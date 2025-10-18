@@ -17,6 +17,15 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+dependencies = [
+    "gitpython>=3.1.45",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.3",
+    "pydantic-settings>=2.11.0",
+    "python-dotenv>=1.1.1",
+    "rich>=14.2.0",
+    "typer>=0.19.2",
+]
 
 [project.urls]
 Homepage = "https://alexeieleusis.github.io/vibe-heal/"
@@ -35,6 +44,10 @@ dev = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
+    "pytest-mock>=3.15.1",
+    "pytest-asyncio>=1.2.0",
+    "responses>=0.25.8",
+    "respx>=0.22.0",
 ]
 
 [build-system]
@@ -100,10 +113,14 @@ ignore = [
     "E501",
     # DoNotAssignLambda
     "E731",
+    # Allow long exception messages
+    "TRY003",
+    # Allow return in try block
+    "TRY300",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+"tests/*" = ["S101", "S105", "S106"]
 
 [tool.ruff.format]
 preview = true
