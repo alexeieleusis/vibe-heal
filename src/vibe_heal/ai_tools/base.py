@@ -1,0 +1,67 @@
+"""Base classes and types for AI tool integration."""
+
+from abc import ABC, abstractmethod
+from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vibe_heal.ai_tools.models import FixResult
+    from vibe_heal.sonarqube.models import SonarQubeIssue
+
+
+class AIToolType(str, Enum):
+    """Supported AI coding tools."""
+
+    CLAUDE_CODE = "claude-code"
+    AIDER = "aider"
+
+    @property
+    def cli_command(self) -> str:
+        """Get the CLI command name for this tool.
+
+        Returns:
+            CLI command name
+        """
+        return self.value
+
+    @property
+    def display_name(self) -> str:
+        """Get human-readable display name.
+
+        Returns:
+            Display name for the tool
+        """
+        return {
+            AIToolType.CLAUDE_CODE: "Claude Code",
+            AIToolType.AIDER: "Aider",
+        }[self]
+
+
+class AITool(ABC):
+    """Abstract base class for AI coding tools."""
+
+    tool_type: AIToolType
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Check if the tool is installed and accessible.
+
+        Returns:
+            True if tool is available, False otherwise
+        """
+
+    @abstractmethod
+    async def fix_issue(
+        self,
+        issue: "SonarQubeIssue",
+        file_path: str,
+    ) -> "FixResult":
+        """Attempt to fix a SonarQube issue.
+
+        Args:
+            issue: The SonarQube issue to fix
+            file_path: Path to the file containing the issue
+
+        Returns:
+            Result of the fix attempt
+        """

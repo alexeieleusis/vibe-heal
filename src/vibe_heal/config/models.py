@@ -1,0 +1,111 @@
+"""Configuration models."""
+
+from typing import Self
+
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from vibe_heal.ai_tools.base import AIToolType
+from vibe_heal.config.exceptions import InvalidConfigurationError
+
+
+class VibeHealConfig(BaseSettings):
+    """Configuration for vibe-heal application."""
+
+    # SonarQube settings
+    sonarqube_url: str = Field(description="SonarQube server URL")
+    sonarqube_token: str | None = Field(
+        default=None,
+        description="SonarQube authentication token (preferred)",
+    )
+    sonarqube_username: str | None = Field(
+        default=None,
+        description="SonarQube username (alternative to token)",
+    )
+    sonarqube_password: str | None = Field(
+        default=None,
+        description="SonarQube password (alternative to token)",
+    )
+    sonarqube_project_key: str = Field(description="SonarQube project key")
+
+    # AI Tool settings
+    ai_tool: AIToolType | None = Field(
+        default=None,
+        description="AI tool to use (auto-detect if not specified)",
+    )
+
+    model_config = SettingsConfigDict(
+        env_file=[".env.vibeheal", ".env"],
+        env_file_encoding="utf-8",
+        env_prefix="",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    @field_validator("ai_tool", mode="before")
+    @classmethod
+    def parse_ai_tool(cls, v: str | AIToolType | None) -> AIToolType | None:
+        """Parse AI tool from string or enum.
+
+        Args:
+            v: AI tool value (string, enum, or None)
+
+        Returns:
+            Parsed AIToolType or None
+
+        Raises:
+            InvalidConfigurationError: If AI tool value is invalid
+        """
+        if v is None:
+            return None
+        if isinstance(v, AIToolType):
+            return v
+        if isinstance(v, str):
+            try:
+                return AIToolType(v.lower())
+            except ValueError as e:
+                valid_tools = [t.value for t in AIToolType]
+                raise InvalidConfigurationError(f"Invalid AI tool: {v}. Valid options: {valid_tools}") from e
+        raise InvalidConfigurationError(f"Invalid AI tool type: {type(v)}")
+
+    @field_validator("sonarqube_url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Ensure URL doesn't have trailing slash.
+
+        Args:
+            v: URL value
+
+        Returns:
+            Normalized URL without trailing slash
+        """
+        return v.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_auth(self) -> Self:
+        """Ensure either token or username/password is provided.
+
+        Returns:
+            Self
+
+        Raises:
+            InvalidConfigurationError: If neither auth method is provided
+        """
+        has_token = self.sonarqube_token is not None
+        has_basic = self.sonarqube_username is not None and self.sonarqube_password is not None
+
+        if not has_token and not has_basic:
+            raise InvalidConfigurationError(
+                "Must provide either SONARQUBE_TOKEN or both SONARQUBE_USERNAME and SONARQUBE_PASSWORD"
+            )
+
+        return self
+
+    @property
+    def use_token_auth(self) -> bool:
+        """Check if token authentication should be used.
+
+        Returns:
+            True if token auth is configured
+        """
+        return self.sonarqube_token is not None
