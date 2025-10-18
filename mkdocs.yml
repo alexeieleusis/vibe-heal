@@ -1,0 +1,52 @@
+site_name: vibe-heal
+repo_url: https://github.com/alexeieleusis/vibe-heal
+site_url: https://alexeieleusis.github.io/vibe-heal
+site_description: AI-powered SonarQube issue remediation that automatically fixes your code quality problems.
+site_author: Alexei Diaz
+edit_uri: edit/main/docs/
+repo_name: alexeieleusis/vibe-heal
+copyright: Maintained by <a href="https://alexeieleusis.com">alexeieleusis</a>.
+
+nav:
+  - Home: index.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["src/vibe_heal"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/alexeieleusis/vibe-heal
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/vibe-heal
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
