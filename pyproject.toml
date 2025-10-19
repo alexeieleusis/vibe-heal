@@ -27,6 +27,9 @@ dependencies = [
     "typer>=0.19.2",
 ]
 
+[project.scripts]
+vibe-heal = "vibe_heal.cli:app"
+
 [project.urls]
 Homepage = "https://alexeieleusis.github.io/vibe-heal/"
 Repository = "https://github.com/alexeieleusis/vibe-heal"
@@ -121,6 +124,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106"]
+"src/vibe_heal/cli.py" = ["B008"]  # Typer uses function calls in defaults
 
 [tool.ruff.format]
 preview = true
