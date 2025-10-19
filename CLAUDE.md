@@ -134,3 +134,156 @@ Workflows use `uv` and are configured in `.github/workflows/`.
 ## Python Version Support
 
 Supports Python 3.9 through 3.13. The `tox.ini` configuration tests against all these versions.
+
+---
+
+## vibe-heal Specific Architecture
+
+### What is vibe-heal?
+
+vibe-heal is an AI-powered SonarQube issue remediation tool that automatically fixes code quality problems using AI coding assistants (Claude Code or Aider).
+
+**Core Workflow**:
+1. Fetch SonarQube issues for a file
+2. Sort issues in reverse line order (high to low - prevents line number shifts)
+3. For each issue: invoke AI tool → if successful, create git commit
+4. Display summary report
+
+**Current Status**: Phases 0-6 complete (141 tests, 82% coverage). Core workflow is working end-to-end!
+
+### High-Level Architecture
+
+```
+CLI Layer (cli.py)
+    ↓
+Orchestrator (orchestrator.py) - coordinates entire workflow
+    ↓
+├─ Config (config/) - loads .env.vibeheal
+├─ SonarQubeClient (sonarqube/) - fetches issues via API
+├─ IssueProcessor (processor/) - sorts/filters issues
+├─ AITool (ai_tools/) - fixes issues (ClaudeCodeTool implemented)
+└─ GitManager (git/) - creates commits
+```
+
+### Module Responsibilities
+
+**`config/`**: Pydantic-based configuration from `.env.vibeheal` or `.env`
+- `VibeHealConfig` model with validation
+- Supports token auth (preferred) or basic auth
+- AI tool auto-detection if not specified
+
+**`sonarqube/`**: Async HTTP client for SonarQube Web API
+- `SonarQubeClient.get_issues_for_file(file_path)` - uses `components` parameter for file-specific queries
+- `SonarQubeIssue` model - supports both old and new SonarQube API formats
+- Uses `httpx` for async requests
+
+**`processor/`**: Business logic for issue handling
+- Sorts issues by line number descending (fixes high line numbers first)
+- Filters by fixability (`is_fixable` property checks for line number, non-resolved status)
+- Supports severity filtering and max issue limits
+
+**`ai_tools/`**: Abstract interface + implementations
+- `AITool` ABC with `fix_issue()` method
+- `AIToolType` enum (CLAUDE_CODE, AIDER)
+- `ClaudeCodeTool` - invokes `claude` CLI with `--print --output-format json`
+- `AIToolFactory` with auto-detection (tries Claude Code first)
+- `FixResult` model for fix outcomes
+
+**`git/`**: Git operations via GitPython
+- `GitManager.commit_fix()` - creates conventional commits
+- Commit format: `fix: [SQ-RULE] message` with full issue details in body
+- Validates file has no uncommitted changes before processing
+- Each fix gets its own commit (easy rollback)
+
+**`orchestrator.py`**: Main workflow coordination
+- `VibeHealOrchestrator.fix_file()` - end-to-end flow
+- Validates preconditions (git state, file exists, AI tool available)
+- Progress indicators with rich library
+- User confirmation before processing (unless dry-run)
+
+**`cli.py`**: Command-line interface with typer
+- `vibe-heal fix <file>` - main command
+- Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--verbose`
+- `vibe-heal config` - shows current configuration
+- Uses rich for beautiful terminal output
+
+### Critical Implementation Details
+
+**Reverse Line Order**: Issues are fixed from highest line number to lowest. This prevents line number shifts from earlier fixes affecting later fixes.
+
+**Component Path Construction**: SonarQube API queries use `components=projectkey:filepath` (lowercase project key). The old approach of querying with `componentKeys` and filtering client-side was incorrect.
+
+**Issue Status Filtering**: Use `issueStatuses=OPEN,CONFIRMED` instead of `resolved=false` for more precise filtering.
+
+**Git Safety**: Only checks that the specific file being fixed has no uncommitted changes. Other files can have changes (requirement was relaxed from "clean working directory").
+
+**Async/Await**: SonarQube client and AI tool operations use async/await pattern. CLI wraps with `asyncio.run()`.
+
+**AI Tool Integration**: Claude Code is invoked with permission mode `acceptEdits` and tool restriction to `Edit,Read` only for security. Uses `--print` and `--output-format json` flags.
+
+### Configuration (.env.vibeheal)
+
+```bash
+SONARQUBE_URL=https://sonar.example.com
+SONARQUBE_TOKEN=your_token  # Preferred
+# OR: SONARQUBE_USERNAME + SONARQUBE_PASSWORD
+SONARQUBE_PROJECT_KEY=your_project
+# AI_TOOL=claude-code  # Optional, auto-detects if not set
+```
+
+### Development Workflow
+
+**Running vibe-heal locally**:
+```bash
+# Install in development mode
+uv pip install -e .
+
+# Test with actual SonarQube (requires .env.vibeheal)
+vibe-heal config  # Verify configuration
+vibe-heal fix src/file.py --dry-run  # Preview
+vibe-heal fix src/file.py --max-issues 1  # Fix one issue
+```
+
+**Testing specific modules**:
+```bash
+# Run specific test file
+uv run pytest tests/sonarqube/test_client.py -v
+
+# Run with one test function
+uv run pytest tests/sonarqube/test_client.py::TestSonarQubeClient::test_get_issues_for_file -v
+
+# Run tests for one module with coverage
+uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
+```
+
+### Common Development Patterns
+
+**Adding a new AI tool**:
+1. Create `src/vibe_heal/ai_tools/new_tool.py` implementing `AITool` ABC
+2. Add to `AIToolType` enum in `base.py`
+3. Update `AIToolFactory._tool_map`
+4. Add tests in `tests/ai_tools/test_new_tool.py`
+
+**Modifying SonarQube API queries**:
+- Client is in `src/vibe_heal/sonarqube/client.py`
+- Models support both old and new API formats (use `model_config = {"extra": "ignore"}`)
+- Test fixtures are in `tests/sonarqube/fixtures/api_responses.json`
+
+**Changing commit message format**:
+- Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
+- Tests verify format in `tests/git/test_manager.py`
+
+### Next Planned Features
+
+Phase 7 (Safety Features):
+- Backup/rollback mechanisms
+- Enhanced validation
+
+Phase 8 (Aider Integration):
+- Implement `AiderTool` class
+- Update auto-detection to try both tools
+
+Future enhancements:
+- Fetch issue documentation from SonarQube API and include in AI prompt
+- Multi-file processing
+- Custom commit message templates
