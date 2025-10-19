@@ -1,12 +1,12 @@
 {
-  "issues_response_page1": {
-    "total": 3,
+  "issues_response_main_py": {
+    "total": 2,
     "p": 1,
     "ps": 100,
     "paging": {
       "pageIndex": 1,
       "pageSize": 100,
-      "total": 3
+      "total": 2
     },
     "issues": [
       {
@@ -28,7 +28,19 @@
         "line": 25,
         "status": "OPEN",
         "type": "CODE_SMELL"
-      },
+      }
+    ]
+  },
+  "issues_response_utils_py": {
+    "total": 1,
+    "p": 1,
+    "ps": 100,
+    "paging": {
+      "pageIndex": 1,
+      "pageSize": 100,
+      "total": 1
+    },
+    "issues": [
       {
         "key": "issue-3",
         "rule": "python:S125",

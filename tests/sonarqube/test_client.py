@@ -91,13 +91,13 @@ class TestSonarQubeClient:
         """Test successful API call."""
         # Mock the API response
         route = respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
+            return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
         )
 
         async with SonarQubeClient(config) as client:
             response = await client._request("GET", "/api/issues/search", params={"p": 1})
 
-            assert response == api_responses["issues_response_page1"]
+            assert response == api_responses["issues_response_main_py"]
             assert route.called
 
     @pytest.mark.asyncio
@@ -151,8 +151,8 @@ class TestSonarQubeClient:
     @respx.mock
     async def test_get_issues_for_file(self, config: VibeHealConfig, api_responses: dict) -> None:
         """Test getting issues for a specific file."""
-        respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
+        route = respx.get("https://sonar.test.com/api/issues/search").mock(
+            return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
         )
 
         async with SonarQubeClient(config) as client:
@@ -163,18 +163,25 @@ class TestSonarQubeClient:
             assert issues[0].key == "issue-1"
             assert issues[1].key == "issue-2"
 
+            # Verify the correct parameters were sent
+            assert route.calls.last.request.url.params["components"] == "my-project:src/main.py"
+            assert route.calls.last.request.url.params["issueStatuses"] == "OPEN,CONFIRMED"
+
     @pytest.mark.asyncio
     @respx.mock
     async def test_get_issues_for_file_no_matches(self, config: VibeHealConfig, api_responses: dict) -> None:
         """Test getting issues for file with no matches."""
-        respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
+        # API returns empty response when file has no issues
+        route = respx.get("https://sonar.test.com/api/issues/search").mock(
+            return_value=httpx.Response(200, json=api_responses["issues_response_empty"])
         )
 
         async with SonarQubeClient(config) as client:
             issues = await client.get_issues_for_file("nonexistent.py")
 
             assert len(issues) == 0
+            # Verify the correct component parameter was sent
+            assert route.calls.last.request.url.params["components"] == "my-project:nonexistent.py"
 
     @pytest.mark.asyncio
     @respx.mock
@@ -258,44 +265,57 @@ class TestSonarQubeClient:
             assert issues[0].key == "issue-1"
             assert issues[-1].key == "issue-20"
 
+            # Verify all pages used the correct component parameter
+            for call in route.calls:
+                assert call.request.url.params["components"] == "my-project:src/main.py"
+                assert call.request.url.params["issueStatuses"] == "OPEN,CONFIRMED"
+
     @pytest.mark.asyncio
     @respx.mock
     async def test_get_issues_with_resolved_param(self, config: VibeHealConfig, api_responses: dict) -> None:
         """Test getting issues with resolved parameter."""
         route = respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
+            return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
         )
 
         async with SonarQubeClient(config) as client:
             await client.get_issues_for_file("src/main.py", resolved=True)
 
-            # Verify the resolved parameter was passed
-            assert route.calls.last.request.url.params["resolved"] == "true"
+            # When resolved=True, issueStatuses should not be in params (includes all statuses)
+            assert "issueStatuses" not in route.calls.last.request.url.params
+            assert route.calls.last.request.url.params["components"] == "my-project:src/main.py"
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_file_path_matching_exact(self, config: VibeHealConfig, api_responses: dict) -> None:
-        """Test file path matching for exact match."""
-        respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
+    async def test_component_path_construction(self, config: VibeHealConfig, api_responses: dict) -> None:
+        """Test component path is constructed correctly with lowercase project key."""
+        route = respx.get("https://sonar.test.com/api/issues/search").mock(
+            return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
         )
 
         async with SonarQubeClient(config) as client:
-            # Exact match: component is "my-project:src/main.py"
-            issues = await client.get_issues_for_file("src/main.py")
+            # Component path should be: lowercase_project_key:file_path
+            await client.get_issues_for_file("src/main.py")
 
-            assert len(issues) == 2
+            assert route.calls.last.request.url.params["components"] == "my-project:src/main.py"
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_file_path_matching_suffix(self, config: VibeHealConfig, api_responses: dict) -> None:
-        """Test file path matching for suffix match."""
-        respx.get("https://sonar.test.com/api/issues/search").mock(
-            return_value=httpx.Response(200, json=api_responses["issues_response_page1"])
-        )
+    async def test_different_files_get_different_components(self, config: VibeHealConfig, api_responses: dict) -> None:
+        """Test that different files query different components."""
+        route = respx.get("https://sonar.test.com/api/issues/search")
+        route.side_effect = [
+            httpx.Response(200, json=api_responses["issues_response_main_py"]),
+            httpx.Response(200, json=api_responses["issues_response_utils_py"]),
+        ]
 
         async with SonarQubeClient(config) as client:
-            # Suffix match: looking for "main.py" which matches "src/main.py"
-            issues = await client.get_issues_for_file("main.py")
+            # Query for main.py
+            issues1 = await client.get_issues_for_file("src/main.py")
+            assert len(issues1) == 2
+            assert route.calls[0].request.url.params["components"] == "my-project:src/main.py"
 
-            assert len(issues) == 2
+            # Query for utils.py
+            issues2 = await client.get_issues_for_file("src/utils.py")
+            assert len(issues2) == 1
+            assert route.calls[1].request.url.params["components"] == "my-project:src/utils.py"
