@@ -143,14 +143,15 @@ class VibeHealOrchestrator:
             msg = "Not a Git repository"
             raise RuntimeError(msg)
 
-        # Check clean working directory (unless dry-run)
-        if not dry_run:
-            self.git_manager.require_clean_working_directory()
-
         # Check file exists
         if not Path(file_path).exists():
             msg = f"File not found: {file_path}"
             raise FileNotFoundError(msg)
+
+        # Check file doesn't have uncommitted changes (unless dry-run)
+        if not dry_run and self.git_manager.has_uncommitted_changes(file_path):
+            msg = f"File '{file_path}' has uncommitted changes. Please commit or stash changes before fixing."
+            raise RuntimeError(msg)
 
         # Check AI tool is available
         if not self.ai_tool.is_available():
