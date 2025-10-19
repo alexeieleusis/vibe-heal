@@ -123,23 +123,26 @@ class SonarQubeClient:
         page = 1
         page_size = 100
 
+        # Build component identifier: projectKey:filePath
+        # SonarQube uses lowercase project key in component paths
+        component = f"{self.config.sonarqube_project_key.lower()}:{file_path}"
+
         while True:
             params = {
-                "componentKeys": self.config.sonarqube_project_key,
-                "resolved": str(resolved).lower(),
+                "components": component,  # Use components (not componentKeys) for specific file
                 "p": page,
                 "ps": page_size,
             }
 
+            # Use issueStatuses instead of resolved for more precise filtering
+            if not resolved:
+                params["issueStatuses"] = "OPEN,CONFIRMED"
+
             data = await self._request("GET", "/api/issues/search", params=params)
             response = IssuesResponse(**data)
 
-            # Filter issues for the specific file
-            for issue in response.issues:
-                # Component format is usually: project_key:path/to/file
-                component_path = issue.component.split(":", 1)[-1]
-                if component_path == file_path or component_path.endswith(f"/{file_path}"):
-                    issues.append(issue)
+            # Add all issues from this page (already filtered by component)
+            issues.extend(response.issues)
 
             # Check if there are more pages
             # Model validator ensures total is never None, but check for safety
