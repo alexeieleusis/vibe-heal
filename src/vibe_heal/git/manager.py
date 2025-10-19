@@ -83,6 +83,27 @@ class GitManager:
 
         return list(set(changed + staged + untracked))
 
+    def has_uncommitted_changes(self, file_path: str) -> bool:
+        """Check if a specific file has uncommitted changes.
+
+        Args:
+            file_path: Path to file to check
+
+        Returns:
+            True if file has uncommitted changes or is staged
+        """
+        # Normalize path to match git's format
+        file_path_normalized = str(Path(file_path))
+
+        # Check if file is in changed files (working directory changes)
+        changed = [item.a_path for item in self.repo.index.diff(None)]
+        if file_path_normalized in changed:
+            return True
+
+        # Check if file is staged
+        staged = [item.a_path for item in self.repo.index.diff("HEAD")]
+        return file_path_normalized in staged
+
     def commit_fix(
         self,
         issue: SonarQubeIssue,
