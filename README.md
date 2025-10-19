@@ -21,47 +21,82 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 - Creates a git commit for each successful fix
 - Provides detailed progress reporting
 
-## Current Status: 🚧 In Development
+## Current Status: ✅ Core Features Complete
 
 **Completed Phases**:
 - ✅ Phase 0: Project Setup
-- ✅ Phase 1: Configuration Management (28 tests, 97% coverage)
-- ✅ Phase 2: SonarQube API Integration (29 tests, 92% coverage)
+- ✅ Phase 1: Configuration Management
+- ✅ Phase 2: SonarQube API Integration
+- ✅ Phase 3: Issue Processing Engine
+- ✅ Phase 4: AI Tool Integration (Claude Code)
+- ✅ Phase 5: Git Integration & Auto-Commit
+- ✅ Phase 6: CLI & Orchestration
 
-**Overall Progress**: 57 tests passing, 90% code coverage
+**Overall Progress**: 141 tests passing, 82% code coverage
 
-**Next Phase**: Issue Processing Engine
+**Status**: The core workflow is complete and working end-to-end! You can now use vibe-heal to automatically fix SonarQube issues with Claude Code.
+
+**Next Steps**: Phase 7 (Safety Features), Phase 8 (Aider Integration), Additional features
 
 See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 
-## Features (Planned)
+## Features
 
-- 🔍 Fetch SonarQube issues for any file
-- 🤖 AI-powered issue fixing (Claude Code, Aider)
-- 📝 Automatic git commits per fix
-- 🔄 Smart issue ordering (reverse line order)
-- 🛡️ Safe operation (requires clean git state)
-- 📊 Detailed progress and summary reports
-- 🎯 Support for both SonarQube old and new API formats
+- ✅ Fetch SonarQube issues for any file
+- ✅ AI-powered issue fixing with Claude Code
+- ✅ Automatic git commits per fix with conventional commit format
+- ✅ Smart issue ordering (reverse line order to avoid line number shifts)
+- ✅ Safe operation (checks for uncommitted changes in target file)
+- ✅ Detailed progress indicators and summary reports
+- ✅ Support for both SonarQube old and new API formats
+- ✅ Dry-run mode for testing without committing
+- ✅ Configurable severity filtering and issue limits
+- ✅ AI tool auto-detection
+- 🔜 Aider integration (Phase 8)
+- 🔜 Additional safety features (Phase 7)
 
-## Quick Start (Future)
+## Quick Start
 
-Once development is complete, using vibe-heal will be as simple as:
+### 1. Install vibe-heal
 
 ```bash
-# Install vibe-heal
-pip install vibe-heal
+# Clone the repository
+git clone https://github.com/alexeieleusis/vibe-heal.git
+cd vibe-heal
 
-# Configure SonarQube connection
+# Install with uv
+uv pip install -e .
+```
+
+### 2. Install Claude Code
+
+```bash
+# Install Claude Code CLI (if not already installed)
+# See https://docs.claude.com/claude-code for installation instructions
+```
+
+### 3. Configure SonarQube connection
+
+```bash
 cat > .env.vibeheal <<EOF
 SONARQUBE_URL=https://sonar.example.com
 SONARQUBE_TOKEN=your_token_here
 SONARQUBE_PROJECT_KEY=your_project_key
-AI_TOOL=claude-code  # or 'aider'
+# AI_TOOL=claude-code  # Optional: will auto-detect if not specified
 EOF
+```
 
-# Fix issues in a file
-vibe-heal fix src/main.py
+### 4. Fix issues!
+
+```bash
+# Test with dry-run first
+vibe-heal fix src/main.py --dry-run
+
+# Fix a single issue to test
+vibe-heal fix src/main.py --max-issues 1
+
+# Fix all MAJOR and above issues
+vibe-heal fix src/main.py --min-severity MAJOR
 ```
 
 ## Development Setup
@@ -132,11 +167,13 @@ vibe-heal/
 ├── src/vibe_heal/
 │   ├── config/          # Configuration management (✅ Complete)
 │   ├── sonarqube/       # SonarQube API client (✅ Complete)
-│   ├── ai_tools/        # AI tool integrations (🚧 In Progress)
-│   ├── processor/       # Issue processing logic (⏳ Pending)
-│   ├── git/             # Git operations (⏳ Pending)
-│   └── utils/           # Utilities
-├── tests/               # Comprehensive test suite (57 tests, 90% coverage)
+│   ├── ai_tools/        # AI tool integrations (✅ Claude Code complete)
+│   ├── processor/       # Issue processing logic (✅ Complete)
+│   ├── git/             # Git operations (✅ Complete)
+│   ├── cli.py           # Command-line interface (✅ Complete)
+│   ├── orchestrator.py  # Workflow orchestration (✅ Complete)
+│   └── models.py        # Top-level models (✅ Complete)
+├── tests/               # Comprehensive test suite (141 tests, 82% coverage)
 └── docs/                # Documentation and development guides
 ```
 
