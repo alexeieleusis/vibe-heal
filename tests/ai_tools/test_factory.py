@@ -1,6 +1,7 @@
 """Tests for AI tool factory."""
 
 import pytest
+from pytest_mock import MockerFixture
 
 from vibe_heal.ai_tools import AIToolFactory, AIToolType, ClaudeCodeTool
 
@@ -21,7 +22,7 @@ class TestAIToolFactory:
         with pytest.raises(ValueError, match="Unsupported AI tool type"):
             AIToolFactory.create(AIToolType.AIDER)
 
-    def test_detect_available_when_claude_exists(self, mocker: pytest.MockFixture) -> None:
+    def test_detect_available_when_claude_exists(self, mocker: MockerFixture) -> None:
         """Test auto-detection when Claude is available."""
         # Mock shutil.which to return Claude path
         mocker.patch("shutil.which", return_value="/usr/local/bin/claude")
@@ -30,7 +31,7 @@ class TestAIToolFactory:
 
         assert detected == AIToolType.CLAUDE_CODE
 
-    def test_detect_available_when_no_tools(self, mocker: pytest.MockFixture) -> None:
+    def test_detect_available_when_no_tools(self, mocker: MockerFixture) -> None:
         """Test auto-detection when no tools available."""
         # Mock shutil.which to return None (tool not found)
         mocker.patch("shutil.which", return_value=None)

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from vibe_heal.ai_tools import ClaudeCodeTool
 from vibe_heal.sonarqube.models import SonarQubeIssue
@@ -27,14 +28,14 @@ def sample_issue() -> SonarQubeIssue:
 class TestClaudeCodeTool:
     """Tests for ClaudeCodeTool."""
 
-    def test_is_available_when_claude_exists(self, mocker: pytest.MockFixture) -> None:
+    def test_is_available_when_claude_exists(self, mocker: MockerFixture) -> None:
         """Test is_available returns True when claude is installed."""
         mocker.patch("shutil.which", return_value="/usr/local/bin/claude")
 
         tool = ClaudeCodeTool()
         assert tool.is_available() is True
 
-    def test_is_available_when_claude_missing(self, mocker: pytest.MockFixture) -> None:
+    def test_is_available_when_claude_missing(self, mocker: MockerFixture) -> None:
         """Test is_available returns False when claude is not installed."""
         mocker.patch("shutil.which", return_value=None)
 
@@ -44,7 +45,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_fix_issue_when_tool_not_available(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
     ) -> None:
         """Test fix_issue returns error when tool not available."""
@@ -60,7 +61,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_fix_issue_when_file_not_found(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
@@ -77,7 +78,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_successful_fix(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
@@ -112,7 +113,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_fix_with_command_failure(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
@@ -145,7 +146,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_timeout_handling(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
@@ -177,7 +178,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_exception_handling(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
@@ -203,7 +204,7 @@ class TestClaudeCodeTool:
     @pytest.mark.asyncio
     async def test_command_construction(
         self,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
     ) -> None:
