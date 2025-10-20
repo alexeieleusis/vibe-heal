@@ -4,16 +4,17 @@ import logging
 from pathlib import Path
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
 from vibe_heal.ai_tools.base import AITool, AIToolType
+from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 from vibe_heal.processor import IssueProcessor
 from vibe_heal.sonarqube import SonarQubeClient
-from vibe_heal.sonarqube.models import SonarQubeIssue
+from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,124 @@ class VibeHealOrchestrator:
         response = input("Continue? [y/N]: ").strip().lower()
         return response in ["y", "yes"]
 
+    async def _fetch_source_lines(self, file_path: str) -> list | None:
+        """Fetch source code lines for a file.
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            List of source lines or None if fetch failed
+        """
+        if not self.config.include_rule_description:
+            return None
+
+        try:
+            async with SonarQubeClient(self.config) as sonar_client:
+                return await sonar_client.get_source_lines(file_path)
+        except Exception as e:
+            logger.warning(f"Failed to fetch source lines: {e}. Continuing without code context.")
+            return None
+
+    async def _fetch_enriched_context(
+        self,
+        issue: SonarQubeIssue,
+        source_lines: list | None,
+    ) -> tuple[SonarQubeRule | None, list | None]:
+        """Fetch enriched context for an issue.
+
+        Args:
+            issue: Issue to fetch context for
+            source_lines: Pre-fetched source lines
+
+        Returns:
+            Tuple of (rule, code_context)
+        """
+        rule = None
+        code_context = None
+
+        if self.config.include_rule_description:
+            try:
+                async with SonarQubeClient(self.config) as sonar_client:
+                    rule = await sonar_client.get_rule_details(issue.rule)
+            except Exception as e:
+                logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
+
+        # Extract code context around the issue line
+        if source_lines and issue.line:
+            context_lines = self.config.code_context_lines
+            start_line = max(1, issue.line - context_lines)
+            end_line = issue.line + context_lines
+            code_context = [line for line in source_lines if start_line <= line.line <= end_line]
+
+            # Log code context at debug level
+            if code_context:
+                logger.debug("Code context for issue %s (line %s):", issue.key, issue.line)
+                for source_line in code_context:
+                    marker = ">>>" if source_line.line == issue.line else "   "
+                    logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
+
+        return rule, code_context
+
+    def _handle_fix_result(
+        self,
+        fix_result: FixResult,
+        issue: SonarQubeIssue,
+        dry_run: bool,
+        summary: FixSummary,
+        progress: Progress,
+        task: TaskID,
+        rule: SonarQubeRule | None,
+    ) -> None:
+        """Handle the result of a fix attempt.
+
+        Args:
+            fix_result: Result from AI tool
+            issue: Issue that was fixed
+            dry_run: Whether in dry-run mode
+            summary: Summary to update
+            progress: Progress bar
+            task: Progress task
+            rule: Rule details
+        """
+        if fix_result.success:
+            # Commit if not dry-run
+            if not dry_run:
+                try:
+                    sha = self.git_manager.commit_fix(
+                        issue,
+                        fix_result.files_modified,
+                        self.ai_tool.tool_type,
+                        rule=rule,
+                    )
+                    summary.commits.append(sha)
+                    summary.fixed += 1
+                    progress.update(
+                        task,
+                        description=f"[green]✓ Fixed line {issue.line}[/green]",
+                    )
+                except Exception as e:
+                    logger.exception("Failed to commit")
+                    summary.failed += 1
+                    progress.update(
+                        task,
+                        description=f"[red]✗ Commit failed: {e}[/red]",
+                    )
+            else:
+                summary.fixed += 1
+                progress.update(
+                    task,
+                    description=f"[green]✓ Would fix line {issue.line} (dry-run)[/green]",
+                )
+        else:
+            summary.failed += 1
+            error = fix_result.error_message or "Unknown error"
+            progress.update(
+                task,
+                description=f"[red]✗ Failed: {error[:50]}[/red]",
+            )
+            logger.error(f"Failed to fix issue {issue.key}: {fix_result.error_message}")
+
     async def _process_issues(
         self,
         issues: list[SonarQubeIssue],
@@ -193,15 +312,7 @@ class VibeHealOrchestrator:
             Fix summary
         """
         summary = FixSummary(total_issues=0)
-
-        # Fetch source code once for all issues (if configured to include context)
-        source_lines = None
-        if self.config.include_rule_description:
-            try:
-                async with SonarQubeClient(self.config) as sonar_client:
-                    source_lines = await sonar_client.get_source_lines(file_path)
-            except Exception as e:
-                logger.warning(f"Failed to fetch source lines: {e}. Continuing without code context.")
+        source_lines = await self._fetch_source_lines(file_path)
 
         with Progress(
             SpinnerColumn(),
@@ -214,32 +325,8 @@ class VibeHealOrchestrator:
                     total=None,
                 )
 
-                # Fetch enriched context for this issue
-                rule = None
-                code_context = None
+                rule, code_context = await self._fetch_enriched_context(issue, source_lines)
 
-                if self.config.include_rule_description:
-                    try:
-                        async with SonarQubeClient(self.config) as sonar_client:
-                            rule = await sonar_client.get_rule_details(issue.rule)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
-
-                # Extract code context around the issue line
-                if source_lines and issue.line:
-                    context_lines = self.config.code_context_lines
-                    start_line = max(1, issue.line - context_lines)
-                    end_line = issue.line + context_lines
-                    code_context = [line for line in source_lines if start_line <= line.line <= end_line]
-
-                    # Log code context at debug level
-                    if code_context:
-                        logger.debug("Code context for issue %s (line %s):", issue.key, issue.line)
-                        for source_line in code_context:
-                            marker = ">>>" if source_line.line == issue.line else "   "
-                            logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
-
-                # Attempt to fix with enriched context
                 fix_result = await self.ai_tool.fix_issue(
                     issue,
                     file_path,
@@ -247,43 +334,7 @@ class VibeHealOrchestrator:
                     code_context=code_context,
                 )
 
-                if fix_result.success:
-                    # Commit if not dry-run
-                    if not dry_run:
-                        try:
-                            sha = self.git_manager.commit_fix(
-                                issue,
-                                fix_result.files_modified,
-                                self.ai_tool.tool_type,
-                                rule=rule,
-                            )
-                            summary.commits.append(sha)
-                            summary.fixed += 1
-                            progress.update(
-                                task,
-                                description=f"[green]✓ Fixed line {issue.line}[/green]",
-                            )
-                        except Exception as e:
-                            logger.exception("Failed to commit")
-                            summary.failed += 1
-                            progress.update(
-                                task,
-                                description=f"[red]✗ Commit failed: {e}[/red]",
-                            )
-                    else:
-                        summary.fixed += 1
-                        progress.update(
-                            task,
-                            description=f"[green]✓ Would fix line {issue.line} (dry-run)[/green]",
-                        )
-                else:
-                    summary.failed += 1
-                    error = fix_result.error_message or "Unknown error"
-                    progress.update(
-                        task,
-                        description=f"[red]✗ Failed: {error[:50]}[/red]",
-                    )
-                    logger.error(f"Failed to fix issue {issue.key}: {fix_result.error_message}")
+                self._handle_fix_result(fix_result, issue, dry_run, summary, progress, task, rule)
 
         return summary
 
