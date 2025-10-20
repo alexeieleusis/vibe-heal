@@ -57,7 +57,7 @@ uv run deptry src
 
 The project uses **ruff** for linting and formatting (not black or flake8). Configuration is in `pyproject.toml`:
 - Line length: 120 characters
-- Target Python version: 3.9+
+- Target Python version: 3.11+
 - Auto-fix enabled
 
 Pre-commit hooks will automatically run ruff-check and ruff-format on commits.
@@ -133,7 +133,7 @@ Workflows use `uv` and are configured in `.github/workflows/`.
 
 ## Python Version Support
 
-Supports Python 3.9 through 3.13. The `tox.ini` configuration tests against all these versions.
+Supports Python 3.11 through 3.13. The `tox.ini` configuration tests against all these versions.
 
 ---
 
