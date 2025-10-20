@@ -31,19 +31,20 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 - ✅ Phase 4: AI Tool Integration (Claude Code)
 - ✅ Phase 5: Git Integration & Auto-Commit
 - ✅ Phase 6: CLI & Orchestration
+- ✅ Phase 8: Aider Integration
 
-**Overall Progress**: 141 tests passing, 82% code coverage
+**Overall Progress**: 157 tests passing, 82% code coverage
 
-**Status**: The core workflow is complete and working end-to-end! You can now use vibe-heal to automatically fix SonarQube issues with Claude Code.
+**Status**: The core workflow is complete and working end-to-end! You can now use vibe-heal to automatically fix SonarQube issues with **Claude Code** or **Aider**.
 
-**Next Steps**: Phase 7 (Safety Features), Phase 8 (Aider Integration), Additional features
+**Next Steps**: Phase 7 (Safety Features), Additional enhancements
 
 See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 
 ## Features
 
 - ✅ Fetch SonarQube issues for any file
-- ✅ AI-powered issue fixing with Claude Code
+- ✅ AI-powered issue fixing with **Claude Code** or **Aider**
 - ✅ Automatic git commits per fix with conventional commit format
 - ✅ Smart issue ordering (reverse line order to avoid line number shifts)
 - ✅ Safe operation (checks for uncommitted changes in target file)
@@ -51,8 +52,8 @@ See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 - ✅ Support for both SonarQube old and new API formats
 - ✅ Dry-run mode for testing without committing
 - ✅ Configurable severity filtering and issue limits
-- ✅ AI tool auto-detection
-- 🔜 Aider integration (Phase 8)
+- ✅ AI tool auto-detection (tries Claude Code first, then Aider)
+- ✅ Aider integration with Ollama/OpenAI/Anthropic support
 - 🔜 Additional safety features (Phase 7)
 
 ## Quick Start
@@ -68,21 +69,45 @@ cd vibe-heal
 uv pip install -e .
 ```
 
-### 2. Install Claude Code
+### 2. Install an AI Tool
 
+**Option A: Claude Code**
 ```bash
 # Install Claude Code CLI (if not already installed)
 # See https://docs.claude.com/claude-code for installation instructions
 ```
 
+**Option B: Aider**
+```bash
+# Install Aider
+pip install aider-chat
+
+# If using Ollama, make sure it's running
+# Download and start Ollama from https://ollama.ai
+ollama pull gemma3:27b  # or your preferred model
+```
+
 ### 3. Configure SonarQube connection
 
+**For Claude Code** (auto-detected):
 ```bash
 cat > .env.vibeheal <<EOF
 SONARQUBE_URL=https://sonar.example.com
 SONARQUBE_TOKEN=your_token_here
 SONARQUBE_PROJECT_KEY=your_project_key
-# AI_TOOL=claude-code  # Optional: will auto-detect if not specified
+EOF
+```
+
+**For Aider with Ollama**:
+```bash
+cat > .env.vibeheal <<EOF
+SONARQUBE_URL=https://sonar.example.com
+SONARQUBE_TOKEN=your_token_here
+SONARQUBE_PROJECT_KEY=your_project_key
+
+AI_TOOL=aider
+AIDER_MODEL=ollama_chat/gemma3:27b
+AIDER_API_BASE=http://127.0.0.1:11434
 EOF
 ```
 
@@ -146,7 +171,7 @@ See [CLAUDE.md](CLAUDE.md) for detailed development commands and project structu
 Create a `.env.vibeheal` file with:
 
 ```bash
-# SonarQube Configuration
+# SonarQube Configuration (Required)
 SONARQUBE_URL=https://sonarqube.example.com
 SONARQUBE_TOKEN=your_token_here
 # OR use username/password (token is preferred)
@@ -155,10 +180,44 @@ SONARQUBE_TOKEN=your_token_here
 
 SONARQUBE_PROJECT_KEY=your_project_key
 
-# AI Tool Configuration (optional - will auto-detect if not set)
-# AI_TOOL=claude-code
-# AI_TOOL=aider
+# AI Tool Configuration (Optional - will auto-detect if not set)
+# AI_TOOL=claude-code  # Use Claude Code
+# AI_TOOL=aider        # Use Aider
+
+# Aider-Specific Configuration (only when using Aider)
+# AIDER_MODEL=ollama_chat/gemma3:27b          # Model to use
+# AIDER_API_KEY=your-api-key                  # API key (if needed)
+# AIDER_API_BASE=http://127.0.0.1:11434       # API base URL
 ```
+
+**Example configurations:**
+
+1. **Claude Code** (auto-detected, no extra config needed):
+   ```bash
+   SONARQUBE_URL=https://sonar.example.com
+   SONARQUBE_TOKEN=your_token
+   SONARQUBE_PROJECT_KEY=your_project
+   ```
+
+2. **Aider with local Ollama**:
+   ```bash
+   SONARQUBE_URL=https://sonar.example.com
+   SONARQUBE_TOKEN=your_token
+   SONARQUBE_PROJECT_KEY=your_project
+   AI_TOOL=aider
+   AIDER_MODEL=ollama_chat/gemma3:27b
+   AIDER_API_BASE=http://127.0.0.1:11434
+   ```
+
+3. **Aider with OpenAI**:
+   ```bash
+   SONARQUBE_URL=https://sonar.example.com
+   SONARQUBE_TOKEN=your_token
+   SONARQUBE_PROJECT_KEY=your_project
+   AI_TOOL=aider
+   AIDER_MODEL=gpt-4
+   AIDER_API_KEY=sk-your-openai-key
+   ```
 
 ## Project Structure
 
@@ -167,13 +226,13 @@ vibe-heal/
 ├── src/vibe_heal/
 │   ├── config/          # Configuration management (✅ Complete)
 │   ├── sonarqube/       # SonarQube API client (✅ Complete)
-│   ├── ai_tools/        # AI tool integrations (✅ Claude Code complete)
+│   ├── ai_tools/        # AI tool integrations (✅ Claude Code + Aider complete)
 │   ├── processor/       # Issue processing logic (✅ Complete)
 │   ├── git/             # Git operations (✅ Complete)
 │   ├── cli.py           # Command-line interface (✅ Complete)
 │   ├── orchestrator.py  # Workflow orchestration (✅ Complete)
 │   └── models.py        # Top-level models (✅ Complete)
-├── tests/               # Comprehensive test suite (141 tests, 82% coverage)
+├── tests/               # Comprehensive test suite (157 tests, 82% coverage)
 └── docs/                # Documentation and development guides
 ```
 
