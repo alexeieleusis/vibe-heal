@@ -73,7 +73,8 @@ class VibeHealOrchestrator:
             Summary of fixes
 
         Raises:
-            Various exceptions for validation errors
+            RuntimeError: If not a Git repository, file has uncommitted changes, or AI tool unavailable
+            FileNotFoundError: If the specified file does not exist
         """
         # Step 1: Validate preconditions
         self._validate_preconditions(file_path, dry_run)
@@ -137,7 +138,8 @@ class VibeHealOrchestrator:
             dry_run: Whether in dry-run mode
 
         Raises:
-            Various exceptions for validation failures
+            RuntimeError: If not a Git repository, file has uncommitted changes, or AI tool unavailable
+            FileNotFoundError: If the specified file does not exist
         """
         # Check Git repository
         if not self.git_manager.is_repository():
