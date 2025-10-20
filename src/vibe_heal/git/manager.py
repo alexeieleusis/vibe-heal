@@ -77,8 +77,8 @@ class GitManager:
         Returns:
             List of file paths with uncommitted changes
         """
-        changed = [item.a_path for item in self.repo.index.diff(None)]
-        staged = [item.a_path for item in self.repo.index.diff("HEAD")]
+        changed = [item.a_path for item in self.repo.index.diff(None) if item.a_path is not None]
+        staged = [item.a_path for item in self.repo.index.diff("HEAD") if item.a_path is not None]
         untracked = self.repo.untracked_files
 
         return list(set(changed + staged + untracked))

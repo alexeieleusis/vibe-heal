@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
-from vibe_heal.ai_tools.base import AITool
+from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
@@ -42,13 +42,14 @@ class VibeHealOrchestrator:
             RuntimeError: If no AI tool is available
         """
         if self.config.ai_tool:
-            tool_type = self.config.ai_tool
+            tool_type: AIToolType = self.config.ai_tool
             self.console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
         else:
-            tool_type = AIToolFactory.detect_available()
-            if not tool_type:
+            detected_tool = AIToolFactory.detect_available()
+            if not detected_tool:
                 msg = "No AI tool found. Please install Claude Code or Aider."
                 raise RuntimeError(msg)
+            tool_type = detected_tool
             self.console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
 
         return AIToolFactory.create(tool_type)
