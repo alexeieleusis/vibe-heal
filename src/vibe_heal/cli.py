@@ -117,6 +117,9 @@ def config() -> None:
             console.print(f"  AI Tool: {cfg.ai_tool.display_name}")
         else:
             console.print("  AI Tool: Auto-detect")
+        console.print("\n[bold]Context Enrichment:[/bold]")
+        console.print(f"  Code Context Lines: {cfg.code_context_lines}")
+        console.print(f"  Include Rule Description: {cfg.include_rule_description}")
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
         sys.exit(1)
