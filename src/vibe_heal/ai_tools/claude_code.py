@@ -10,7 +10,7 @@ from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
 
 if TYPE_CHECKING:
-    from vibe_heal.sonarqube.models import SonarQubeIssue
+    from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
 
 
 class ClaudeCodeTool(AITool):
@@ -38,12 +38,16 @@ class ClaudeCodeTool(AITool):
         self,
         issue: "SonarQubeIssue",
         file_path: str,
+        rule: "SonarQubeRule | None" = None,
+        code_context: "list[SourceLine] | None" = None,
     ) -> FixResult:
         """Fix an issue using Claude Code.
 
         Args:
             issue: The SonarQube issue to fix
             file_path: Path to the file containing the issue
+            rule: Detailed rule information (optional)
+            code_context: Source code lines around the issue (optional)
 
         Returns:
             Result of the fix attempt
@@ -64,8 +68,8 @@ class ClaudeCodeTool(AITool):
                 error_message=f"File not found: {file_path}",
             )
 
-        # Create prompt
-        prompt = create_fix_prompt(issue, file_path)
+        # Create prompt with enriched context
+        prompt = create_fix_prompt(issue, file_path, rule=rule, code_context=code_context)
 
         # Invoke Claude
         try:

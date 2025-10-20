@@ -48,6 +48,16 @@ class VibeHealConfig(BaseSettings):
         description="API base URL for Aider's model provider (e.g., 'http://127.0.0.1:11434')",
     )
 
+    # Context enrichment settings
+    code_context_lines: int = Field(
+        default=5,
+        description="Number of lines to show before/after the issue line for context",
+    )
+    include_rule_description: bool = Field(
+        default=True,
+        description="Include full rule description in AI prompts",
+    )
+
     model_config = SettingsConfigDict(
         env_file=[".env.vibeheal", ".env"],
         env_file_encoding="utf-8",

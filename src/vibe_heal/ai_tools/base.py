@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vibe_heal.ai_tools.models import FixResult
-    from vibe_heal.sonarqube.models import SonarQubeIssue
+    from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
 
 
 class AIToolType(str, Enum):
@@ -55,12 +55,16 @@ class AITool(ABC):
         self,
         issue: "SonarQubeIssue",
         file_path: str,
+        rule: "SonarQubeRule | None" = None,
+        code_context: "list[SourceLine] | None" = None,
     ) -> "FixResult":
         """Attempt to fix a SonarQube issue.
 
         Args:
             issue: The SonarQube issue to fix
             file_path: Path to the file containing the issue
+            rule: Detailed rule information (optional)
+            code_context: Source code lines around the issue (optional)
 
         Returns:
             Result of the fix attempt

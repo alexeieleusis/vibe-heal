@@ -9,7 +9,14 @@ from vibe_heal.sonarqube.exceptions import (
     SonarQubeAPIError,
     SonarQubeAuthError,
 )
-from vibe_heal.sonarqube.models import IssuesResponse, SonarQubeIssue
+from vibe_heal.sonarqube.models import (
+    IssuesResponse,
+    RuleResponse,
+    SonarQubeIssue,
+    SonarQubeRule,
+    SourceLine,
+    SourceLinesResponse,
+)
 
 
 class SonarQubeClient:
@@ -155,3 +162,63 @@ class SonarQubeClient:
             page += 1
 
         return issues
+
+    async def get_rule_details(self, rule_key: str) -> SonarQubeRule:
+        """Get detailed information about a specific rule.
+
+        Args:
+            rule_key: Rule identifier (e.g., 'typescript:S3801')
+
+        Returns:
+            Detailed rule information
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        params = {
+            "key": rule_key,
+            "actives": "true",  # Include active profiles information
+        }
+
+        data = await self._request("GET", "/api/rules/show", params=params)
+        response = RuleResponse(**data)
+
+        return response.rule
+
+    async def get_source_lines(
+        self,
+        file_path: str,
+        from_line: int | None = None,
+        to_line: int | None = None,
+    ) -> list[SourceLine]:
+        """Get source code lines for a specific file.
+
+        Args:
+            file_path: Path to the file (relative to project root)
+            from_line: Start line number (1-based, inclusive). If None, starts from line 1
+            to_line: End line number (1-based, inclusive). If None, gets all lines
+
+        Returns:
+            List of source code lines
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        # Build component identifier: projectKey:filePath
+        component = f"{self.config.sonarqube_project_key}:{file_path}"
+
+        params: dict[str, Any] = {
+            "key": component,
+        }
+
+        if from_line is not None:
+            params["from"] = from_line
+        if to_line is not None:
+            params["to"] = to_line
+
+        data = await self._request("GET", "/api/sources/lines", params=params)
+        response = SourceLinesResponse(**data)
+
+        return response.sources
