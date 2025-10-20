@@ -1,9 +1,8 @@
 """Tests for AI tool factory."""
 
-import pytest
 from pytest_mock import MockerFixture
 
-from vibe_heal.ai_tools import AIToolFactory, AIToolType, ClaudeCodeTool
+from vibe_heal.ai_tools import AiderTool, AIToolFactory, AIToolType, ClaudeCodeTool
 
 
 class TestAIToolFactory:
@@ -16,11 +15,12 @@ class TestAIToolFactory:
         assert isinstance(tool, ClaudeCodeTool)
         assert tool.tool_type == AIToolType.CLAUDE_CODE
 
-    def test_create_invalid_tool_type(self) -> None:
-        """Test creating tool with unsupported type raises error."""
-        # AIDER is not implemented yet (Phase 8)
-        with pytest.raises(ValueError, match="Unsupported AI tool type"):
-            AIToolFactory.create(AIToolType.AIDER)
+    def test_create_aider_tool(self) -> None:
+        """Test creating Aider tool."""
+        tool = AIToolFactory.create(AIToolType.AIDER)
+
+        assert isinstance(tool, AiderTool)
+        assert tool.tool_type == AIToolType.AIDER
 
     def test_detect_available_when_claude_exists(self, mocker: MockerFixture) -> None:
         """Test auto-detection when Claude is available."""
@@ -30,6 +30,23 @@ class TestAIToolFactory:
         detected = AIToolFactory.detect_available()
 
         assert detected == AIToolType.CLAUDE_CODE
+
+    def test_detect_available_when_aider_exists(self, mocker: MockerFixture) -> None:
+        """Test auto-detection when Aider is available but Claude is not."""
+
+        # Mock shutil.which to return None for claude, path for aider
+        def which_mock(cmd: str) -> str | None:
+            if cmd == "claude":
+                return None
+            if cmd == "aider":
+                return "/usr/local/bin/aider"
+            return None
+
+        mocker.patch("shutil.which", side_effect=which_mock)
+
+        detected = AIToolFactory.detect_available()
+
+        assert detected == AIToolType.AIDER
 
     def test_detect_available_when_no_tools(self, mocker: MockerFixture) -> None:
         """Test auto-detection when no tools available."""
@@ -48,3 +65,34 @@ class TestAIToolFactory:
         assert tool1 is not tool2
         assert isinstance(tool1, ClaudeCodeTool)
         assert isinstance(tool2, ClaudeCodeTool)
+
+        tool3 = AIToolFactory.create(AIToolType.AIDER)
+        tool4 = AIToolFactory.create(AIToolType.AIDER)
+
+        assert tool3 is not tool4
+        assert isinstance(tool3, AiderTool)
+        assert isinstance(tool4, AiderTool)
+
+    def test_create_aider_with_config(self, mocker: MockerFixture) -> None:
+        """Test creating Aider tool with configuration."""
+        # Create mock config
+        mock_config = mocker.MagicMock()
+        mock_config.aider_model = "ollama_chat/gemma3:27b"
+        mock_config.aider_api_key = "test-key"
+        mock_config.aider_api_base = "http://localhost:11434"
+
+        tool = AIToolFactory.create(AIToolType.AIDER, config=mock_config)
+
+        assert isinstance(tool, AiderTool)
+        assert tool.model == "ollama_chat/gemma3:27b"
+        assert tool.api_key == "test-key"
+        assert tool.api_base == "http://localhost:11434"
+
+    def test_create_aider_without_config(self) -> None:
+        """Test creating Aider tool without configuration."""
+        tool = AIToolFactory.create(AIToolType.AIDER)
+
+        assert isinstance(tool, AiderTool)
+        assert tool.model is None
+        assert tool.api_key is None
+        assert tool.api_base is None
