@@ -25,6 +25,7 @@ class AiderTool(AITool):
         model: str | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
+        env_file_path: Path | None = None,
     ) -> None:
         """Initialize Aider tool.
 
@@ -33,11 +34,13 @@ class AiderTool(AITool):
             model: Model to use with Aider (e.g., 'ollama_chat/gemma3:27b')
             api_key: API key for model provider (sets OLLAMA_API_KEY env var)
             api_base: API base URL for model provider (sets OLLAMA_API_BASE env var)
+            env_file_path: Path to .env file to pass to Aider via --env-file
         """
         self.timeout = timeout
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
+        self.env_file_path = env_file_path
 
     def is_available(self) -> bool:
         """Check if Aider CLI is installed.
@@ -137,6 +140,10 @@ class AiderTool(AITool):
             # Add model flag if specified
             if self.model:
                 cmd.extend(["--model", self.model])
+
+            # Add env-file flag if specified
+            if self.env_file_path:
+                cmd.extend(["--env-file", str(self.env_file_path)])
 
             # Prepare environment variables
             env = os.environ.copy()

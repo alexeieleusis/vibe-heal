@@ -1,5 +1,7 @@
 """Tests for AI tool factory."""
 
+from pathlib import Path
+
 from pytest_mock import MockerFixture
 
 from vibe_heal.ai_tools import AiderTool, AIToolFactory, AIToolType, ClaudeCodeTool
@@ -80,6 +82,8 @@ class TestAIToolFactory:
         mock_config.aider_model = "ollama_chat/gemma3:27b"
         mock_config.aider_api_key = "test-key"
         mock_config.aider_api_base = "http://localhost:11434"
+        env_file = Path("/path/to/.env.vibeheal")
+        mock_config.find_env_file.return_value = env_file
 
         tool = AIToolFactory.create(AIToolType.AIDER, config=mock_config)
 
@@ -87,6 +91,7 @@ class TestAIToolFactory:
         assert tool.model == "ollama_chat/gemma3:27b"
         assert tool.api_key == "test-key"
         assert tool.api_base == "http://localhost:11434"
+        assert tool.env_file_path == env_file
 
     def test_create_aider_without_config(self) -> None:
         """Test creating Aider tool without configuration."""

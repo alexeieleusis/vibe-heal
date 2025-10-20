@@ -246,14 +246,17 @@ class TestAiderTool:
 
     def test_initialization_with_model_config(self) -> None:
         """Test that model config is properly stored."""
+        env_file = Path("/path/to/.env.vibeheal")
         tool = AiderTool(
             model="ollama_chat/gemma3:27b",
             api_key="test-key",
             api_base="http://localhost:11434",
+            env_file_path=env_file,
         )
         assert tool.model == "ollama_chat/gemma3:27b"
         assert tool.api_key == "test-key"
         assert tool.api_base == "http://localhost:11434"
+        assert tool.env_file_path == env_file
 
     @pytest.mark.asyncio
     async def test_model_flag_added_to_command(
@@ -323,3 +326,38 @@ class TestAiderTool:
         env = kwargs.get("env", {})
         assert env.get("OLLAMA_API_KEY") == "test-api-key"
         assert env.get("OLLAMA_API_BASE") == "http://localhost:11434"
+
+    @pytest.mark.asyncio
+    async def test_env_file_flag_added_to_command(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+    ) -> None:
+        """Test that --env-file flag is added when env_file_path is specified."""
+        mocker.patch("shutil.which", return_value="/usr/local/bin/aider")
+
+        # Create a temporary file and env file
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+        env_file = tmp_path / ".env.vibeheal"
+        env_file.write_text("SOME_VAR=value")
+
+        # Mock subprocess
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"Fixed", b"")
+        mock_process.returncode = 0
+
+        mock_create_subprocess = mocker.patch(
+            "asyncio.create_subprocess_exec",
+            return_value=mock_process,
+        )
+
+        tool = AiderTool(env_file_path=env_file)
+        await tool.fix_issue(sample_issue, str(test_file))
+
+        # Verify --env-file flag was added
+        args, kwargs = mock_create_subprocess.call_args
+        assert "--env-file" in args
+        env_file_index = args.index("--env-file")
+        assert args[env_file_index + 1] == str(env_file)
