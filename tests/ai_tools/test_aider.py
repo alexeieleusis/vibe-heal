@@ -233,7 +233,11 @@ class TestAiderTool:
         assert args[0] == "aider"
         assert "--yes" in args
         assert "--no-git" in args
-        assert "--message" in args
+        assert "--message-file" in args
+        # Verify a temp file path is passed
+        message_file_idx = args.index("--message-file")
+        assert message_file_idx < len(args) - 1
+        assert args[message_file_idx + 1].endswith(".txt")
 
     def test_custom_timeout(self) -> None:
         """Test that custom timeout is accepted."""

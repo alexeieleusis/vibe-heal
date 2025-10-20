@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -112,64 +113,77 @@ class AiderTool(AITool):
         Returns:
             FixResult with outcome
         """
-        # Build command
-        # --yes: Auto-confirm changes
-        # --no-git: Don't auto-commit (we handle commits ourselves)
-        # --message: Provide the fix prompt
-        cmd = [
-            "aider",
-            "--yes",
-            "--no-git",
-            "--message",
-            prompt,
-            file_path,
-        ]
-
-        # Add model flag if specified
-        if self.model:
-            cmd.extend(["--model", self.model])
-
-        # Prepare environment variables
-        env = os.environ.copy()
-        if self.api_key:
-            env["OLLAMA_API_KEY"] = self.api_key
-        if self.api_base:
-            env["OLLAMA_API_BASE"] = self.api_base
-
-        # Execute command
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=Path.cwd(),
-            env=env,
-        )
-
+        # Create a temporary file for the message
+        temp_file = None
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout,
+            # Create temp file with the prompt
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                temp_file = f.name
+                f.write(prompt)
+
+            # Build command
+            # --yes: Auto-confirm changes
+            # --no-git: Don't auto-commit (we handle commits ourselves)
+            # --message-file: Provide the fix prompt from a file
+            cmd = [
+                "aider",
+                "--yes",
+                "--no-git",
+                "--message-file",
+                temp_file,
+                file_path,
+            ]
+
+            # Add model flag if specified
+            if self.model:
+                cmd.extend(["--model", self.model])
+
+            # Prepare environment variables
+            env = os.environ.copy()
+            if self.api_key:
+                env["OLLAMA_API_KEY"] = self.api_key
+            if self.api_base:
+                env["OLLAMA_API_BASE"] = self.api_base
+
+            # Execute command
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=Path.cwd(),
+                env=env,
             )
 
-            stdout_text = stdout.decode() if stdout else ""
-            stderr_text = stderr.decode() if stderr else ""
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout,
+                )
 
-            # Check if successful
-            # Aider returns 0 on success, even if no changes were made
-            if process.returncode == 0:
-                # Aider modifies the file in place
+                stdout_text = stdout.decode() if stdout else ""
+                stderr_text = stderr.decode() if stderr else ""
+
+                # Check if successful
+                # Aider returns 0 on success, even if no changes were made
+                if process.returncode == 0:
+                    # Aider modifies the file in place
+                    return FixResult(
+                        success=True,
+                        files_modified=[file_path],
+                        ai_response=stdout_text,
+                    )
                 return FixResult(
-                    success=True,
-                    files_modified=[file_path],
+                    success=False,
+                    error_message=f"Aider failed with exit code {process.returncode}: {stderr_text}",
                     ai_response=stdout_text,
                 )
-            return FixResult(
-                success=False,
-                error_message=f"Aider failed with exit code {process.returncode}: {stderr_text}",
-                ai_response=stdout_text,
-            )
 
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            raise
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise
+
+        finally:
+            # Clean up temporary file
+            if temp_file and Path(temp_file).exists():
+                Path(temp_file).unlink()
