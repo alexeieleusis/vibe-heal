@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pytest_mock import MockerFixture
 
 from vibe_heal.ai_tools import AIToolType, ClaudeCodeTool, FixResult
 from vibe_heal.config import VibeHealConfig
@@ -51,7 +52,7 @@ class TestOrchestratorInit:
     def test_init_with_configured_ai_tool(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test initialization with configured AI tool."""
         mock_config.ai_tool = AIToolType.CLAUDE_CODE
@@ -65,7 +66,7 @@ class TestOrchestratorInit:
     def test_init_with_auto_detect(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test initialization with auto-detected AI tool."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
@@ -77,7 +78,7 @@ class TestOrchestratorInit:
     def test_init_raises_when_no_ai_tool(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test initialization fails when no AI tool available."""
         mocker.patch("shutil.which", return_value=None)
@@ -92,7 +93,7 @@ class TestOrchestratorValidation:
     def test_validate_preconditions_not_git_repo(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
         """Test validation fails when not a Git repository."""
@@ -109,7 +110,7 @@ class TestOrchestratorValidation:
     def test_validate_preconditions_file_has_uncommitted_changes(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
         """Test validation fails when file has uncommitted changes."""
@@ -127,7 +128,7 @@ class TestOrchestratorValidation:
     def test_validate_preconditions_file_not_found(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test validation fails when file doesn't exist."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
@@ -141,7 +142,7 @@ class TestOrchestratorValidation:
     def test_validate_preconditions_ai_tool_not_available(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
         """Test validation fails when AI tool is not available."""
@@ -165,7 +166,7 @@ class TestOrchestratorValidation:
     def test_validate_preconditions_dry_run_skips_file_check(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
         """Test validation skips file uncommitted changes check in dry-run mode."""
@@ -190,7 +191,7 @@ class TestOrchestratorFixFile:
     async def test_fix_file_no_issues(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
         """Test fix_file when no issues found."""
@@ -218,7 +219,7 @@ class TestOrchestratorFixFile:
     async def test_fix_file_no_fixable_issues(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
         sample_issue: SonarQubeIssue,
     ) -> None:
@@ -250,7 +251,7 @@ class TestOrchestratorFixFile:
     async def test_fix_file_successful_dry_run(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
         sample_issue: SonarQubeIssue,
     ) -> None:
@@ -287,7 +288,7 @@ class TestOrchestratorFixFile:
     async def test_fix_file_user_cancels(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
         tmp_path: Path,
         sample_issue: SonarQubeIssue,
     ) -> None:
@@ -323,7 +324,7 @@ class TestConfirmProcessing:
     def test_confirm_processing_yes(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test user confirms processing."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
@@ -336,7 +337,7 @@ class TestConfirmProcessing:
     def test_confirm_processing_no(
         self,
         mock_config: VibeHealConfig,
-        mocker: pytest.MockFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Test user declines processing."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
