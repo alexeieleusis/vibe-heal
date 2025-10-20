@@ -1,5 +1,6 @@
 """Configuration models."""
 
+from pathlib import Path
 from typing import Self
 
 from pydantic import Field, field_validator, model_validator
@@ -133,3 +134,18 @@ class VibeHealConfig(BaseSettings):
             True if token auth is configured
         """
         return self.sonarqube_token is not None
+
+    @staticmethod
+    def find_env_file() -> Path | None:
+        """Find the environment file being used.
+
+        Checks for .env.vibeheal and .env in current directory in that order.
+
+        Returns:
+            Path to the env file if found, None otherwise
+        """
+        for env_file in [".env.vibeheal", ".env"]:
+            path = Path(env_file)
+            if path.exists():
+                return path.absolute()
+        return None
