@@ -11,7 +11,7 @@ from vibe_heal.git.exceptions import (
     GitOperationError,
     NotAGitRepositoryError,
 )
-from vibe_heal.sonarqube.models import SonarQubeIssue
+from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 
 
 class GitManager:
@@ -109,6 +109,7 @@ class GitManager:
         issue: SonarQubeIssue,
         files: list[str],
         ai_tool_type: AIToolType,
+        rule: SonarQubeRule | None = None,
     ) -> str:
         """Create a commit for a fixed issue.
 
@@ -116,6 +117,7 @@ class GitManager:
             issue: The SonarQube issue that was fixed
             files: List of files to commit
             ai_tool_type: The AI tool used for the fix
+            rule: Detailed rule information (optional)
 
         Returns:
             Commit SHA
@@ -128,7 +130,7 @@ class GitManager:
             raise GitOperationError(msg)
 
         # Create commit message
-        message = self._create_commit_message(issue, ai_tool_type)
+        message = self._create_commit_message(issue, ai_tool_type, rule)
 
         try:
             # Stage files
@@ -147,12 +149,14 @@ class GitManager:
         self,
         issue: SonarQubeIssue,
         ai_tool_type: AIToolType,
+        rule: SonarQubeRule | None = None,
     ) -> str:
         """Create a formatted commit message for a fix.
 
         Args:
             issue: The SonarQube issue that was fixed
             ai_tool_type: The AI tool used for the fix
+            rule: Detailed rule information (optional)
 
         Returns:
             Formatted commit message
@@ -160,21 +164,39 @@ class GitManager:
         # Extract rule name (e.g., "python:S1481" -> "S1481")
         rule_short = issue.rule.split(":")[-1] if ":" in issue.rule else issue.rule
 
-        # Create subject line
-        subject = f"fix: [SQ-{rule_short}] {issue.message[:50]}"
+        # Create subject line (use rule name if available)
+        if rule:
+            subject = f"fix: [{issue.rule}] {issue.message[:50]}"
+        else:
+            subject = f"fix: [SQ-{rule_short}] {issue.message[:50]}"
+
         if len(issue.message) > 50:
             subject = subject.rstrip() + "..."
 
         # Create body
         body_parts = [
-            f"Fixes SonarQube issue on line {issue.line}",
-            f"Rule: {issue.rule}",
-            f"Severity: {issue.severity}",
-            f"Type: {issue.type}",
-            f"Message: {issue.message}",
-            "",
-            f"Fixed by vibe-heal using {ai_tool_type.display_name}",
+            f"SonarQube Issue: {issue.key}",
         ]
+
+        if rule:
+            body_parts.append(f"Rule: {issue.rule} - {rule.name}")
+        else:
+            body_parts.append(f"Rule: {issue.rule}")
+
+        body_parts.extend([
+            f"Severity: {issue.severity}",
+            f"Location: {issue.component}:{issue.line}",
+            "",
+        ])
+
+        # Add public documentation link
+        if rule:
+            body_parts.extend([
+                f"Rationale: {rule.public_doc_url}",
+                "",
+            ])
+
+        body_parts.append(f"Fixed by: vibe-heal using {ai_tool_type.display_name}")
 
         body = "\n".join(body_parts)
 

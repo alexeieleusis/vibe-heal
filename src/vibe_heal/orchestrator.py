@@ -194,6 +194,15 @@ class VibeHealOrchestrator:
         """
         summary = FixSummary(total_issues=0)
 
+        # Fetch source code once for all issues (if configured to include context)
+        source_lines = None
+        if self.config.include_rule_description:
+            try:
+                async with SonarQubeClient(self.config) as sonar_client:
+                    source_lines = await sonar_client.get_source_lines(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to fetch source lines: {e}. Continuing without code context.")
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -205,8 +214,31 @@ class VibeHealOrchestrator:
                     total=None,
                 )
 
-                # Attempt to fix
-                fix_result = await self.ai_tool.fix_issue(issue, file_path)
+                # Fetch enriched context for this issue
+                rule = None
+                code_context = None
+
+                if self.config.include_rule_description:
+                    try:
+                        async with SonarQubeClient(self.config) as sonar_client:
+                            rule = await sonar_client.get_rule_details(issue.rule)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
+
+                # Extract code context around the issue line
+                if source_lines and issue.line:
+                    context_lines = self.config.code_context_lines
+                    start_line = max(1, issue.line - context_lines)
+                    end_line = issue.line + context_lines
+                    code_context = [line for line in source_lines if start_line <= line.line <= end_line]
+
+                # Attempt to fix with enriched context
+                fix_result = await self.ai_tool.fix_issue(
+                    issue,
+                    file_path,
+                    rule=rule,
+                    code_context=code_context,
+                )
 
                 if fix_result.success:
                     # Commit if not dry-run
@@ -216,6 +248,7 @@ class VibeHealOrchestrator:
                                 issue,
                                 fix_result.files_modified,
                                 self.ai_tool.tool_type,
+                                rule=rule,
                             )
                             summary.commits.append(sha)
                             summary.fixed += 1

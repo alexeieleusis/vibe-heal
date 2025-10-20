@@ -45,7 +45,9 @@ See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 
 - ✅ Fetch SonarQube issues for any file
 - ✅ AI-powered issue fixing with **Claude Code** or **Aider**
+- ✅ **Enriched AI prompts** with full rule documentation and code context
 - ✅ Automatic git commits per fix with conventional commit format
+- ✅ **Enhanced commit messages** with rule links and detailed context
 - ✅ Smart issue ordering (reverse line order to avoid line number shifts)
 - ✅ Safe operation (checks for uncommitted changes in target file)
 - ✅ Detailed progress indicators and summary reports
@@ -188,6 +190,10 @@ SONARQUBE_PROJECT_KEY=your_project_key
 # AIDER_MODEL=ollama_chat/gemma3:27b          # Model to use
 # AIDER_API_KEY=your-api-key                  # API key (if needed)
 # AIDER_API_BASE=http://127.0.0.1:11434       # API base URL
+
+# Context Enrichment (Optional - enhances AI fix quality)
+# CODE_CONTEXT_LINES=5                        # Lines before/after issue to show AI (default: 5)
+# INCLUDE_RULE_DESCRIPTION=true               # Include full rule docs in prompts (default: true)
 ```
 
 **Example configurations:**

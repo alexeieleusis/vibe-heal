@@ -1,33 +1,81 @@
 """Prompt templates for AI tools."""
 
-from vibe_heal.sonarqube.models import SonarQubeIssue
+from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
 
 
-def create_fix_prompt(issue: SonarQubeIssue, file_path: str) -> str:
+def create_fix_prompt(
+    issue: SonarQubeIssue,
+    file_path: str,
+    rule: SonarQubeRule | None = None,
+    code_context: list[SourceLine] | None = None,
+) -> str:
     """Create a prompt for fixing a SonarQube issue.
 
     Args:
         issue: The SonarQube issue to fix
         file_path: Path to the file containing the issue
+        rule: Detailed rule information (optional)
+        code_context: Source code lines around the issue (optional)
 
     Returns:
         Formatted prompt for AI tool
     """
-    prompt = f"""Fix the following SonarQube issue in {file_path}:
+    # Build basic issue details
+    prompt_parts = [
+        f"Fix the following SonarQube issue in {file_path}:",
+        "",
+        "**Issue Details:**",
+        f"- Rule: {issue.rule}",
+    ]
 
-**Issue Details:**
-- Rule: {issue.rule}
-- Severity: {issue.severity}
-- Type: {issue.type}
-- Line: {issue.line}
-- Message: {issue.message}
+    # Add rule name if we have rule details
+    if rule:
+        prompt_parts.append(f"- Rule Name: {rule.name}")
 
-**Instructions:**
-1. Fix the issue while maintaining code functionality and style
-2. Make minimal changes - only fix this specific issue
-3. Do not fix other unrelated issues in the file
-4. Ensure the fix doesn't break existing functionality
-5. Follow the project's coding standards
+    prompt_parts.extend([
+        f"- Severity: {issue.severity}",
+        f"- Type: {issue.type}",
+        f"- Line: {issue.line}",
+        f"- Message: {issue.message}",
+        "",
+    ])
 
-Please make the necessary changes to fix this issue."""
-    return prompt.strip()
+    # Add rule rationale if available
+    if rule:
+        prompt_parts.extend([
+            "**Rule Rationale:**",
+            rule.markdown_description,
+            "",
+            f"**Documentation:** {rule.public_doc_url}",
+            "",
+        ])
+
+    # Add code context if available
+    if code_context and issue.line:
+        prompt_parts.extend([
+            "**Code Context:**",
+            "```",
+        ])
+        for source_line in code_context:
+            marker = ">>>" if source_line.line == issue.line else "   "
+            prompt_parts.append(f"{marker} {source_line.line}: {source_line.plain_code}")
+        prompt_parts.extend([
+            "```",
+            "",
+            f"(The issue is on line {issue.line}, marked with >>>)",
+            "",
+        ])
+
+    # Add instructions
+    prompt_parts.extend([
+        "**Instructions:**",
+        "1. Fix the issue while maintaining code functionality and style",
+        "2. Make minimal changes - only fix this specific issue",
+        "3. Do not fix other unrelated issues in the file",
+        "4. Ensure the fix doesn't break existing functionality",
+        "5. Follow the project's coding standards and the rule guidance above",
+        "",
+        "Please make the necessary changes to fix this issue.",
+    ])
+
+    return "\n".join(prompt_parts)
