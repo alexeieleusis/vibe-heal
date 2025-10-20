@@ -39,6 +39,7 @@ class AIToolFactory:
                     model=config.aider_model,
                     api_key=config.aider_api_key,
                     api_base=config.aider_api_base,
+                    env_file_path=config.find_env_file(),
                 )
             return AiderTool()
 

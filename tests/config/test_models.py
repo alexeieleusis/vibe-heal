@@ -1,5 +1,7 @@
 """Tests for configuration models."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -174,3 +176,55 @@ class TestVibeHealConfig:
 
         # Token auth should be used when both are present
         assert config.use_token_auth is True
+
+    def test_find_env_file_vibeheal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test find_env_file returns .env.vibeheal when it exists."""
+        # Change to tmp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create .env.vibeheal
+        env_file = tmp_path / ".env.vibeheal"
+        env_file.write_text("TEST=value")
+
+        result = VibeHealConfig.find_env_file()
+        assert result is not None
+        assert result.name == ".env.vibeheal"
+        assert result == env_file.absolute()
+
+    def test_find_env_file_fallback_to_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test find_env_file falls back to .env when .env.vibeheal doesn't exist."""
+        # Change to tmp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create only .env
+        env_file = tmp_path / ".env"
+        env_file.write_text("TEST=value")
+
+        result = VibeHealConfig.find_env_file()
+        assert result is not None
+        assert result.name == ".env"
+        assert result == env_file.absolute()
+
+    def test_find_env_file_prefers_vibeheal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test find_env_file prefers .env.vibeheal over .env when both exist."""
+        # Change to tmp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create both files
+        vibeheal_file = tmp_path / ".env.vibeheal"
+        vibeheal_file.write_text("TEST=vibeheal")
+        env_file = tmp_path / ".env"
+        env_file.write_text("TEST=env")
+
+        result = VibeHealConfig.find_env_file()
+        assert result is not None
+        assert result.name == ".env.vibeheal"
+        assert result == vibeheal_file.absolute()
+
+    def test_find_env_file_returns_none_when_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test find_env_file returns None when no env files exist."""
+        # Change to tmp directory
+        monkeypatch.chdir(tmp_path)
+
+        result = VibeHealConfig.find_env_file()
+        assert result is None
