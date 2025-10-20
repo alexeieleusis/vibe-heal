@@ -4,11 +4,13 @@ import asyncio
 import json
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
-from vibe_heal.ai_tools.prompts import create_fix_prompt
-from vibe_heal.sonarqube.models import SonarQubeIssue
+
+if TYPE_CHECKING:
+    from vibe_heal.sonarqube.models import SonarQubeIssue
 
 
 class ClaudeCodeTool(AITool):
@@ -34,7 +36,7 @@ class ClaudeCodeTool(AITool):
 
     async def fix_issue(
         self,
-        issue: SonarQubeIssue,
+        issue: "SonarQubeIssue",
         file_path: str,
     ) -> FixResult:
         """Fix an issue using Claude Code.
@@ -46,6 +48,9 @@ class ClaudeCodeTool(AITool):
         Returns:
             Result of the fix attempt
         """
+        # Import here to avoid circular dependency
+        from vibe_heal.ai_tools.prompts import create_fix_prompt
+
         if not self.is_available():
             return FixResult(
                 success=False,
