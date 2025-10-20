@@ -24,6 +24,8 @@ def mock_config() -> VibeHealConfig:
     config.sonarqube_url = "https://sonar.example.com"
     config.sonarqube_project_key = "test-project"
     config.ai_tool = None  # Test auto-detection
+    config.include_rule_description = True  # Default to true
+    config.code_context_lines = 5  # Default value
     return config
 
 

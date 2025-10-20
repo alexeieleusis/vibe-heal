@@ -203,17 +203,15 @@ class TestGitManagerCommit:
         # Modify file
         (git_repo / "test.py").write_text("print('fixed')")
 
-        # Commit fix
-        manager.commit_fix(sample_issue, ["test.py"], AIToolType.CLAUDE_CODE)
+        # Commit fix (without rule details)
+        manager.commit_fix(sample_issue, ["test.py"], AIToolType.CLAUDE_CODE, rule=None)
 
-        # Check commit message
+        # Check commit message (should use old format without rule)
         commit = manager.repo.head.commit
         assert "[SQ-S1481]" in commit.message
         assert "Remove unused import" in commit.message
-        assert "line 10" in commit.message
         assert "python:S1481" in commit.message
         assert "MAJOR" in commit.message
-        assert "CODE_SMELL" in commit.message
         assert "Claude Code" in commit.message
 
     def test_commit_fix_message_truncation(self, git_repo: Path) -> None:

@@ -229,6 +229,10 @@ SONARQUBE_TOKEN=your_token  # Preferred
 # OR: SONARQUBE_USERNAME + SONARQUBE_PASSWORD
 SONARQUBE_PROJECT_KEY=your_project
 # AI_TOOL=claude-code  # Optional, auto-detects if not set
+
+# Context enrichment (optional, enhances AI fix quality)
+# CODE_CONTEXT_LINES=5  # Lines before/after issue to show AI (default: 5)
+# INCLUDE_RULE_DESCRIPTION=true  # Include full rule docs in prompts (default: true)
 ```
 
 ### Development Workflow
