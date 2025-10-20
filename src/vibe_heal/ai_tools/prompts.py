@@ -46,8 +46,6 @@ def create_fix_prompt(
             "**Rule Rationale:**",
             rule.markdown_description,
             "",
-            f"**Documentation:** {rule.public_doc_url}",
-            "",
         ])
 
     # Add code context if available
