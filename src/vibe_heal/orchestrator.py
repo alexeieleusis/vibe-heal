@@ -232,6 +232,13 @@ class VibeHealOrchestrator:
                     end_line = issue.line + context_lines
                     code_context = [line for line in source_lines if start_line <= line.line <= end_line]
 
+                    # Log code context at debug level
+                    if code_context:
+                        logger.debug("Code context for issue %s (line %s):", issue.key, issue.line)
+                        for source_line in code_context:
+                            marker = ">>>" if source_line.line == issue.line else "   "
+                            logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
+
                 # Attempt to fix with enriched context
                 fix_result = await self.ai_tool.fix_issue(
                     issue,
