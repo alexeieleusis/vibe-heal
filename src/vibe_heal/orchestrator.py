@@ -52,7 +52,7 @@ class VibeHealOrchestrator:
             tool_type = detected_tool
             self.console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
 
-        return AIToolFactory.create(tool_type)
+        return AIToolFactory.create(tool_type, self.config)
 
     async def fix_file(
         self,
