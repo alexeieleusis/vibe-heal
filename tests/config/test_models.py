@@ -104,6 +104,17 @@ class TestVibeHealConfig:
 
         assert config.ai_tool == AIToolType.CLAUDE_CODE
 
+    def test_ai_tool_aider_from_string(self) -> None:
+        """Test parsing Aider from lowercase string."""
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.example.com",
+            sonarqube_token="token",
+            sonarqube_project_key="my-project",
+            ai_tool="aider",
+        )
+
+        assert config.ai_tool == AIToolType.AIDER
+
     def test_ai_tool_from_enum(self) -> None:
         """Test that enum value is accepted directly."""
         config = VibeHealConfig(

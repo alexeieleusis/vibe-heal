@@ -34,6 +34,34 @@ AI_TOOL=claude-code
         assert config.ai_tool is not None
         assert config.ai_tool.value == "claude-code"
 
+    def test_load_aider_from_env_vibeheal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test loading Aider config from .env.vibeheal file."""
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create .env.vibeheal file with Aider config
+        env_file = tmp_path / ".env.vibeheal"
+        env_file.write_text(
+            """
+SONARQUBE_URL=https://sonar.example.com
+SONARQUBE_TOKEN=test-token
+SONARQUBE_PROJECT_KEY=test-project
+AI_TOOL=aider
+AIDER_MODEL=ollama_chat/gemma3:27b
+AIDER_API_BASE=http://127.0.0.1:11434
+"""
+        )
+
+        config = VibeHealConfig()
+
+        assert config.sonarqube_url == "https://sonar.example.com"
+        assert config.sonarqube_token == "test-token"
+        assert config.sonarqube_project_key == "test-project"
+        assert config.ai_tool is not None
+        assert config.ai_tool.value == "aider"
+        assert config.aider_model == "ollama_chat/gemma3:27b"
+        assert config.aider_api_base == "http://127.0.0.1:11434"
+
     def test_load_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test loading config from .env file."""
         # Change to temp directory
