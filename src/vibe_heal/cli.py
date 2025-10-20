@@ -71,7 +71,7 @@ def fix(
 
     try:
         # Load configuration
-        config = VibeHealConfig()
+        config = VibeHealConfig()  # type: ignore[call-arg]
 
         # Override AI tool if specified
         if ai_tool:
@@ -108,7 +108,7 @@ def fix(
 def config() -> None:
     """Show current configuration."""
     try:
-        cfg = VibeHealConfig()
+        cfg = VibeHealConfig()  # type: ignore[call-arg]
         console.print("[bold]Current Configuration:[/bold]\n")
         console.print(f"  SonarQube URL: {cfg.sonarqube_url}")
         console.print(f"  Project Key: {cfg.sonarqube_project_key}")
