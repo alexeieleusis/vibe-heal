@@ -1,5 +1,7 @@
 """Tests for top-level models."""
 
+import math
+
 from vibe_heal.models import FixSummary
 
 
@@ -51,7 +53,7 @@ class TestFixSummary:
             failed=0,
         )
 
-        assert summary.success_rate == 100.0
+        assert math.isclose(summary.success_rate, 100.0, rel_tol=1e-09, abs_tol=1e-09)
 
     def test_has_failures_true(self) -> None:
         """Test has_failures when there are failures."""
