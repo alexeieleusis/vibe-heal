@@ -33,7 +33,7 @@ class TestFixSummary:
         )
 
         # 8 fixed out of 10 attempted (8 + 2) = 80%
-        assert summary.success_rate == 80.0
+        assert math.isclose(summary.success_rate, 80.0, rel_tol=1e-09, abs_tol=1e-09)
 
     def test_success_rate_zero_attempted(self) -> None:
         """Test success rate when no issues attempted."""
