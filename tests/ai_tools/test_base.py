@@ -34,7 +34,7 @@ class TestAIToolType:
     def test_enum_comparison(self) -> None:
         """Test enum equality comparison."""
         assert AIToolType.CLAUDE_CODE == AIToolType.CLAUDE_CODE
-        assert AIToolType.AIDER == AIToolType.AIDER
+        assert AIToolType.AIDER != AIToolType.CLAUDE_CODE
         assert AIToolType.CLAUDE_CODE != AIToolType.AIDER
 
     def test_enum_from_string(self) -> None:
