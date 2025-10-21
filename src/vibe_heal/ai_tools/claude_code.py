@@ -162,13 +162,33 @@ class ClaudeCodeTool(AITool):
             List of modified file paths
         """
         try:
-            # Validate JSON structure (will raise JSONDecodeError if invalid)
-            json.loads(json_output)
-            # Look for tool uses that indicate file modifications
-            # The structure may vary, but typically Edit tool usage indicates modifications
-            # For now, assume the file was modified if command succeeded
-            # TODO: Parse actual tool usage from JSON response to be more precise
+            data = json.loads(json_output)
+
+            # Check if data contains tool uses (Edit, Write, etc.)
+            # Claude CLI JSON format includes tool use information
+            modified_files = set()
+
+            # Look for tool uses in the response
+            if isinstance(data, dict):
+                # Check for 'toolUses' or similar fields that indicate Edit/Write operations
+                tool_uses = data.get("toolUses", [])
+                for tool_use in tool_uses:
+                    if isinstance(tool_use, dict):
+                        tool_name = tool_use.get("name", "")
+                        # Edit and Write tools modify files
+                        if tool_name in ("Edit", "Write"):
+                            # Extract file_path parameter if present
+                            params = tool_use.get("parameters", {})
+                            if isinstance(params, dict) and "file_path" in params:
+                                modified_files.add(params["file_path"])
+
+            # If we found specific modified files, return them
+            if modified_files:
+                return list(modified_files)
+
+            # Otherwise, assume the target file was modified if JSON was valid
             return [file_path]
+
         except json.JSONDecodeError:
             # If JSON parsing fails, assume the file was modified
             return [file_path]
