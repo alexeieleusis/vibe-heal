@@ -43,7 +43,7 @@ class TestFixSummary:
             failed=0,
         )
 
-        assert summary.success_rate == 0.0
+        assert math.isclose(summary.success_rate, 0.0, rel_tol=1e-09, abs_tol=1e-09)
 
     def test_success_rate_all_successful(self) -> None:
         """Test success rate when all successful."""
