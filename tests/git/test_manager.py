@@ -312,6 +312,46 @@ class TestGitManagerCommit:
         # Verify SHA matches actual commit
         assert sha == manager.repo.head.commit.hexsha
 
+    def test_commit_fix_returns_none_when_no_changes(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix returns None when there are no changes to commit."""
+        manager = GitManager(git_repo)
+
+        # Don't modify any files - try to commit the same file that's already in the repo
+        # This simulates the case where a previous fix already resolved this issue
+
+        # Commit fix - should return None because there are no changes
+        sha = manager.commit_fix(sample_issue, ["test.py"], AIToolType.CLAUDE_CODE)
+
+        # Should return None when no changes
+        assert sha is None
+
+    def test_commit_fix_no_empty_commit_created(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix does not create an empty commit."""
+        manager = GitManager(git_repo)
+
+        # Get current HEAD
+        old_head = manager.repo.head.commit.hexsha
+
+        # Try to commit without any changes
+        sha = manager.commit_fix(sample_issue, ["test.py"], AIToolType.CLAUDE_CODE)
+
+        # Should return None
+        assert sha is None
+
+        # HEAD should not have moved
+        assert manager.repo.head.commit.hexsha == old_head
+
+        # Repository should still be clean
+        assert manager.is_clean()
+
 
 class TestGitManagerSafety:
     """Tests for safety checks."""
