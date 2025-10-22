@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import aiofiles
+
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
 
@@ -120,9 +122,10 @@ class AiderTool(AITool):
         temp_file = None
         try:
             # Create temp file with the prompt
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-                temp_file = f.name
-                f.write(prompt)
+            fd, temp_file = tempfile.mkstemp(suffix=".txt", text=True)
+            os.close(fd)  # Close the file descriptor immediately
+            async with aiofiles.open(temp_file, mode="w") as f:
+                await f.write(prompt)
 
             # Build command
             # --yes: Auto-confirm changes
