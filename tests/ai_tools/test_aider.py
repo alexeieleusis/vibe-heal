@@ -322,7 +322,7 @@ class TestAiderTool:
         await tool.fix_issue(sample_issue, str(test_file))
 
         # Verify environment variables were set
-        args, kwargs = mock_create_subprocess.call_args
+        _, kwargs = mock_create_subprocess.call_args
         env = kwargs.get("env", {})
         assert env.get("OLLAMA_API_KEY") == "test-api-key"
         assert env.get("OLLAMA_API_BASE") == "http://localhost:11434"
