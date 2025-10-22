@@ -229,7 +229,7 @@ class TestAiderTool:
         await tool.fix_issue(sample_issue, str(test_file))
 
         # Verify command was called correctly
-        args, kwargs = mock_create_subprocess.call_args
+        args, _ = mock_create_subprocess.call_args
         assert args[0] == "aider"
         assert "--yes" in args
         assert "--no-git" in args
