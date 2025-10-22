@@ -286,7 +286,7 @@ class TestAiderTool:
         await tool.fix_issue(sample_issue, str(test_file))
 
         # Verify --model flag was added
-        args, kwargs = mock_create_subprocess.call_args
+        args, _ = mock_create_subprocess.call_args
         assert "--model" in args
         model_index = args.index("--model")
         assert args[model_index + 1] == "ollama_chat/gemma3:27b"
