@@ -357,7 +357,7 @@ class TestAiderTool:
         await tool.fix_issue(sample_issue, str(test_file))
 
         # Verify --env-file flag was added
-        args, kwargs = mock_create_subprocess.call_args
+        args, _ = mock_create_subprocess.call_args
         assert "--env-file" in args
         env_file_index = args.index("--env-file")
         assert args[env_file_index + 1] == str(env_file)
