@@ -110,7 +110,7 @@ class GitManager:
         files: list[str],
         ai_tool_type: AIToolType,
         rule: SonarQubeRule | None = None,
-    ) -> str:
+    ) -> str | None:
         """Create a commit for a fixed issue.
 
         Args:
@@ -120,7 +120,7 @@ class GitManager:
             rule: Detailed rule information (optional)
 
         Returns:
-            Commit SHA
+            Commit SHA, or None if there were no changes to commit
 
         Raises:
             GitOperationError: If commit fails
@@ -129,12 +129,18 @@ class GitManager:
             msg = "No files to commit"
             raise GitOperationError(msg)
 
-        # Create commit message
-        message = self._create_commit_message(issue, ai_tool_type, rule)
-
         try:
             # Stage files
             self.repo.index.add(files)
+
+            # Check if there are any changes to commit
+            # This happens when one fix resolves multiple issues
+            if not self.repo.index.diff("HEAD"):
+                # No changes staged - return None to indicate no commit was created
+                return None
+
+            # Create commit message
+            message = self._create_commit_message(issue, ai_tool_type, rule)
 
             # Create commit
             commit = self.repo.index.commit(message)

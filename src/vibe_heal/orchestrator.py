@@ -267,12 +267,22 @@ class VibeHealOrchestrator:
                         self.ai_tool.tool_type,
                         rule=rule,
                     )
-                    summary.commits.append(sha)
-                    summary.fixed += 1
-                    progress.update(
-                        task,
-                        description=f"[green]✓ Fixed line {issue.line}[/green]",
-                    )
+                    if sha:
+                        # Commit was created
+                        summary.commits.append(sha)
+                        summary.fixed += 1
+                        progress.update(
+                            task,
+                            description=f"[green]✓ Fixed line {issue.line}[/green]",
+                        )
+                    else:
+                        # No commit created (issue was already fixed)
+                        summary.skipped += 1
+                        progress.update(
+                            task,
+                            description=f"[yellow]⊘ Line {issue.line} already fixed[/yellow]",
+                        )
+                        logger.info(f"Issue {issue.key} was already fixed by a previous commit")
                 except Exception as e:
                     logger.exception("Failed to commit")
                     summary.failed += 1
