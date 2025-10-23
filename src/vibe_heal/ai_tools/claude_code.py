@@ -4,7 +4,7 @@ import asyncio
 import json
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
@@ -163,32 +163,63 @@ class ClaudeCodeTool(AITool):
         """
         try:
             data = json.loads(json_output)
-
-            # Check if data contains tool uses (Edit, Write, etc.)
-            # Claude CLI JSON format includes tool use information
-            modified_files = set()
-
-            # Look for tool uses in the response
-            if isinstance(data, dict):
-                # Check for 'toolUses' or similar fields that indicate Edit/Write operations
-                tool_uses = data.get("toolUses", [])
-                for tool_use in tool_uses:
-                    if isinstance(tool_use, dict):
-                        tool_name = tool_use.get("name", "")
-                        # Edit and Write tools modify files
-                        if tool_name in ("Edit", "Write"):
-                            # Extract file_path parameter if present
-                            params = tool_use.get("parameters", {})
-                            if isinstance(params, dict) and "file_path" in params:
-                                modified_files.add(params["file_path"])
-
-            # If we found specific modified files, return them
-            if modified_files:
-                return list(modified_files)
-
-            # Otherwise, assume the target file was modified if JSON was valid
-            return [file_path]
-
         except json.JSONDecodeError:
             # If JSON parsing fails, assume the file was modified
             return [file_path]
+
+        # Extract modified files from tool uses
+        modified_files = self._extract_modified_files_from_data(data)
+
+        # If we found specific modified files, return them
+        if modified_files:
+            return list(modified_files)
+
+        # Otherwise, assume the target file was modified if JSON was valid
+        return [file_path]
+
+    def _extract_modified_files_from_data(self, data: dict | list) -> set[str]:
+        """Extract modified files from Claude CLI JSON data.
+
+        Args:
+            data: Parsed JSON data from Claude CLI
+
+        Returns:
+            Set of modified file paths
+        """
+        modified_files: set[str] = set()
+
+        if not isinstance(data, dict):
+            return modified_files
+
+        # Check for 'toolUses' or similar fields that indicate Edit/Write operations
+        tool_uses = data.get("toolUses", [])
+        for tool_use in tool_uses:
+            file_path = self._extract_file_path_from_tool_use(tool_use)
+            if file_path:
+                modified_files.add(file_path)
+
+        return modified_files
+
+    def _extract_file_path_from_tool_use(self, tool_use: dict | list) -> str | None:
+        """Extract file path from a tool use entry.
+
+        Args:
+            tool_use: Tool use dictionary
+
+        Returns:
+            File path if found, None otherwise
+        """
+        if not isinstance(tool_use, dict):
+            return None
+
+        tool_name = tool_use.get("name", "")
+        # Edit and Write tools modify files
+        if tool_name not in ("Edit", "Write"):
+            return None
+
+        # Extract file_path parameter if present
+        params = tool_use.get("parameters", {})
+        if isinstance(params, dict) and "file_path" in params:
+            return cast(str, params["file_path"])
+
+        return None
