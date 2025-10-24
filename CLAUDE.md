@@ -222,10 +222,22 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `get_user_email()` - retrieves git user email for project naming
 
 **`orchestrator.py`**: Main workflow coordination
-- `VibeHealOrchestrator.fix_file()` - end-to-end flow
+- `VibeHealOrchestrator.fix_file()` - end-to-end flow for fixing a single file
 - Validates preconditions (git state, file exists, AI tool available)
 - Progress indicators with rich library
 - User confirmation before processing (unless dry-run)
+
+**`cleanup/`**: Branch cleanup workflow
+- `CleanupOrchestrator` - orchestrates branch cleanup workflow
+  - `cleanup_branch(base_branch, max_iterations, file_patterns)` - cleans up all modified files
+  - Workflow: analyze branch → create temp project → run analysis → fix files iteratively → delete temp project
+  - `_cleanup_file(file_path, project_key, project_name, max_iterations)` - fixes single file until no issues remain
+  - Reuses `VibeHealOrchestrator.fix_file()` for actual fixing
+  - `_filter_files(files, patterns)` - filters files by glob patterns
+  - `CleanupResult` model - tracks overall cleanup results
+  - `FileCleanupResult` model - tracks per-file cleanup results
+  - Always cleans up temporary project in finally block
+  - Supports file pattern filtering (e.g., `["*.py", "src/**/*.ts"]`)
 
 **`cli.py`**: Command-line interface with typer
 - `vibe-heal fix <file>` - main command
