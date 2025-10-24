@@ -168,15 +168,19 @@ class BranchAnalyzer:
             BranchAnalyzerError: If user email is not configured
         """
 
-        def _raise_if_no_email(email: str | None) -> None:
-            if not email:
+        def _validate_email_is_string(email: str | int | float | None) -> str:
+            """Validate that email is a non-empty string."""
+            if not email or not isinstance(email, str):
                 raise BranchAnalyzerError("Git user email not configured. Run: git config user.email 'your@email.com'")
+            return email
 
         try:
             # Try repository config first, then global config
             email = self.repo.config_reader().get_value("user", "email", default=None)
-            _raise_if_no_email(email)
-            return email
+            return _validate_email_is_string(email)
 
+        except BranchAnalyzerError:
+            # Re-raise our own exceptions
+            raise
         except Exception as e:
             raise BranchAnalyzerError(f"Failed to get user email: {e}") from e
