@@ -106,6 +106,10 @@ class SonarQubeClient:
                     status_code=response.status_code,
                 )
 
+            # Handle 204 No Content responses (e.g., delete operations)
+            if response.status_code == 204 or not response.content:
+                return {}
+
             result: dict[Any, Any] = response.json()
             return result
 
