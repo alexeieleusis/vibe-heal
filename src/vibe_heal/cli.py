@@ -10,8 +10,11 @@ from rich.logging import RichHandler
 
 from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AIToolType
+from vibe_heal.ai_tools.factory import AIToolFactory
+from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
 from vibe_heal.config import ConfigurationError, VibeHealConfig
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.sonarqube.client import SonarQubeClient
 
 app = typer.Typer(
     name="vibe-heal",
@@ -93,6 +96,131 @@ def fix(
         # Exit with error if there were failures
         if summary.has_failures:
             sys.exit(1)
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+def _display_cleanup_results(result: CleanupResult) -> None:
+    """Display cleanup results.
+
+    Args:
+        result: Cleanup result to display
+    """
+    console.print("\n[bold]Cleanup Summary:[/bold]")
+    console.print(f"  Files processed: {len(result.files_processed)}")
+    console.print(f"  [green]Total issues fixed: {result.total_issues_fixed}[/green]")
+
+    if result.files_processed:
+        console.print("\n[bold]Per-File Results:[/bold]")
+        for file_result in result.files_processed:
+            status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
+            console.print(f"  {status} {file_result.file_path}: {file_result.issues_fixed} issues fixed")
+            if file_result.error_message:
+                console.print(f"      [red]Error: {file_result.error_message}[/red]")
+
+    if not result.success:
+        if result.error_message:
+            console.print(f"\n[red]Cleanup failed: {result.error_message}[/red]")
+        sys.exit(1)
+
+    console.print("\n[green]✨ Branch cleanup complete![/green]")
+
+
+@app.command()
+def cleanup(
+    base_branch: str = typer.Option(
+        "origin/main",
+        "--base-branch",
+        "-b",
+        help="Base branch to compare against",
+    ),
+    max_iterations: int = typer.Option(
+        10,
+        "--max-iterations",
+        "-i",
+        help="Maximum fix iterations per file",
+    ),
+    file_patterns: list[str] | None = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+    ),
+    ai_tool: AIToolType | None = typer.Option(
+        None,
+        "--ai-tool",
+        help="AI tool to use (overrides config)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output",
+    ),
+) -> None:
+    """Clean up all modified files in current branch.
+
+    Creates a temporary SonarQube project, analyzes all modified files,
+    and fixes issues iteratively until the branch is clean.
+    """
+    setup_logging(verbose)
+
+    try:
+        # Load configuration
+        config = VibeHealConfig()  # type: ignore[call-arg]
+
+        # Override AI tool if specified
+        if ai_tool:
+            config.ai_tool = ai_tool
+
+        # Display what we're doing
+        console.print("\n[bold cyan]Branch Cleanup[/bold cyan]")
+        console.print(f"  Base branch: {base_branch}")
+        console.print(f"  Max iterations per file: {max_iterations}")
+        if file_patterns:
+            console.print(f"  File patterns: {', '.join(file_patterns)}")
+        console.print()
+
+        # Initialize AI tool
+        if config.ai_tool:
+            tool_type = config.ai_tool
+            console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
+        else:
+            detected_tool = AIToolFactory.detect_available()
+            if not detected_tool:
+                console.print("[red]No AI tool found. Please install Claude Code or Aider.[/red]")
+                sys.exit(1)
+            tool_type = detected_tool
+            console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
+
+        ai_tool_instance = AIToolFactory.create(tool_type, config)
+
+        # Check AI tool is available
+        if not ai_tool_instance.is_available():
+            console.print(f"[red]{tool_type.display_name} is not available[/red]")
+            sys.exit(1)
+
+        # Run cleanup with async context manager for client
+        async def run_cleanup() -> None:
+            async with SonarQubeClient(config) as client:
+                orchestrator = CleanupOrchestrator(config, client, ai_tool_instance)
+
+                result = await orchestrator.cleanup_branch(
+                    base_branch=base_branch,
+                    max_iterations=max_iterations,
+                    file_patterns=file_patterns,
+                )
+
+                _display_cleanup_results(result)
+
+        asyncio.run(run_cleanup())
 
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
