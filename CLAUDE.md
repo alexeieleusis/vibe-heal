@@ -194,6 +194,13 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - Commit format: `fix: [SQ-RULE] message` with full issue details in body
 - Validates file has no uncommitted changes before processing
 - Each fix gets its own commit (easy rollback)
+- `BranchAnalyzer` - analyzes branch differences for branch cleanup feature
+  - `get_modified_files(base_branch='origin/main')` - returns files modified vs base branch
+  - Uses git three-dot diff syntax to compare from merge base
+  - Filters out deleted files, returns only existing files
+  - `get_current_branch()` - returns active branch name
+  - `validate_branch_exists(branch)` - checks local and remote branches
+  - `get_user_email()` - retrieves git user email for project naming
 
 **`orchestrator.py`**: Main workflow coordination
 - `VibeHealOrchestrator.fix_file()` - end-to-end flow
