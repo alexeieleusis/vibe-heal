@@ -186,6 +186,15 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `project_exists(project_key)` - checks project existence
   - `_sanitize_identifier(value)` - sanitizes strings for project keys (alphanumeric + underscore, lowercase)
   - `TempProjectMetadata` model - tracks created projects for cleanup
+- `AnalysisRunner` - executes SonarQube analysis via sonar-scanner CLI
+  - `run_analysis(project_key, project_name, project_dir, sources)` - runs scanner and waits for completion
+  - Uses `asyncio.create_subprocess_exec` for non-blocking execution
+  - Polls `/api/ce/task?id={taskId}` to wait for server-side analysis completion
+  - `validate_scanner_available()` - checks if sonar-scanner is installed
+  - `AnalysisResult` model - returns success status, task_id, dashboard_url, error details
+  - Supports both token and basic auth
+  - Optional sources parameter for partial analysis optimization
+  - **Requirement**: `sonar-scanner` CLI must be installed (https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/)
 
 **`processor/`**: Business logic for issue handling
 - Sorts issues by line number descending (fixes high line numbers first)
