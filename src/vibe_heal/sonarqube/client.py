@@ -222,3 +222,60 @@ class SonarQubeClient:
         response = SourceLinesResponse(**data)
 
         return response.sources
+
+    async def create_project(self, key: str, name: str) -> None:
+        """Create a new SonarQube project.
+
+        Args:
+            key: Project key (unique identifier)
+            name: Project name (display name)
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed (e.g., project already exists)
+        """
+        params = {
+            "project": key,
+            "name": name,
+        }
+
+        await self._request("POST", "/api/projects/create", params=params)
+
+    async def delete_project(self, key: str) -> None:
+        """Delete a SonarQube project.
+
+        Args:
+            key: Project key to delete
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed (e.g., project doesn't exist)
+        """
+        params = {
+            "project": key,
+        }
+
+        await self._request("POST", "/api/projects/delete", params=params)
+
+    async def project_exists(self, key: str) -> bool:
+        """Check if a project exists.
+
+        Args:
+            key: Project key to check
+
+        Returns:
+            True if project exists, False otherwise
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        params = {
+            "projects": key,
+        }
+
+        data = await self._request("GET", "/api/projects/search", params=params)
+
+        # Response format: {"components": [...], "paging": {...}}
+        components = data.get("components", [])
+        return len(components) > 0
