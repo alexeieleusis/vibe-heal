@@ -240,10 +240,15 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Supports file pattern filtering (e.g., `["*.py", "src/**/*.ts"]`)
 
 **`cli.py`**: Command-line interface with typer
-- `vibe-heal fix <file>` - main command
-- Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--verbose`
+- `vibe-heal fix <file>` - fix issues in a single file
+  - Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--verbose`
+- `vibe-heal cleanup` - clean up all modified files in current branch
+  - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--verbose`
+  - Creates temporary SonarQube project, runs analysis, fixes issues iteratively
+  - Displays per-file results with issues fixed counts
 - `vibe-heal config` - shows current configuration
-- Uses rich for beautiful terminal output
+- `vibe-heal version` - shows version information
+- Uses rich for beautiful terminal output with colors and formatting
 
 ### Critical Implementation Details
 
