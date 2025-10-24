@@ -174,8 +174,18 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 **`sonarqube/`**: Async HTTP client for SonarQube Web API
 - `SonarQubeClient.get_issues_for_file(file_path)` - uses `components` parameter for file-specific queries
+- `SonarQubeClient.create_project(key, name)` - creates new SonarQube project
+- `SonarQubeClient.delete_project(key)` - deletes SonarQube project
+- `SonarQubeClient.project_exists(key)` - checks if project exists
 - `SonarQubeIssue` model - supports both old and new SonarQube API formats
 - Uses `httpx` for async requests
+- `ProjectManager` - manages temporary project lifecycle for branch cleanup
+  - `create_temp_project(base_key, branch_name, user_email)` - creates uniquely named temp project
+  - Project key format: `{base_key}_{sanitized_email}_{sanitized_branch}`
+  - `delete_project(project_key)` - deletes temporary project
+  - `project_exists(project_key)` - checks project existence
+  - `_sanitize_identifier(value)` - sanitizes strings for project keys (alphanumeric + underscore, lowercase)
+  - `TempProjectMetadata` model - tracks created projects for cleanup
 
 **`processor/`**: Business logic for issue handling
 - Sorts issues by line number descending (fixes high line numbers first)
