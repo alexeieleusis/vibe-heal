@@ -43,6 +43,7 @@ See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 
 ## Features
 
+- ✅ **Branch cleanup**: Automatically fix all modified files in a branch before code review
 - ✅ Fetch SonarQube issues for any file
 - ✅ AI-powered issue fixing with **Claude Code** or **Aider**
 - ✅ **Enriched AI prompts** with full rule documentation and code context
@@ -115,6 +116,7 @@ EOF
 
 ### 4. Fix issues!
 
+**Option A: Fix a single file**
 ```bash
 # Test with dry-run first
 vibe-heal fix src/main.py --dry-run
@@ -124,6 +126,21 @@ vibe-heal fix src/main.py --max-issues 1
 
 # Fix all MAJOR and above issues
 vibe-heal fix src/main.py --min-severity MAJOR
+```
+
+**Option B: Clean up entire branch** (recommended before code review)
+```bash
+# Clean up all modified files in your branch
+vibe-heal cleanup
+
+# Clean up with custom base branch
+vibe-heal cleanup --base-branch develop
+
+# Clean up only Python files
+vibe-heal cleanup --pattern "*.py"
+
+# Clean up with more iterations per file
+vibe-heal cleanup --max-iterations 20
 ```
 
 ## Development Setup
@@ -234,11 +251,12 @@ vibe-heal/
 │   ├── sonarqube/       # SonarQube API client (✅ Complete)
 │   ├── ai_tools/        # AI tool integrations (✅ Claude Code + Aider complete)
 │   ├── processor/       # Issue processing logic (✅ Complete)
-│   ├── git/             # Git operations (✅ Complete)
+│   ├── git/             # Git operations & branch analysis (✅ Complete)
+│   ├── cleanup/         # Branch cleanup orchestration (✅ Complete)
 │   ├── cli.py           # Command-line interface (✅ Complete)
 │   ├── orchestrator.py  # Workflow orchestration (✅ Complete)
 │   └── models.py        # Top-level models (✅ Complete)
-├── tests/               # Comprehensive test suite (157 tests, 82% coverage)
+├── tests/               # Comprehensive test suite (275 tests, 85%+ coverage)
 └── docs/                # Documentation and development guides
 ```
 
