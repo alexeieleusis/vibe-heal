@@ -319,3 +319,104 @@ class TestSonarQubeClient:
             issues2 = await client.get_issues_for_file("src/utils.py")
             assert len(issues2) == 1
             assert route.calls[1].request.url.params["components"] == "my-project:src/utils.py"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_create_project_success(self, config: VibeHealConfig) -> None:
+        """Test successful project creation."""
+        route = respx.post("https://sonar.test.com/api/projects/create").mock(
+            return_value=httpx.Response(200, json={"project": {"key": "test-project"}})
+        )
+
+        async with SonarQubeClient(config) as client:
+            await client.create_project("test-project", "Test Project")
+
+        assert route.called
+        assert route.calls.last.request.url.params["project"] == "test-project"
+        assert route.calls.last.request.url.params["name"] == "Test Project"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_create_project_already_exists(self, config: VibeHealConfig) -> None:
+        """Test error when creating duplicate project."""
+        respx.post("https://sonar.test.com/api/projects/create").mock(
+            return_value=httpx.Response(400, text="Project already exists")
+        )
+
+        async with SonarQubeClient(config) as client:
+            with pytest.raises(SonarQubeAPIError, match="API request failed"):
+                await client.create_project("existing-project", "Existing")
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_delete_project_success(self, config: VibeHealConfig) -> None:
+        """Test successful project deletion."""
+        route = respx.post("https://sonar.test.com/api/projects/delete").mock(return_value=httpx.Response(204))
+
+        async with SonarQubeClient(config) as client:
+            await client.delete_project("test-project")
+
+        assert route.called
+        assert route.calls.last.request.url.params["project"] == "test-project"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_delete_project_not_found(self, config: VibeHealConfig) -> None:
+        """Test error when deleting non-existent project."""
+        respx.post("https://sonar.test.com/api/projects/delete").mock(
+            return_value=httpx.Response(404, text="Project not found")
+        )
+
+        async with SonarQubeClient(config) as client:
+            with pytest.raises(SonarQubeAPIError, match="API request failed"):
+                await client.delete_project("nonexistent-project")
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_project_exists_true(self, config: VibeHealConfig) -> None:
+        """Test checking existence of existing project."""
+        response_data = {
+            "components": [{"key": "test-project", "name": "Test Project"}],
+            "paging": {"pageIndex": 1, "pageSize": 100, "total": 1},
+        }
+        respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(200, json=response_data)
+        )
+
+        async with SonarQubeClient(config) as client:
+            exists = await client.project_exists("test-project")
+
+        assert exists is True
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_project_exists_false(self, config: VibeHealConfig) -> None:
+        """Test checking existence of non-existent project."""
+        response_data = {
+            "components": [],
+            "paging": {"pageIndex": 1, "pageSize": 100, "total": 0},
+        }
+        respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(200, json=response_data)
+        )
+
+        async with SonarQubeClient(config) as client:
+            exists = await client.project_exists("nonexistent-project")
+
+        assert exists is False
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_project_exists_query_params(self, config: VibeHealConfig) -> None:
+        """Test that project_exists uses correct query parameters."""
+        route = respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(
+                200, json={"components": [], "paging": {"pageIndex": 1, "pageSize": 100, "total": 0}}
+            )
+        )
+
+        async with SonarQubeClient(config) as client:
+            await client.project_exists("my-test-project")
+
+        assert route.called
+        assert route.calls.last.request.url.params["projects"] == "my-test-project"
