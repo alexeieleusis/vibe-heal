@@ -1,6 +1,7 @@
 """SonarQube analysis execution via sonar-scanner CLI."""
 
 import asyncio
+import logging
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 class AnalysisResult(BaseModel):
@@ -106,7 +108,9 @@ class AnalysisRunner:
 
             if not task_id:
                 console.print("[red]    Could not find task ID in scanner output[/red]")
-                console.print(f"[dim]    Scanner output (last 1000 chars):\n{scanner_output[-1000:]}[/dim]")
+                console.print("[dim]    See debug log for full scanner output[/dim]")
+                # Log full scanner output to debug log for troubleshooting
+                logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
                 return AnalysisResult(
                     success=False,
                     error_message="Could not extract task ID from scanner output",
