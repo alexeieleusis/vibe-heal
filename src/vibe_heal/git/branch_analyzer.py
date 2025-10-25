@@ -148,7 +148,7 @@ class BranchAnalyzer:
                 remote_branches = [ref.name.split("/", 1)[1] for ref in self.repo.remote().refs]
                 if branch in remote_branches:
                     return True
-            except Exception:  # noqa: S110
+            except GitCommandError:
                 # Cannot access default remote, assume branch doesn't exist
                 pass
 
