@@ -129,6 +129,6 @@ class ProjectManager:
             'fix_bug__123'
         """
         # Replace non-alphanumeric (except underscore) with underscore
-        sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", value)
+        sanitized = re.sub(r"\W", "_", value)
         # Convert to lowercase
         return sanitized.lower()
