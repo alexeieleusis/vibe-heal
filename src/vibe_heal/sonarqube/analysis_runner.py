@@ -5,10 +5,13 @@ import shutil
 from pathlib import Path
 
 from pydantic import BaseModel
+from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
+
+console = Console()
 
 
 class AnalysisResult(BaseModel):
@@ -76,6 +79,7 @@ class AnalysisRunner:
 
         # Execute scanner
         try:
+            console.print(f"[dim]    Executing: sonar-scanner (project: {project_key})[/dim]")
             result = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=str(project_dir),
@@ -83,33 +87,46 @@ class AnalysisRunner:
                 stderr=asyncio.subprocess.PIPE,
             )
 
+            console.print("[dim]    Waiting for scanner to complete...[/dim]")
             stdout, stderr = await result.communicate()
+            console.print(f"[dim]    Scanner finished with exit code: {result.returncode}[/dim]")
 
             if result.returncode != 0:
                 error_output = stderr.decode() if stderr else stdout.decode()
+                console.print(f"[red]    Scanner error: {error_output[:500]}[/red]")
                 return AnalysisResult(
                     success=False,
                     error_message=f"sonar-scanner failed with exit code {result.returncode}: {error_output}",
                 )
 
             # Extract task ID from scanner output
-            task_id = self._extract_task_id(stdout.decode())
+            scanner_output = stdout.decode()
+            console.print("[dim]    Extracting task ID from scanner output...[/dim]")
+            task_id = self._extract_task_id(scanner_output)
 
             if not task_id:
+                console.print("[red]    Could not find task ID in scanner output[/red]")
+                console.print(f"[dim]    Scanner output (last 1000 chars):\n{scanner_output[-1000:]}[/dim]")
                 return AnalysisResult(
                     success=False,
                     error_message="Could not extract task ID from scanner output",
                 )
 
+            console.print(f"[dim]    Task ID: {task_id}[/dim]")
+
             # Wait for analysis to complete on server
+            console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
             analysis_success = await self._wait_for_analysis(task_id, timeout=300)
 
             if not analysis_success:
+                console.print("[red]    Analysis timed out or failed on server[/red]")
                 return AnalysisResult(
                     success=False,
                     task_id=task_id,
                     error_message="Analysis timed out or failed on server",
                 )
+
+            console.print("[green]    ✓ Server-side analysis completed successfully[/green]")
 
             # Build dashboard URL
             dashboard_url = f"{self.config.sonarqube_url}/dashboard?id={project_key}"
@@ -181,6 +198,7 @@ class AnalysisRunner:
         """
         poll_interval = 2  # seconds between polls
         elapsed = 0
+        last_status = None
 
         while elapsed < timeout:
             try:
@@ -190,21 +208,29 @@ class AnalysisRunner:
                 task = data.get("task", {})
                 status = task.get("status")
 
+                # Only log status changes to reduce noise
+                if status != last_status:
+                    console.print(f"[dim]    Analysis status: {status}[/dim]")
+                    last_status = status
+
                 if status == "SUCCESS":
                     return True
                 if status in ("FAILED", "CANCELED"):
+                    console.print(f"[red]    Analysis failed with status: {status}[/red]")
                     return False
 
                 # Status is PENDING or IN_PROGRESS, keep waiting
                 await asyncio.sleep(poll_interval)
                 elapsed += poll_interval
 
-            except SonarQubeAPIError:
+            except SonarQubeAPIError as e:
+                console.print(f"[yellow]    Warning: API error while polling: {e}[/yellow]")
                 # API error, keep trying
                 await asyncio.sleep(poll_interval)
                 elapsed += poll_interval
 
         # Timeout reached
+        console.print(f"[red]    Timeout reached after {timeout} seconds[/red]")
         return False
 
     def _extract_task_id(self, scanner_output: str) -> str | None:
