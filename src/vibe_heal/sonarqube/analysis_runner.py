@@ -120,14 +120,23 @@ class AnalysisRunner:
 
             # Wait for analysis to complete on server
             console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
-            analysis_success = await self._wait_for_analysis(task_id, timeout=300)
-
-            if not analysis_success:
-                console.print("[red]    Analysis timed out or failed on server[/red]")
+            try:
+                async with asyncio.timeout(300):
+                    analysis_success = await self._wait_for_analysis(task_id)
+            except TimeoutError:
+                console.print("[red]    Analysis timed out after 300 seconds[/red]")
                 return AnalysisResult(
                     success=False,
                     task_id=task_id,
-                    error_message="Analysis timed out or failed on server",
+                    error_message="Analysis timed out after 300 seconds",
+                )
+
+            if not analysis_success:
+                console.print("[red]    Analysis failed on server[/red]")
+                return AnalysisResult(
+                    success=False,
+                    task_id=task_id,
+                    error_message="Analysis failed on server",
                 )
 
             console.print("[green]    ✓ Server-side analysis completed successfully[/green]")
@@ -190,21 +199,19 @@ class AnalysisRunner:
 
         return command
 
-    async def _wait_for_analysis(self, task_id: str, timeout: int = 300) -> bool:
+    async def _wait_for_analysis(self, task_id: str) -> bool:
         """Poll SonarQube for analysis completion.
 
         Args:
             task_id: Analysis task ID from scanner
-            timeout: Maximum seconds to wait (default: 300)
 
         Returns:
             True if analysis succeeded, False if failed or timed out
         """
         poll_interval = 2  # seconds between polls
-        elapsed = 0
         last_status = None
 
-        while elapsed < timeout:
+        while True:
             try:
                 # Query task status via API
                 data = await self.client._request("GET", "/api/ce/task", params={"id": task_id})
@@ -225,17 +232,11 @@ class AnalysisRunner:
 
                 # Status is PENDING or IN_PROGRESS, keep waiting
                 await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
 
             except SonarQubeAPIError as e:
                 console.print(f"[yellow]    Warning: API error while polling: {e}[/yellow]")
                 # API error, keep trying
                 await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-
-        # Timeout reached
-        console.print(f"[red]    Timeout reached after {timeout} seconds[/red]")
-        return False
 
     def _extract_task_id(self, scanner_output: str) -> str | None:
         """Extract task ID from sonar-scanner output.

@@ -153,7 +153,7 @@ class TestWaitForAnalysis:
         """Test when analysis succeeds on first poll."""
         mock_client._request.return_value = {"task": {"status": "SUCCESS"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=10)
+        result = await analysis_runner._wait_for_analysis("test-task-id")
 
         assert result is True
         mock_client._request.assert_called_once()
@@ -170,7 +170,7 @@ class TestWaitForAnalysis:
             {"task": {"status": "SUCCESS"}},
         ]
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=10)
+        result = await analysis_runner._wait_for_analysis("test-task-id")
 
         assert result is True
         assert mock_client._request.call_count == 3
@@ -180,7 +180,7 @@ class TestWaitForAnalysis:
         """Test when analysis fails."""
         mock_client._request.return_value = {"task": {"status": "FAILED"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=10)
+        result = await analysis_runner._wait_for_analysis("test-task-id")
 
         assert result is False
 
@@ -189,19 +189,22 @@ class TestWaitForAnalysis:
         """Test when analysis is canceled."""
         mock_client._request.return_value = {"task": {"status": "CANCELED"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=10)
+        result = await analysis_runner._wait_for_analysis("test-task-id")
 
         assert result is False
 
     @pytest.mark.asyncio
     async def test_analysis_timeout(self, analysis_runner: AnalysisRunner, mock_client: AsyncMock) -> None:
         """Test when analysis times out."""
+        import asyncio
+
         # Always return IN_PROGRESS to simulate timeout
         mock_client._request.return_value = {"task": {"status": "IN_PROGRESS"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=5)
-
-        assert result is False
+        # Use timeout context manager as the caller would
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.1):  # Very short timeout for test
+                await analysis_runner._wait_for_analysis("test-task-id")
 
     @pytest.mark.asyncio
     async def test_analysis_api_error_recovers(self, analysis_runner: AnalysisRunner, mock_client: AsyncMock) -> None:
@@ -212,7 +215,7 @@ class TestWaitForAnalysis:
             {"task": {"status": "SUCCESS"}},
         ]
 
-        result = await analysis_runner._wait_for_analysis("test-task-id", timeout=10)
+        result = await analysis_runner._wait_for_analysis("test-task-id")
 
         assert result is True
         assert mock_client._request.call_count == 2
@@ -308,8 +311,8 @@ INFO: Analysis total time: 10.234 s
         assert "Could not extract task ID" in result.error_message
 
     @pytest.mark.asyncio
-    async def test_analysis_timeout_on_server(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
-        """Test when analysis times out on SonarQube server."""
+    async def test_analysis_failed_on_server(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        """Test when analysis fails on SonarQube server."""
         scanner_output = b"""
 INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=AY123
 """
@@ -331,7 +334,41 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
 
         assert result.success is False
         assert result.task_id == "AY123"
-        assert "timed out or failed" in result.error_message
+        assert "failed on server" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_analysis_timeout_on_server(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        """Test when analysis times out on SonarQube server."""
+        import asyncio
+
+        scanner_output = b"""
+INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=AY123
+"""
+
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.communicate = AsyncMock(return_value=(scanner_output, b""))
+
+        # Mock _wait_for_analysis to sleep forever (simulating timeout)
+        async def wait_forever(task_id: str) -> bool:
+            await asyncio.sleep(1000)
+            return True
+
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+            patch.object(analysis_runner, "_wait_for_analysis", side_effect=wait_forever),
+            patch("asyncio.timeout", return_value=asyncio.timeout(0.1)),  # Very short timeout
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="test-key",
+                project_name="Test Project",
+                project_dir=tmp_path,
+            )
+
+        assert result.success is False
+        assert result.task_id == "AY123"
+        assert "timed out after 300 seconds" in result.error_message
 
     @pytest.mark.asyncio
     async def test_subprocess_exception(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
