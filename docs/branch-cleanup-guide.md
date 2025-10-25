@@ -17,6 +17,9 @@ Use `vibe-heal cleanup` when:
 
 1. **Analyzes branch**: Compares current branch against base branch (default: `origin/main`)
 2. **Creates temporary project**: Creates a unique SonarQube project for analysis
+   - Project naming format: `{base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}`
+   - Timestamp format: `yymmdd-hhmm` (e.g., `251024-1630` for October 24, 2025 at 4:30 PM UTC)
+   - Example: `my-project_user_example_com_feature_new_api_251024-1630`
 3. **Runs analysis**: Analyzes all modified files using `sonar-scanner`
 4. **Fixes issues iteratively**: For each file:
    - Runs SonarQube analysis
