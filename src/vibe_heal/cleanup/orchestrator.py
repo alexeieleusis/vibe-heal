@@ -75,6 +75,7 @@ class CleanupOrchestrator:
         base_branch: str = "origin/main",
         max_iterations: int = 10,
         file_patterns: list[str] | None = None,
+        verbose: bool = False,
     ) -> CleanupResult:
         """Clean up all modified files in current branch.
 
@@ -175,12 +176,21 @@ class CleanupOrchestrator:
                 console.print(f"[dim]Analysis completed. Dashboard: {analysis_result.dashboard_url}[/dim]")
 
                 # Check if any modified files have fixable issues
+                # CRITICAL: Override project key in BOTH config and client.config to use temp project!
+                # The client was created with the original config, so we must override both references.
+                original_project_key = self.config.sonarqube_project_key
+                self.config.sonarqube_project_key = temp_project.project_key
+                self.client.config.sonarqube_project_key = temp_project.project_key
+
                 total_fixable_issues = 0
                 files_with_issues: list[Path] = []
 
                 for file_path in modified_files:
                     issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
                     fixable_issues = [issue for issue in issues if issue.is_fixable]
+
+                    if verbose and issues:
+                        console.print(f"[dim]  {file_path}: {len(issues)} total, {len(fixable_issues)} fixable[/dim]")
 
                     if fixable_issues:
                         files_with_issues.append(file_path)
@@ -201,7 +211,8 @@ class CleanupOrchestrator:
                     issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
                     fixable_issues = [issue for issue in issues if issue.is_fixable]
 
-                    # Use existing orchestrator to fix file
+                    # Fix file using existing orchestrator
+                    # Note: Config override already done at iteration level
                     orchestrator = VibeHealOrchestrator(config=self.config)
 
                     fix_summary = await orchestrator.fix_file(
@@ -225,6 +236,10 @@ class CleanupOrchestrator:
                         if fix_summary.has_failures
                         else None,
                     )
+
+                # Restore original project key for next iteration
+                self.config.sonarqube_project_key = original_project_key
+                self.client.config.sonarqube_project_key = original_project_key
 
                 # Wait before next iteration to let SonarQube process commits
                 if iteration < max_iterations - 1:  # Don't wait after last iteration
@@ -258,10 +273,12 @@ class CleanupOrchestrator:
             # Always cleanup temporary project
             if temp_project:
                 try:
+                    console.print(f"[dim]Deleting temporary project: {temp_project.project_key}[/dim]")
                     await self.project_manager.delete_project(temp_project.project_key)
+                    console.print("[green]✓ Temporary project deleted[/green]")
                 except Exception as e:
                     # Log but don't fail the operation if cleanup fails
-                    # The main operation result should still be returned
+                    console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
                     _ = e  # Suppress unused variable warning
 
     def _filter_files(
