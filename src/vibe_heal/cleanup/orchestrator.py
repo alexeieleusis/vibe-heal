@@ -70,7 +70,7 @@ class CleanupOrchestrator:
         self.branch_analyzer = BranchAnalyzer(Path.cwd())
         self.git_manager = GitManager(Path.cwd())
 
-    async def cleanup_branch(
+    async def cleanup_branch(  # noqa: C901
         self,
         base_branch: str = "origin/main",
         max_iterations: int = 10,
@@ -81,13 +81,16 @@ class CleanupOrchestrator:
         Workflow:
         1. Analyze branch to get modified files
         2. Create temporary SonarQube project
-        3. Run analysis on project
-        4. Fix issues for each file iteratively
-        5. Delete temporary project
+        3. Loop (max_iterations times):
+           - Run full repo analysis
+           - Get issues for all modified files
+           - If no issues, break
+           - Fix all modified files (one pass)
+        4. Delete temporary project
 
         Args:
             base_branch: Base branch to compare against (default: origin/main)
-            max_iterations: Maximum analysis iterations per file (default: 10)
+            max_iterations: Maximum analysis iterations for the entire branch (default: 10)
             file_patterns: Optional list of glob patterns to filter files
 
         Returns:
@@ -139,35 +142,97 @@ class CleanupOrchestrator:
             )
             console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
 
-            # Step 3: Run initial analysis on entire project
-            console.print("\n[dim]Running SonarQube analysis...[/dim]")
-            analysis_result = await self.analysis_runner.run_analysis(
-                project_key=temp_project.project_key,
-                project_name=temp_project.project_name,
-                project_dir=Path.cwd(),
-            )
+            # Step 3: Iterative fix loop
+            # Run analysis and fix all files until no issues remain or max iterations reached
+            analysis_result: AnalysisResult | None = None
 
-            if not analysis_result.success:
-                console.print(f"[red]Analysis failed: {analysis_result.error_message}[/red]")
-                return CleanupResult(
-                    success=False,
-                    files_processed=[],
-                    temp_project=temp_project,
-                    analysis_result=analysis_result,
-                    error_message=f"Initial analysis failed: {analysis_result.error_message}",
-                )
+            # Initialize file results tracking
+            file_results_map: dict[Path, FileCleanupResult] = {
+                f: FileCleanupResult(file_path=f, issues_fixed=0, success=True) for f in modified_files
+            }
 
-            console.print(f"[dim]Analysis completed successfully. Dashboard: {analysis_result.dashboard_url}[/dim]")
+            for iteration in range(max_iterations):
+                console.print(f"\n[bold]Iteration {iteration + 1}/{max_iterations}[/bold]")
 
-            # Step 4: Fix issues for each modified file
-            for file_path in modified_files:
-                file_result = await self._cleanup_file(
-                    file_path=file_path,
+                # Run full repo analysis
+                console.print("[dim]Running SonarQube analysis on full repository...[/dim]")
+                analysis_result = await self.analysis_runner.run_analysis(
                     project_key=temp_project.project_key,
                     project_name=temp_project.project_name,
-                    max_iterations=max_iterations,
+                    project_dir=Path.cwd(),
                 )
-                files_processed.append(file_result)
+
+                if not analysis_result.success:
+                    console.print(f"[red]Analysis failed: {analysis_result.error_message}[/red]")
+                    return CleanupResult(
+                        success=False,
+                        files_processed=list(file_results_map.values()),
+                        temp_project=temp_project,
+                        analysis_result=analysis_result,
+                        error_message=f"Analysis failed at iteration {iteration + 1}: {analysis_result.error_message}",
+                    )
+
+                console.print(f"[dim]Analysis completed. Dashboard: {analysis_result.dashboard_url}[/dim]")
+
+                # Check if any modified files have fixable issues
+                total_fixable_issues = 0
+                files_with_issues: list[Path] = []
+
+                for file_path in modified_files:
+                    issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
+                    fixable_issues = [issue for issue in issues if issue.is_fixable]
+
+                    if fixable_issues:
+                        files_with_issues.append(file_path)
+                        total_fixable_issues += len(fixable_issues)
+                        console.print(f"[dim]  {file_path}: {len(fixable_issues)} fixable issues[/dim]")
+
+                if total_fixable_issues == 0:
+                    console.print("[green]✓ No fixable issues remaining![/green]")
+                    break
+
+                console.print(f"[dim]Total fixable issues across all files: {total_fixable_issues}[/dim]")
+
+                # Fix all files with issues (one pass)
+                for file_path in files_with_issues:
+                    console.print(f"\n[dim]Fixing {file_path}...[/dim]")
+
+                    # Get issues for this file
+                    issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
+                    fixable_issues = [issue for issue in issues if issue.is_fixable]
+
+                    # Use existing orchestrator to fix file
+                    orchestrator = VibeHealOrchestrator(config=self.config)
+
+                    fix_summary = await orchestrator.fix_file(
+                        file_path=str(file_path),
+                        max_issues=len(fixable_issues),
+                        min_severity=None,
+                        dry_run=False,
+                    )
+
+                    console.print(
+                        f"[dim]  Fixed: {fix_summary.fixed}, Failed: {fix_summary.failed}, Skipped: {fix_summary.skipped}[/dim]"
+                    )
+
+                    # Update file results
+                    current_result = file_results_map[file_path]
+                    file_results_map[file_path] = FileCleanupResult(
+                        file_path=file_path,
+                        issues_fixed=current_result.issues_fixed + fix_summary.fixed,
+                        success=current_result.success and not fix_summary.has_failures,
+                        error_message=f"Fixes failed at iteration {iteration + 1}"
+                        if fix_summary.has_failures
+                        else None,
+                    )
+
+                # Wait before next iteration to let SonarQube process commits
+                if iteration < max_iterations - 1:  # Don't wait after last iteration
+                    console.print("[dim]Waiting for SonarQube to process changes...[/dim]")
+                    await asyncio.sleep(5)
+
+            # Convert file results map to list
+            files_processed = list(file_results_map.values())
 
             # Calculate total issues fixed
             total_issues_fixed = sum(f.issues_fixed for f in files_processed)
@@ -198,118 +263,6 @@ class CleanupOrchestrator:
                     # Log but don't fail the operation if cleanup fails
                     # The main operation result should still be returned
                     _ = e  # Suppress unused variable warning
-
-    async def _cleanup_file(
-        self,
-        file_path: Path,
-        project_key: str,
-        project_name: str,
-        max_iterations: int,
-    ) -> FileCleanupResult:
-        """Clean up issues in a single file iteratively.
-
-        Runs analysis and fixes issues until no more issues remain or max iterations reached.
-
-        Args:
-            file_path: Path to file to clean up
-            project_key: Temporary project key
-            project_name: Temporary project name
-            max_iterations: Maximum number of iterations
-
-        Returns:
-            FileCleanupResult with fix details
-        """
-        total_fixed = 0
-
-        try:
-            console.print(f"\n[dim]Processing {file_path}...[/dim]")
-
-            for iteration in range(max_iterations):
-                console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
-
-                # Run analysis for this specific file
-                analysis_result = await self.analysis_runner.run_analysis(
-                    project_key=project_key,
-                    project_name=project_name,
-                    project_dir=Path.cwd(),
-                    sources=[file_path],  # Optimize: analyze only this file
-                )
-
-                if not analysis_result.success:
-                    console.print(f"[red]  Analysis failed at iteration {iteration + 1}[/red]")
-                    return FileCleanupResult(
-                        file_path=file_path,
-                        issues_fixed=total_fixed,
-                        success=False,
-                        error_message=f"Analysis failed at iteration {iteration + 1}: {analysis_result.error_message}",
-                    )
-
-                # Get issues for this file from SonarQube
-                console.print("[dim]  Fetching issues from SonarQube...[/dim]")
-                issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
-                console.print(f"[dim]  Found {len(issues)} total issues[/dim]")
-
-                # Filter fixable issues
-                fixable_issues = [issue for issue in issues if issue.is_fixable]
-                console.print(f"[dim]  {len(fixable_issues)} fixable issues[/dim]")
-
-                if not fixable_issues:
-                    # No more issues to fix
-                    console.print(f"[green]  ✓ No more fixable issues (fixed {total_fixed} total)[/green]")
-                    return FileCleanupResult(
-                        file_path=file_path,
-                        issues_fixed=total_fixed,
-                        success=True,
-                    )
-
-                # Use existing orchestrator to fix file
-                # This reuses all the existing logic from the fix command
-                console.print(f"[dim]  Invoking AI tool to fix {len(fixable_issues)} issues...[/dim]")
-                orchestrator = VibeHealOrchestrator(config=self.config)
-
-                # Fix the file (will handle all issues in reverse line order)
-                fix_summary = await orchestrator.fix_file(
-                    file_path=str(file_path),
-                    max_issues=len(fixable_issues),
-                    min_severity=None,  # Fix all severities
-                    dry_run=False,
-                )
-
-                console.print(
-                    f"[dim]  Fixed: {fix_summary.fixed}, Failed: {fix_summary.failed}, Skipped: {fix_summary.skipped}[/dim]"
-                )
-
-                # Check if any fixes failed
-                if fix_summary.has_failures:
-                    console.print(f"[red]  Fix failed at iteration {iteration + 1}[/red]")
-                    return FileCleanupResult(
-                        file_path=file_path,
-                        issues_fixed=total_fixed,
-                        success=False,
-                        error_message=f"Fix failed at iteration {iteration + 1}: {fix_summary.failed} fixes failed",
-                    )
-
-                # Track how many issues were fixed this iteration
-                total_fixed += fix_summary.fixed
-                console.print(f"[dim]  Total fixed so far: {total_fixed}[/dim]")
-
-                # Wait a bit before next analysis to let SonarQube process
-                await asyncio.sleep(2)
-
-            # Reached max iterations
-            return FileCleanupResult(
-                file_path=file_path,
-                issues_fixed=total_fixed,
-                success=True,
-            )
-
-        except Exception as e:
-            return FileCleanupResult(
-                file_path=file_path,
-                issues_fixed=total_fixed,
-                success=False,
-                error_message=f"Cleanup failed: {e}",
-            )
 
     def _filter_files(
         self,
