@@ -283,3 +283,26 @@ class SonarQubeClient:
         # Response format: {"components": [...], "paging": {...}}
         components = data.get("components", [])
         return len(components) > 0
+
+    async def get_project_analyses_count(self, project_key: str) -> int:
+        """Get the number of analyses run for a project.
+
+        Args:
+            project_key: Project key to check
+
+        Returns:
+            Number of analyses run on this project
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        params = {
+            "project": project_key,
+        }
+
+        data = await self._request("GET", "/api/project_analyses/search", params=params)
+
+        # Response format: {"analyses": [...], "paging": {...}}
+        analyses = data.get("analyses", [])
+        return len(analyses)

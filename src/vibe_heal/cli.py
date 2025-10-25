@@ -216,6 +216,7 @@ def cleanup(
                     base_branch=base_branch,
                     max_iterations=max_iterations,
                     file_patterns=file_patterns,
+                    verbose=verbose,
                 )
 
                 _display_cleanup_results(result)
