@@ -42,7 +42,8 @@ class ProjectManager:
     ) -> TempProjectMetadata:
         """Create temporary project for branch analysis.
 
-        Project key/name format: {base_key}_{sanitized_email}_{sanitized_branch}
+        Project key/name format: {base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}
+        Timestamp format: yymmdd-hhmm
         Sanitization: replace non-alphanumeric with underscore, lowercase.
 
         Args:
@@ -60,8 +61,11 @@ class ProjectManager:
         sanitized_email = self._sanitize_identifier(user_email)
         sanitized_branch = self._sanitize_identifier(branch_name)
 
+        # Generate timestamp in yymmdd-hhmm format
+        timestamp = datetime.now(timezone.utc).strftime("%y%m%d-%H%M")
+
         # Build project key and name
-        project_key = f"{base_key}_{sanitized_email}_{sanitized_branch}"
+        project_key = f"{base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}"
         project_name = project_key  # Use same value for both
 
         # Create project via API

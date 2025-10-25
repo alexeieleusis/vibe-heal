@@ -181,7 +181,9 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - Uses `httpx` for async requests
 - `ProjectManager` - manages temporary project lifecycle for branch cleanup
   - `create_temp_project(base_key, branch_name, user_email)` - creates uniquely named temp project
-  - Project key format: `{base_key}_{sanitized_email}_{sanitized_branch}`
+  - Project key format: `{base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}`
+  - Timestamp format: `yymmdd-hhmm` (e.g., `251024-1630`)
+  - Example: `my-project_user_example_com_feature_api_251024-1630`
   - `delete_project(project_key)` - deletes temporary project
   - `project_exists(project_key)` - checks project existence
   - `_sanitize_identifier(value)` - sanitizes strings for project keys (alphanumeric + underscore, lowercase)

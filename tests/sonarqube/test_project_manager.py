@@ -47,13 +47,22 @@ class TestCreateTempProject:
 
         metadata = await project_manager.create_temp_project(base_key, branch_name, user_email)
 
-        # Verify project was created with sanitized key
-        expected_key = "my_project_user_example_com_feature_new_api"
-        mock_client.create_project.assert_called_once_with(expected_key, expected_key)
+        # Verify project key has expected format with timestamp
+        expected_prefix = "my_project_user_example_com_feature_new_api_"
+        assert metadata.project_key.startswith(expected_prefix)
+
+        # Extract and verify timestamp format (yymmdd-hhmm)
+        timestamp = metadata.project_key[len(expected_prefix) :]
+        assert len(timestamp) == 11  # 6 digits + dash + 4 digits = 11 chars
+        assert timestamp[6] == "-"
+        assert timestamp[:6].isdigit()  # yymmdd
+        assert timestamp[7:].isdigit()  # hhmm
+
+        # Verify project was created with the generated key
+        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_key)
 
         # Verify metadata
-        assert metadata.project_key == expected_key
-        assert metadata.project_name == expected_key
+        assert metadata.project_name == metadata.project_key
         assert metadata.base_project_key == base_key
         assert metadata.branch_name == branch_name
         assert metadata.user_email == user_email
@@ -74,9 +83,11 @@ class TestCreateTempProject:
 
         metadata = await project_manager.create_temp_project("project", "main", "user+tag@example.co.uk")
 
-        expected_key = "project_user_tag_example_co_uk_main"
-        assert metadata.project_key == expected_key
-        mock_client.create_project.assert_called_once_with(expected_key, expected_key)
+        # Check prefix without timestamp
+        expected_prefix = "project_user_tag_example_co_uk_main_"
+        assert metadata.project_key.startswith(expected_prefix)
+        # Verify project was created with the generated key (including timestamp)
+        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_key)
 
     @pytest.mark.asyncio
     async def test_create_temp_project_sanitizes_branch(
@@ -94,8 +105,9 @@ class TestCreateTempProject:
 
         for branch, expected_sanitized in test_branches:
             metadata = await project_manager.create_temp_project("proj", branch, "user@test.com")
-            expected_key = f"proj_user_test_com_{expected_sanitized}"
-            assert metadata.project_key == expected_key
+            # Check prefix without timestamp
+            expected_prefix = f"proj_user_test_com_{expected_sanitized}_"
+            assert metadata.project_key.startswith(expected_prefix)
 
     @pytest.mark.asyncio
     async def test_create_temp_project_api_error(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
