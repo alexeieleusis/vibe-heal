@@ -580,7 +580,6 @@ cleanup:
 
 ## See Also
 
-- [Configuration Guide](../README.md#configuration)
-- [Fix Command Documentation](../README.md#quick-start)
 - [Architecture Documentation](ARCHITECTURE.md)
 - [CI/CD Integration Examples](#cicd-integration)
+- [Project Home](index.md)

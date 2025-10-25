@@ -9,6 +9,7 @@ copyright: Maintained by <a href="https://alexeieleusis.com">alexeieleusis</a>.
 
 nav:
   - Home: index.md
+  - Branch Cleanup Guide: branch-cleanup-guide.md
   - Architecture: ARCHITECTURE.md
   - Roadmap: ROADMAP.md
   - API Reference: modules.md
@@ -22,6 +23,8 @@ nav:
     - Phase 5 - Git: phases/PHASE_5_GIT.md
     - Phase 6 - CLI: phases/PHASE_6_CLI.md
     - Phase 7 - Safety: phases/PHASE_7_SAFETY.md
+  - Feature Requests:
+    - Branch Cleanup: feature-requests/branch-cleanup.md
 plugins:
   - search
   - mkdocstrings:
