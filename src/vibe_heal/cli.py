@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from vibe_heal import __version__
-from vibe_heal.ai_tools.base import AIToolType
+from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
 from vibe_heal.config import ConfigurationError, VibeHealConfig
@@ -133,6 +133,37 @@ def _display_cleanup_results(result: CleanupResult) -> None:
     console.print("\n[green]✨ Branch cleanup complete![/green]")
 
 
+async def _run_cleanup(
+    config: VibeHealConfig,
+    ai_tool_instance: AITool,
+    base_branch: str,
+    max_iterations: int,
+    file_patterns: list[str] | None,
+    verbose: bool,
+) -> None:
+    """Run branch cleanup workflow.
+
+    Args:
+        config: Configuration object
+        ai_tool_instance: AI tool instance to use for fixing
+        base_branch: Base branch to compare against
+        max_iterations: Maximum fix iterations per file
+        file_patterns: Optional file patterns to filter
+        verbose: Enable verbose output
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = CleanupOrchestrator(config, client, ai_tool_instance)
+
+        result = await orchestrator.cleanup_branch(
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+            verbose=verbose,
+        )
+
+        _display_cleanup_results(result)
+
+
 @app.command()
 def cleanup(
     base_branch: str = typer.Option(
@@ -207,21 +238,17 @@ def cleanup(
             console.print(f"[red]{tool_type.display_name} is not available[/red]")
             sys.exit(1)
 
-        # Run cleanup with async context manager for client
-        async def run_cleanup() -> None:
-            async with SonarQubeClient(config) as client:
-                orchestrator = CleanupOrchestrator(config, client, ai_tool_instance)
-
-                result = await orchestrator.cleanup_branch(
-                    base_branch=base_branch,
-                    max_iterations=max_iterations,
-                    file_patterns=file_patterns,
-                    verbose=verbose,
-                )
-
-                _display_cleanup_results(result)
-
-        asyncio.run(run_cleanup())
+        # Run cleanup
+        asyncio.run(
+            _run_cleanup(
+                config=config,
+                ai_tool_instance=ai_tool_instance,
+                base_branch=base_branch,
+                max_iterations=max_iterations,
+                file_patterns=file_patterns,
+                verbose=verbose,
+            )
+        )
 
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
