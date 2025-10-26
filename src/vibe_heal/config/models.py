@@ -1,7 +1,7 @@
 """Configuration models."""
 
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,6 +66,38 @@ class VibeHealConfig(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    def __init__(self, env_file: str | Path | None = None, **kwargs: Any) -> None:
+        """Initialize configuration.
+
+        Args:
+            env_file: Optional path to custom env file
+            **kwargs: Additional configuration values
+        """
+        if env_file is not None:
+            # Override model_config with custom env file
+            env_path = Path(env_file)
+            if not env_path.exists():
+                raise InvalidConfigurationError(f"Environment file not found: {env_file}")
+
+            # Create new settings config with custom env file
+            custom_config = SettingsConfigDict(
+                env_file=env_path,
+                env_file_encoding="utf-8",
+                env_prefix="",
+                case_sensitive=False,
+                extra="ignore",
+            )
+            # Temporarily override model_config
+            original_config = self.model_config
+            self.__class__.model_config = custom_config
+            try:
+                super().__init__(**kwargs)
+            finally:
+                # Restore original config
+                self.__class__.model_config = original_config
+        else:
+            super().__init__(**kwargs)
 
     @field_validator("ai_tool", mode="before")
     @classmethod
