@@ -171,6 +171,8 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - `VibeHealConfig` model with validation
 - Supports token auth (preferred) or basic auth
 - AI tool auto-detection if not specified
+- Supports custom env file via `env_file` parameter in constructor
+- CLI commands accept `--env-file` option to override default config file
 
 **`sonarqube/`**: Async HTTP client for SonarQube Web API
 - `SonarQubeClient.get_issues_for_file(file_path)` - uses `components` parameter for file-specific queries
@@ -243,12 +245,13 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 **`cli.py`**: Command-line interface with typer
 - `vibe-heal fix <file>` - fix issues in a single file
-  - Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--verbose`
+  - Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--env-file`, `--verbose`
 - `vibe-heal cleanup` - clean up all modified files in current branch
-  - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--verbose`
+  - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--env-file`, `--verbose`
   - Creates temporary SonarQube project, runs analysis, fixes issues iteratively
   - Displays per-file results with issues fixed counts
 - `vibe-heal config` - shows current configuration
+  - Flags: `--env-file`
 - `vibe-heal version` - shows version information
 - Uses rich for beautiful terminal output with colors and formatting
 
@@ -268,6 +271,8 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 ### Configuration (.env.vibeheal)
 
+By default, configuration is loaded from `.env.vibeheal` or `.env` in the current directory.
+
 ```bash
 SONARQUBE_URL=https://sonar.example.com
 SONARQUBE_TOKEN=your_token  # Preferred
@@ -278,6 +283,14 @@ SONARQUBE_PROJECT_KEY=your_project
 # Context enrichment (optional, enhances AI fix quality)
 # CODE_CONTEXT_LINES=5  # Lines before/after issue to show AI (default: 5)
 # INCLUDE_RULE_DESCRIPTION=true  # Include full rule docs in prompts (default: true)
+```
+
+**Custom environment files**: All CLI commands support `--env-file` to specify a custom configuration file:
+
+```bash
+vibe-heal fix src/file.py --env-file .env.production
+vibe-heal cleanup --env-file ~/configs/project-a.env
+vibe-heal config --env-file .env.staging
 ```
 
 ### Development Workflow

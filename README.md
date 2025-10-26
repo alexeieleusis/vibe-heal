@@ -126,6 +126,9 @@ vibe-heal fix src/main.py --max-issues 1
 
 # Fix all MAJOR and above issues
 vibe-heal fix src/main.py --min-severity MAJOR
+
+# Use a custom environment file
+vibe-heal fix src/main.py --env-file .env.production
 ```
 
 **Option B: Clean up entire branch** (recommended before code review)
@@ -141,6 +144,9 @@ vibe-heal cleanup --pattern "*.py"
 
 # Clean up with more iterations per file
 vibe-heal cleanup --max-iterations 20
+
+# Use a custom environment file
+vibe-heal cleanup --env-file .env.production
 ```
 
 ## Development Setup
@@ -187,6 +193,10 @@ See [CLAUDE.md](CLAUDE.md) for detailed development commands and project structu
 
 ## Configuration
 
+### Default Configuration
+
+By default, vibe-heal looks for configuration in `.env.vibeheal` or `.env` in the current directory.
+
 Create a `.env.vibeheal` file with:
 
 ```bash
@@ -212,6 +222,27 @@ SONARQUBE_PROJECT_KEY=your_project_key
 # CODE_CONTEXT_LINES=5                        # Lines before/after issue to show AI (default: 5)
 # INCLUDE_RULE_DESCRIPTION=true               # Include full rule docs in prompts (default: true)
 ```
+
+### Custom Environment Files
+
+You can specify a custom environment file using the `--env-file` option:
+
+```bash
+# Use a different environment file for production SonarQube
+vibe-heal fix src/main.py --env-file .env.production
+
+# Use different configs for different projects
+vibe-heal cleanup --env-file ~/configs/project-a.env
+
+# View configuration from a specific file
+vibe-heal config --env-file .env.staging
+```
+
+This is useful for:
+- Managing multiple SonarQube projects
+- Switching between different environments (dev, staging, production)
+- Testing with different AI tools or configurations
+- CI/CD pipelines with environment-specific settings
 
 **Example configurations:**
 

@@ -125,6 +125,16 @@ vibe-heal cleanup --ai-tool claude-code
 vibe-heal cleanup --ai-tool aider
 ```
 
+### Use custom environment file
+
+```bash
+# Use a different environment file for production SonarQube
+vibe-heal cleanup --env-file .env.production
+
+# Use different configs for different projects
+vibe-heal cleanup --env-file ~/configs/project-a.env
+```
+
 ### Verbose output
 
 ```bash
