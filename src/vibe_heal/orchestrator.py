@@ -109,15 +109,7 @@ class VibeHealOrchestrator:
                 skipped=result.skipped_issues,
             )
 
-        # Step 4: Confirm with user
-        if not dry_run and not self._confirm_processing(len(result.issues_to_fix)):
-            self.console.print("[yellow]Cancelled by user[/yellow]")
-            return FixSummary(
-                total_issues=result.total_issues,
-                skipped=len(result.issues_to_fix),
-            )
-
-        # Step 5: Process each issue
+        # Step 4: Process each issue
         summary = await self._process_issues(
             result.issues_to_fix,
             file_path,
@@ -126,7 +118,7 @@ class VibeHealOrchestrator:
         summary.total_issues = result.total_issues
         summary.skipped = result.skipped_issues
 
-        # Step 6: Display summary
+        # Step 5: Display summary
         self._display_summary(summary, dry_run)
 
         return summary
@@ -160,21 +152,6 @@ class VibeHealOrchestrator:
         if not self.ai_tool.is_available():
             msg = f"{self.ai_tool.tool_type.display_name} is not available"
             raise RuntimeError(msg)
-
-    def _confirm_processing(self, issue_count: int) -> bool:
-        """Ask user to confirm processing.
-
-        Args:
-            issue_count: Number of issues to process
-
-        Returns:
-            True if user confirms
-        """
-        self.console.print(f"\n[bold yellow]About to process {issue_count} issue(s).[/bold yellow]")
-        self.console.print("[yellow]Each fix will be committed separately.[/yellow]")
-
-        response = input("Continue? [y/N]: ").strip().lower()
-        return response in ["y", "yes"]
 
     async def _fetch_source_lines(self, file_path: str) -> list | None:
         """Fetch source code lines for a file.
