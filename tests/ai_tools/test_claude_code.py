@@ -1,6 +1,7 @@
 """Tests for Claude Code AI tool."""
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -259,7 +260,7 @@ class TestClaudeCodeTool:
 
         # Track created temp files
         created_temp_files = []
-        original_mkstemp = mocker.MagicMock(wraps=__import__("tempfile").mkstemp)
+        original_mkstemp = mocker.MagicMock(wraps=tempfile.mkstemp)
 
         def track_mkstemp(*args, **kwargs):
             result = original_mkstemp(*args, **kwargs)
