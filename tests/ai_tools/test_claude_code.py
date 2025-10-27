@@ -260,14 +260,14 @@ class TestClaudeCodeTool:
 
         # Track created temp files
         created_temp_files = []
-        original_mkstemp = mocker.MagicMock(wraps=tempfile.mkstemp)
+        original_namedtempfile = tempfile.NamedTemporaryFile
 
-        def track_mkstemp(*args, **kwargs):
-            result = original_mkstemp(*args, **kwargs)
-            created_temp_files.append(result[1])
-            return result
+        def track_namedtempfile(*args, **kwargs):
+            temp = original_namedtempfile(*args, **kwargs)
+            created_temp_files.append(temp.name)
+            return temp
 
-        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+        mocker.patch("tempfile.NamedTemporaryFile", side_effect=track_namedtempfile)
 
         # Mock subprocess
         mock_process = mocker.AsyncMock()

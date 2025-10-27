@@ -2,13 +2,10 @@
 
 import asyncio
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
-
-import aiofiles
 
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
@@ -108,17 +105,16 @@ class ClaudeCodeTool(AITool):
         temp_file = None
         try:
             # Create temp file with the prompt
-            fd, temp_file = tempfile.mkstemp(suffix=".txt", text=True)
-            os.close(fd)  # Close the file descriptor immediately
-            async with aiofiles.open(temp_file, mode="w") as f:
-                await f.write(prompt)
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tf:
+                tf.write(prompt)
+                temp_file = tf.name
 
             # Build command with JSON output for structured parsing
             # Pass a simple prompt that references the temp file
             cmd = [
                 "claude",
                 "--print",
-                f"Please implement the changes specified in {temp_file}",
+                f'Please implement the changes specified in "{temp_file}"',
                 "--output-format",
                 "json",
                 "--permission-mode",
