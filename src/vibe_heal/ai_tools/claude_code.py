@@ -2,9 +2,13 @@
 
 import asyncio
 import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+import aiofiles
 
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
@@ -100,56 +104,71 @@ class ClaudeCodeTool(AITool):
         Returns:
             FixResult with outcome
         """
-        # Build command with JSON output for structured parsing
-        cmd = [
-            "claude",
-            "--print",
-            prompt,
-            "--output-format",
-            "json",
-            "--permission-mode",
-            "acceptEdits",
-            "--allowedTools",
-            "Edit,Read",
-        ]
-
-        # Execute command
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=Path.cwd(),
-        )
-
+        # Create a temporary file for the detailed instructions
+        temp_file = None
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout,
+            # Create temp file with the prompt
+            fd, temp_file = tempfile.mkstemp(suffix=".txt", text=True)
+            os.close(fd)  # Close the file descriptor immediately
+            async with aiofiles.open(temp_file, mode="w") as f:
+                await f.write(prompt)
+
+            # Build command with JSON output for structured parsing
+            # Pass a simple prompt that references the temp file
+            cmd = [
+                "claude",
+                "--print",
+                f"Please implement the changes specified in {temp_file}",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "acceptEdits",
+                "--allowedTools",
+                "Edit,Read",
+            ]
+
+            # Execute command
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=Path.cwd(),
             )
 
-            stdout_text = stdout.decode() if stdout else ""
-            stderr_text = stderr.decode() if stderr else ""
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout,
+                )
 
-            # Check if successful
-            if process.returncode == 0:
-                # Parse JSON response to extract information
-                files_modified = self._parse_modified_files(stdout_text, file_path)
+                stdout_text = stdout.decode() if stdout else ""
+                stderr_text = stderr.decode() if stderr else ""
 
+                # Check if successful
+                if process.returncode == 0:
+                    # Parse JSON response to extract information
+                    files_modified = self._parse_modified_files(stdout_text, file_path)
+
+                    return FixResult(
+                        success=True,
+                        files_modified=files_modified,
+                        ai_response=stdout_text,
+                    )
                 return FixResult(
-                    success=True,
-                    files_modified=files_modified,
+                    success=False,
+                    error_message=f"Claude failed with exit code {process.returncode}: {stderr_text}",
                     ai_response=stdout_text,
                 )
-            return FixResult(
-                success=False,
-                error_message=f"Claude failed with exit code {process.returncode}: {stderr_text}",
-                ai_response=stdout_text,
-            )
 
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            raise
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise
+
+        finally:
+            # Clean up temporary file
+            if temp_file and Path(temp_file).exists():
+                Path(temp_file).unlink()
 
     def _parse_modified_files(self, json_output: str, file_path: str) -> list[str]:
         """Parse JSON output to extract modified files.
