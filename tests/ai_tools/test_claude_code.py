@@ -1,6 +1,7 @@
 """Tests for Claude Code AI tool."""
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -237,6 +238,54 @@ class TestClaudeCodeTool:
         assert "--permission-mode" in args
         assert "acceptEdits" in args
         assert "--allowedTools" in args
+
+        # Verify prompt references a temp file
+        prompt_arg = args[2]  # The prompt is the 3rd argument after "claude" and "--print"
+        assert "Please implement the changes specified in" in prompt_arg
+        assert ".txt" in prompt_arg
+
+    @pytest.mark.asyncio
+    async def test_temp_file_cleanup(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+    ) -> None:
+        """Test that temporary file is cleaned up after execution."""
+        mocker.patch("shutil.which", return_value="/usr/local/bin/claude")
+
+        # Create a test file
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        # Track created temp files
+        created_temp_files = []
+        original_namedtempfile = tempfile.NamedTemporaryFile
+
+        def track_namedtempfile(*args, **kwargs):
+            temp = original_namedtempfile(*args, **kwargs)
+            created_temp_files.append(temp.name)
+            return temp
+
+        mocker.patch("tempfile.NamedTemporaryFile", side_effect=track_namedtempfile)
+
+        # Mock subprocess
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"{}", b"")
+        mock_process.returncode = 0
+
+        mocker.patch(
+            "asyncio.create_subprocess_exec",
+            return_value=mock_process,
+        )
+
+        tool = ClaudeCodeTool()
+        await tool.fix_issue(sample_issue, str(test_file))
+
+        # Verify temp file was created and then cleaned up
+        assert len(created_temp_files) == 1
+        temp_file_path = Path(created_temp_files[0])
+        assert not temp_file_path.exists()  # Should be deleted
 
     def test_custom_timeout(self) -> None:
         """Test that custom timeout is accepted."""
