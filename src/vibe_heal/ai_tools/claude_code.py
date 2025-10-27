@@ -87,6 +87,48 @@ class ClaudeCodeTool(AITool):
                 error_message=f"Error invoking Claude: {e}",
             )
 
+    async def fix_duplication(
+        self,
+        prompt: str,
+        file_path: str,
+    ) -> FixResult:
+        """Fix code duplication using Claude Code.
+
+        Args:
+            prompt: Detailed prompt describing the duplication
+            file_path: Path to the file containing the duplication
+
+        Returns:
+            Result of the fix attempt
+        """
+        if not self.is_available():
+            return FixResult(
+                success=False,
+                error_message="Claude CLI not found. Please install Claude Code first.",
+            )
+
+        # Verify file exists
+        if not Path(file_path).exists():
+            return FixResult(
+                success=False,
+                error_message=f"File not found: {file_path}",
+            )
+
+        # Invoke Claude with the duplication prompt
+        try:
+            result = await self._invoke_claude(prompt, file_path)
+            return result
+        except asyncio.TimeoutError:
+            return FixResult(
+                success=False,
+                error_message=f"Claude timed out after {self.timeout} seconds",
+            )
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_message=f"Error invoking Claude: {e}",
+            )
+
     async def _invoke_claude(
         self,
         prompt: str,

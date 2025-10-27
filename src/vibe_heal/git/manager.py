@@ -187,6 +187,51 @@ class GitManager:
             msg = f"Failed to create commit: {e}"
             raise GitOperationError(msg) from e
 
+    def create_commit(
+        self,
+        message: str,
+        files: list[str] | None = None,
+    ) -> str | None:
+        """Create a commit with a custom message.
+
+        If files is None, automatically detects and commits all modified files.
+
+        Args:
+            message: Commit message
+            files: List of files to commit, or None to auto-detect all modified files
+
+        Returns:
+            Commit SHA, or None if there were no changes to commit
+
+        Raises:
+            GitOperationError: If commit fails or no files to commit
+        """
+        # Auto-detect modified files if not provided
+        if files is None:
+            files = self.get_all_modified_files()
+
+        if not files:
+            msg = "No files to commit"
+            raise GitOperationError(msg)
+
+        try:
+            # Stage files
+            self.repo.index.add(files)
+
+            # Check if there are any changes to commit
+            if not self.repo.index.diff("HEAD"):
+                # No changes staged - return None to indicate no commit was created
+                return None
+
+            # Create commit
+            commit = self.repo.index.commit(message)
+
+            return commit.hexsha
+
+        except git.GitError as e:
+            msg = f"Failed to create commit: {e}"
+            raise GitOperationError(msg) from e
+
     def _create_commit_message(
         self,
         issue: SonarQubeIssue,

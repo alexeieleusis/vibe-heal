@@ -13,6 +13,7 @@ from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
 from vibe_heal.config import ConfigurationError, VibeHealConfig
+from vibe_heal.deduplication.orchestrator import DeduplicationOrchestrator
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.client import SonarQubeClient
 
@@ -95,6 +96,97 @@ def fix(
                 dry_run=dry_run,
                 max_issues=max_issues,
                 min_severity=min_severity,
+            )
+        )
+
+        # Exit with error if there were failures
+        if summary.has_failures:
+            sys.exit(1)
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+@app.command()
+def dedupe(
+    file_path: str = typer.Argument(..., help="Path to file to deduplicate"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview fixes without committing",
+    ),
+    max_duplications: int | None = typer.Option(
+        None,
+        "--max-duplications",
+        "-n",
+        help="Maximum number of duplication groups to fix",
+    ),
+    ai_tool: AIToolType | None = typer.Option(
+        None,
+        "--ai-tool",
+        help="AI tool to use (overrides config)",
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help="Path to custom environment file (default: .env.vibeheal or .env)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output",
+    ),
+) -> None:
+    """Remove code duplications in a file."""
+    setup_logging(verbose)
+
+    try:
+        # Load configuration
+        config = VibeHealConfig(env_file=env_file)
+
+        # Override AI tool if specified
+        if ai_tool:
+            config.ai_tool = ai_tool
+
+        # Initialize AI tool
+        if config.ai_tool:
+            tool_type = config.ai_tool
+            console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
+        else:
+            detected_tool = AIToolFactory.detect_available()
+            if not detected_tool:
+                console.print("[red]No AI tool found. Please install Claude Code or Aider.[/red]")
+                sys.exit(1)
+            tool_type = detected_tool
+            console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
+
+        ai_tool_instance = AIToolFactory.create(tool_type, config)
+
+        # Check AI tool is available
+        if not ai_tool_instance.is_available():
+            console.print(f"[red]{tool_type.display_name} is not available[/red]")
+            sys.exit(1)
+
+        # Create orchestrator
+        orchestrator = DeduplicationOrchestrator(
+            config=config,
+            ai_tool=ai_tool_instance,
+            console=console,
+        )
+
+        # Run deduplication
+        summary = asyncio.run(
+            orchestrator.dedupe_file(
+                file_path=file_path,
+                dry_run=dry_run,
+                max_duplications=max_duplications,
             )
         )
 
