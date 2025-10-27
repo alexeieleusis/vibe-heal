@@ -62,6 +62,11 @@ def fix(
         "--ai-tool",
         help="AI tool to use (overrides config)",
     ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help="Path to custom environment file (default: .env.vibeheal or .env)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -74,7 +79,7 @@ def fix(
 
     try:
         # Load configuration
-        config = VibeHealConfig()  # type: ignore[call-arg]
+        config = VibeHealConfig(env_file=env_file)
 
         # Override AI tool if specified
         if ai_tool:
@@ -189,6 +194,11 @@ def cleanup(
         "--ai-tool",
         help="AI tool to use (overrides config)",
     ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help="Path to custom environment file (default: .env.vibeheal or .env)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -205,7 +215,7 @@ def cleanup(
 
     try:
         # Load configuration
-        config = VibeHealConfig()  # type: ignore[call-arg]
+        config = VibeHealConfig(env_file=env_file)
 
         # Override AI tool if specified
         if ai_tool:
@@ -261,10 +271,16 @@ def cleanup(
 
 
 @app.command()
-def config() -> None:
+def config(
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help="Path to custom environment file (default: .env.vibeheal or .env)",
+    ),
+) -> None:
     """Show current configuration."""
     try:
-        cfg = VibeHealConfig()  # type: ignore[call-arg]
+        cfg = VibeHealConfig(env_file=env_file)
         console.print("[bold]Current Configuration:[/bold]\n")
         console.print(f"  SonarQube URL: {cfg.sonarqube_url}")
         console.print(f"  Project Key: {cfg.sonarqube_project_key}")

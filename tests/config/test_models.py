@@ -228,3 +228,85 @@ class TestVibeHealConfig:
 
         result = VibeHealConfig.find_env_file()
         assert result is None
+
+    def test_custom_env_file_path_str(self, tmp_path: Path) -> None:
+        """Test loading config from custom env file (string path)."""
+        # Create custom env file
+        custom_env = tmp_path / ".env.custom"
+        custom_env.write_text(
+            "SONARQUBE_URL=https://custom.example.com\n"
+            "SONARQUBE_TOKEN=custom-token\n"
+            "SONARQUBE_PROJECT_KEY=custom-project\n"
+        )
+
+        config = VibeHealConfig(env_file=str(custom_env))
+
+        assert config.sonarqube_url == "https://custom.example.com"
+        assert config.sonarqube_token == "custom-token"
+        assert config.sonarqube_project_key == "custom-project"
+
+    def test_custom_env_file_path_object(self, tmp_path: Path) -> None:
+        """Test loading config from custom env file (Path object)."""
+        # Create custom env file
+        custom_env = tmp_path / ".env.custom"
+        custom_env.write_text(
+            "SONARQUBE_URL=https://custom.example.com\n"
+            "SONARQUBE_TOKEN=custom-token\n"
+            "SONARQUBE_PROJECT_KEY=custom-project\n"
+        )
+
+        config = VibeHealConfig(env_file=custom_env)
+
+        assert config.sonarqube_url == "https://custom.example.com"
+        assert config.sonarqube_token == "custom-token"
+        assert config.sonarqube_project_key == "custom-project"
+
+    def test_custom_env_file_not_found(self, tmp_path: Path) -> None:
+        """Test that non-existent custom env file raises error."""
+        non_existent = tmp_path / ".env.nonexistent"
+
+        with pytest.raises(InvalidConfigurationError, match="Environment file not found"):
+            VibeHealConfig(env_file=non_existent)
+
+    def test_custom_env_file_overrides_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that custom env file takes precedence over default files."""
+        # Change to tmp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create default .env.vibeheal
+        default_env = tmp_path / ".env.vibeheal"
+        default_env.write_text(
+            "SONARQUBE_URL=https://default.example.com\n"
+            "SONARQUBE_TOKEN=default-token\n"
+            "SONARQUBE_PROJECT_KEY=default-project\n"
+        )
+
+        # Create custom env file
+        custom_env = tmp_path / ".env.custom"
+        custom_env.write_text(
+            "SONARQUBE_URL=https://custom.example.com\n"
+            "SONARQUBE_TOKEN=custom-token\n"
+            "SONARQUBE_PROJECT_KEY=custom-project\n"
+        )
+
+        # Custom env file should be used
+        config = VibeHealConfig(env_file=custom_env)
+
+        assert config.sonarqube_url == "https://custom.example.com"
+        assert config.sonarqube_token == "custom-token"
+        assert config.sonarqube_project_key == "custom-project"
+
+    def test_custom_env_file_with_ai_tool(self, tmp_path: Path) -> None:
+        """Test loading AI tool configuration from custom env file."""
+        # Create custom env file with AI tool setting
+        custom_env = tmp_path / ".env.custom"
+        custom_env.write_text(
+            "SONARQUBE_URL=https://custom.example.com\n"
+            "SONARQUBE_TOKEN=custom-token\n"
+            "SONARQUBE_PROJECT_KEY=custom-project\n"
+            "AI_TOOL=aider\n"
+        )
+
+        config = VibeHealConfig(env_file=custom_env)
+
+        assert config.ai_tool == AIToolType.AIDER
