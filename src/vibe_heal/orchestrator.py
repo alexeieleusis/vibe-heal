@@ -139,7 +139,7 @@ class VibeHealOrchestrator:
             dry_run: Whether in dry-run mode
 
         Raises:
-            RuntimeError: If not a Git repository, file has uncommitted changes, or AI tool unavailable
+            RuntimeError: If not a Git repository, working directory has uncommitted changes, or AI tool unavailable
             FileNotFoundError: If the specified file does not exist
         """
         # Check Git repository
@@ -152,10 +152,9 @@ class VibeHealOrchestrator:
             msg = f"File not found: {file_path}"
             raise FileNotFoundError(msg)
 
-        # Check file doesn't have uncommitted changes (unless dry-run)
-        if not dry_run and self.git_manager.has_uncommitted_changes(file_path):
-            msg = f"File '{file_path}' has uncommitted changes. Please commit or stash changes before fixing."
-            raise RuntimeError(msg)
+        # Check working directory is clean (no modified/staged files, untracked OK) unless dry-run
+        if not dry_run:
+            self.git_manager.require_clean_working_directory()
 
         # Check AI tool is available
         if not self.ai_tool.is_available():
@@ -261,9 +260,10 @@ class VibeHealOrchestrator:
             # Commit if not dry-run
             if not dry_run:
                 try:
+                    # Pass None to auto-detect all modified files
                     sha = self.git_manager.commit_fix(
                         issue,
-                        fix_result.files_modified,
+                        None,  # Auto-detect all modified files
                         self.ai_tool.tool_type,
                         rule=rule,
                     )

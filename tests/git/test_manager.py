@@ -352,6 +352,100 @@ class TestGitManagerCommit:
         # Repository should still be clean
         assert manager.is_clean()
 
+    def test_commit_fix_auto_detects_modified_files(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix auto-detects all modified files when files=None."""
+        manager = GitManager(git_repo)
+
+        # Create and commit a second file first
+        file2 = git_repo / "test2.py"
+        file2.write_text("print('original')")
+        manager.repo.index.add(["test2.py"])
+        manager.repo.index.commit("Add test2.py")
+
+        # Now modify both tracked files
+        (git_repo / "test.py").write_text("print('fixed 1')")
+        file2.write_text("print('fixed 2')")
+
+        # Commit fix with files=None to auto-detect
+        sha = manager.commit_fix(sample_issue, None, AIToolType.CLAUDE_CODE)
+
+        # Should create commit
+        assert sha is not None
+
+        # Both files should be in the commit
+        commit = manager.repo.head.commit
+        assert "test.py" in commit.stats.files
+        assert "test2.py" in commit.stats.files
+
+    def test_commit_fix_auto_detect_excludes_untracked(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix auto-detect excludes untracked files."""
+        manager = GitManager(git_repo)
+
+        # Modify tracked file
+        (git_repo / "test.py").write_text("print('fixed')")
+
+        # Create untracked file
+        (git_repo / "new_file.py").write_text("print('new')")
+
+        # Commit fix with files=None to auto-detect
+        sha = manager.commit_fix(sample_issue, None, AIToolType.CLAUDE_CODE)
+
+        # Should create commit
+        assert sha is not None
+
+        # Only tracked file should be in commit
+        commit = manager.repo.head.commit
+        assert "test.py" in commit.stats.files
+        assert "new_file.py" not in commit.stats.files
+
+    def test_commit_fix_message_includes_file_count(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix includes file count in message for multiple files."""
+        manager = GitManager(git_repo)
+
+        # Modify multiple files
+        (git_repo / "test.py").write_text("print('fixed 1')")
+        file2 = git_repo / "test2.py"
+        file2.write_text("print('fixed 2')")
+        file3 = git_repo / "test3.py"
+        file3.write_text("print('fixed 3')")
+
+        # Commit fix with multiple files
+        manager.commit_fix(sample_issue, ["test.py", "test2.py", "test3.py"], AIToolType.CLAUDE_CODE)
+
+        # Check commit message includes file count
+        commit = manager.repo.head.commit
+        assert "Files modified: 3" in commit.message
+
+    def test_commit_fix_message_no_file_count_for_single_file(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test commit_fix does not include file count for single file."""
+        manager = GitManager(git_repo)
+
+        # Modify single file
+        (git_repo / "test.py").write_text("print('fixed')")
+
+        # Commit fix with single file
+        manager.commit_fix(sample_issue, ["test.py"], AIToolType.CLAUDE_CODE)
+
+        # Check commit message does not include file count
+        commit = manager.repo.head.commit
+        assert "Files modified:" not in commit.message
+
 
 class TestGitManagerSafety:
     """Tests for safety checks."""
@@ -376,7 +470,7 @@ class TestGitManagerSafety:
         # Modify file
         (git_repo / "test.py").write_text("print('modified')")
 
-        with pytest.raises(DirtyWorkingDirectoryError, match="not clean"):
+        with pytest.raises(DirtyWorkingDirectoryError, match="uncommitted changes"):
             manager.require_clean_working_directory()
 
     def test_require_clean_working_directory_lists_files(
@@ -391,3 +485,111 @@ class TestGitManagerSafety:
 
         with pytest.raises(DirtyWorkingDirectoryError, match="test.py"):
             manager.require_clean_working_directory()
+
+    def test_require_clean_working_directory_allows_untracked_files(
+        self,
+        git_repo: Path,
+    ) -> None:
+        """Test require_clean_working_directory allows untracked files."""
+        manager = GitManager(git_repo)
+
+        # Create untracked file
+        (git_repo / "new_file.py").write_text("print('new')")
+
+        # Should not raise - untracked files are OK
+        manager.require_clean_working_directory()
+
+    def test_require_clean_working_directory_error_message_mentions_untracked_ok(
+        self,
+        git_repo: Path,
+    ) -> None:
+        """Test error message mentions that untracked files are OK."""
+        manager = GitManager(git_repo)
+
+        # Modify file
+        (git_repo / "test.py").write_text("print('modified')")
+
+        with pytest.raises(DirtyWorkingDirectoryError, match="Untracked files are OK"):
+            manager.require_clean_working_directory()
+
+
+class TestGitManagerModifiedFiles:
+    """Tests for modified/staged file detection."""
+
+    def test_get_modified_or_staged_files_empty(self, git_repo: Path) -> None:
+        """Test get_modified_or_staged_files returns empty list for clean repo."""
+        manager = GitManager(git_repo)
+
+        modified = manager.get_modified_or_staged_files()
+
+        assert modified == []
+
+    def test_get_modified_or_staged_files_with_modified(self, git_repo: Path) -> None:
+        """Test get_modified_or_staged_files returns modified files."""
+        manager = GitManager(git_repo)
+
+        # Modify file
+        (git_repo / "test.py").write_text("print('modified')")
+
+        modified = manager.get_modified_or_staged_files()
+
+        assert "test.py" in modified
+
+    def test_get_modified_or_staged_files_with_staged(self, git_repo: Path) -> None:
+        """Test get_modified_or_staged_files returns staged files."""
+        manager = GitManager(git_repo)
+
+        # Modify and stage file
+        (git_repo / "test.py").write_text("print('staged')")
+        manager.repo.index.add(["test.py"])
+
+        modified = manager.get_modified_or_staged_files()
+
+        assert "test.py" in modified
+
+    def test_get_modified_or_staged_files_excludes_untracked(self, git_repo: Path) -> None:
+        """Test get_modified_or_staged_files excludes untracked files."""
+        manager = GitManager(git_repo)
+
+        # Create untracked file
+        (git_repo / "new_file.py").write_text("print('new')")
+
+        modified = manager.get_modified_or_staged_files()
+
+        assert "new_file.py" not in modified
+        assert modified == []
+
+    def test_has_modified_or_staged_files_false_for_clean(self, git_repo: Path) -> None:
+        """Test has_modified_or_staged_files returns False for clean repo."""
+        manager = GitManager(git_repo)
+
+        assert manager.has_modified_or_staged_files() is False
+
+    def test_has_modified_or_staged_files_true_for_modified(self, git_repo: Path) -> None:
+        """Test has_modified_or_staged_files returns True with modified files."""
+        manager = GitManager(git_repo)
+
+        # Modify file
+        (git_repo / "test.py").write_text("print('modified')")
+
+        assert manager.has_modified_or_staged_files() is True
+
+    def test_has_modified_or_staged_files_false_for_untracked(self, git_repo: Path) -> None:
+        """Test has_modified_or_staged_files returns False with only untracked files."""
+        manager = GitManager(git_repo)
+
+        # Create untracked file
+        (git_repo / "new_file.py").write_text("print('new')")
+
+        assert manager.has_modified_or_staged_files() is False
+
+    def test_get_all_modified_files(self, git_repo: Path) -> None:
+        """Test get_all_modified_files returns all modified files."""
+        manager = GitManager(git_repo)
+
+        # Modify file
+        (git_repo / "test.py").write_text("print('modified')")
+
+        modified = manager.get_all_modified_files()
+
+        assert "test.py" in modified
