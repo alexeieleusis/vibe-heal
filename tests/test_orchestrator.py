@@ -109,22 +109,26 @@ class TestOrchestratorValidation:
         with pytest.raises(RuntimeError, match="Not a Git repository"):
             orchestrator._validate_preconditions(str(test_file), dry_run=False)
 
-    def test_validate_preconditions_file_has_uncommitted_changes(
+    def test_validate_preconditions_working_directory_has_uncommitted_changes(
         self,
         mock_config: VibeHealConfig,
         mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
-        """Test validation fails when file has uncommitted changes."""
+        """Test validation fails when working directory has uncommitted changes."""
+        from vibe_heal.git.exceptions import DirtyWorkingDirectoryError
+
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
         mocker.patch.object(GitManager, "is_repository", return_value=True)
-        mocker.patch.object(GitManager, "has_uncommitted_changes", return_value=True)
+        mocker.patch.object(
+            GitManager, "require_clean_working_directory", side_effect=DirtyWorkingDirectoryError("dirty")
+        )
 
         orchestrator = VibeHealOrchestrator(mock_config)
         test_file = tmp_path / "test.py"
         test_file.write_text("code")
 
-        with pytest.raises(RuntimeError, match="uncommitted changes"):
+        with pytest.raises(DirtyWorkingDirectoryError):
             orchestrator._validate_preconditions(str(test_file), dry_run=False)
 
     def test_validate_preconditions_file_not_found(
@@ -152,7 +156,7 @@ class TestOrchestratorValidation:
         mock_config.ai_tool = AIToolType.CLAUDE_CODE
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
         mocker.patch.object(GitManager, "is_repository", return_value=True)
-        mocker.patch.object(GitManager, "has_uncommitted_changes", return_value=False)
+        mocker.patch.object(GitManager, "require_clean_working_directory")
 
         orchestrator = VibeHealOrchestrator(mock_config)
 
@@ -165,16 +169,16 @@ class TestOrchestratorValidation:
         with pytest.raises(RuntimeError, match="not available"):
             orchestrator._validate_preconditions(str(test_file), dry_run=False)
 
-    def test_validate_preconditions_dry_run_skips_file_check(
+    def test_validate_preconditions_dry_run_skips_clean_check(
         self,
         mock_config: VibeHealConfig,
         mocker: MockerFixture,
         tmp_path: Path,
     ) -> None:
-        """Test validation skips file uncommitted changes check in dry-run mode."""
+        """Test validation skips clean working directory check in dry-run mode."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
         mocker.patch.object(GitManager, "is_repository", return_value=True)
-        mock_file_check = mocker.patch.object(GitManager, "has_uncommitted_changes")
+        mock_clean_check = mocker.patch.object(GitManager, "require_clean_working_directory")
 
         orchestrator = VibeHealOrchestrator(mock_config)
         test_file = tmp_path / "test.py"
@@ -182,8 +186,8 @@ class TestOrchestratorValidation:
 
         orchestrator._validate_preconditions(str(test_file), dry_run=True)
 
-        # Should not check file for uncommitted changes in dry-run mode
-        mock_file_check.assert_not_called()
+        # Should not check for clean working directory in dry-run mode
+        mock_clean_check.assert_not_called()
 
 
 class TestOrchestratorFixFile:
@@ -297,7 +301,7 @@ class TestOrchestratorFixFile:
         """Test fix_file when user cancels."""
         mocker.patch("shutil.which", return_value="/usr/bin/claude")
         mocker.patch.object(GitManager, "is_repository", return_value=True)
-        mocker.patch.object(GitManager, "has_uncommitted_changes", return_value=False)
+        mocker.patch.object(GitManager, "require_clean_working_directory")
 
         # Mock SonarQube client
         mock_client = AsyncMock()

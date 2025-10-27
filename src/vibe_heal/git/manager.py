@@ -83,6 +83,35 @@ class GitManager:
 
         return list(set(changed + staged + untracked))
 
+    def get_modified_or_staged_files(self) -> list[str]:
+        """Get list of modified or staged files (excluding untracked files).
+
+        Returns:
+            List of file paths that are modified or staged (but not untracked)
+        """
+        changed = [item.a_path for item in self.repo.index.diff(None) if item.a_path is not None]
+        staged = [item.a_path for item in self.repo.index.diff("HEAD") if item.a_path is not None]
+
+        return list(set(changed + staged))
+
+    def has_modified_or_staged_files(self) -> bool:
+        """Check if there are any modified or staged files (excluding untracked).
+
+        Returns:
+            True if there are modified or staged files
+        """
+        return len(self.get_modified_or_staged_files()) > 0
+
+    def get_all_modified_files(self) -> list[str]:
+        """Get all files that have been modified in the working directory.
+
+        This includes both staged and unstaged changes, but excludes untracked files.
+
+        Returns:
+            List of file paths with modifications
+        """
+        return self.get_modified_or_staged_files()
+
     def has_uncommitted_changes(self, file_path: str) -> bool:
         """Check if a specific file has uncommitted changes.
 
@@ -107,15 +136,18 @@ class GitManager:
     def commit_fix(
         self,
         issue: SonarQubeIssue,
-        files: list[str],
+        files: list[str] | None,
         ai_tool_type: AIToolType,
         rule: SonarQubeRule | None = None,
     ) -> str | None:
         """Create a commit for a fixed issue.
 
+        If files is None, automatically detects and commits all modified files.
+        If files is an empty list, raises an error.
+
         Args:
             issue: The SonarQube issue that was fixed
-            files: List of files to commit
+            files: List of files to commit, or None to auto-detect all modified files
             ai_tool_type: The AI tool used for the fix
             rule: Detailed rule information (optional)
 
@@ -123,8 +155,12 @@ class GitManager:
             Commit SHA, or None if there were no changes to commit
 
         Raises:
-            GitOperationError: If commit fails
+            GitOperationError: If commit fails or no files to commit
         """
+        # Auto-detect modified files if not provided
+        if files is None:
+            files = self.get_all_modified_files()
+
         if not files:
             msg = "No files to commit"
             raise GitOperationError(msg)
@@ -140,7 +176,7 @@ class GitManager:
                 return None
 
             # Create commit message
-            message = self._create_commit_message(issue, ai_tool_type, rule)
+            message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
 
             # Create commit
             commit = self.repo.index.commit(message)
@@ -156,6 +192,7 @@ class GitManager:
         issue: SonarQubeIssue,
         ai_tool_type: AIToolType,
         rule: SonarQubeRule | None = None,
+        file_count: int = 1,
     ) -> str:
         """Create a formatted commit message for a fix.
 
@@ -163,6 +200,7 @@ class GitManager:
             issue: The SonarQube issue that was fixed
             ai_tool_type: The AI tool used for the fix
             rule: Detailed rule information (optional)
+            file_count: Number of files modified in this fix (default: 1)
 
         Returns:
             Formatted commit message
@@ -192,8 +230,13 @@ class GitManager:
         body_parts.extend([
             f"Severity: {issue.severity}",
             f"Location: {issue.component}:{issue.line}",
-            "",
         ])
+
+        # Add file count if multiple files were modified
+        if file_count > 1:
+            body_parts.append(f"Files modified: {file_count}")
+
+        body_parts.append("")
 
         # Add public documentation link
         if rule:
@@ -210,16 +253,20 @@ class GitManager:
         return f"{subject}\n\n{body}"
 
     def require_clean_working_directory(self) -> None:
-        """Ensure working directory is clean.
+        """Ensure working directory has no modified or staged files.
+
+        Untracked files are allowed, but modified or staged files must be committed first.
 
         Raises:
-            DirtyWorkingDirectoryError: If working directory is dirty
+            DirtyWorkingDirectoryError: If there are modified or staged files
         """
-        if not self.is_clean():
-            uncommitted = self.get_uncommitted_files()
+        modified_or_staged = self.get_modified_or_staged_files()
+        if modified_or_staged:
             msg = (
-                "Working directory is not clean. Uncommitted files:\n"
-                + "\n".join(f"  - {f}" for f in uncommitted[:10])
-                + ("\n  ..." if len(uncommitted) > 10 else "")
+                "Working directory has uncommitted changes. Please commit or stash modified files first.\n"
+                "Modified or staged files:\n"
+                + "\n".join(f"  - {f}" for f in modified_or_staged[:10])
+                + ("\n  ..." if len(modified_or_staged) > 10 else "")
+                + "\n\nNote: Untracked files are OK and won't block processing."
             )
             raise DirtyWorkingDirectoryError(msg)
