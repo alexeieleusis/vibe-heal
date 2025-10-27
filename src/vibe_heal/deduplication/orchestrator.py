@@ -2,7 +2,9 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
@@ -16,6 +18,11 @@ from vibe_heal.deduplication.processor import (
 )
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
+
+if TYPE_CHECKING:
+    from vibe_heal.sonarqube.analysis_runner import AnalysisResult
+    from vibe_heal.sonarqube.client import SonarQubeClient
+    from vibe_heal.sonarqube.project_manager import TempProjectMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -385,3 +392,329 @@ class DeduplicationOrchestrator:
 
         if dry_run:
             self.console.print("\n[yellow]Dry-run mode: no changes committed[/yellow]")
+
+
+class FileDedupResult(BaseModel):
+    """Result of deduplicating a single file."""
+
+    file_path: Path
+    duplications_fixed: int
+    success: bool
+    error_message: str | None = None
+
+
+class DedupeBranchResult(BaseModel):
+    """Result of branch-wide deduplication operation."""
+
+    success: bool
+    files_processed: list[FileDedupResult]
+    temp_project: "TempProjectMetadata | None" = None
+    analysis_result: "AnalysisResult | None" = None
+    total_duplications_fixed: int = 0
+    error_message: str | None = None
+
+
+class DedupeBranchOrchestrator:
+    """Orchestrates branch-wide deduplication workflow.
+
+    Similar to CleanupOrchestrator but focuses on code duplications.
+    Coordinates:
+    - Branch analysis (modified files)
+    - Temporary project creation
+    - SonarQube analysis
+    - Duplication fixing via AI tool
+    - Project cleanup
+    """
+
+    def __init__(
+        self,
+        config: VibeHealConfig,
+        client: "SonarQubeClient",
+        ai_tool: AITool,
+    ) -> None:
+        """Initialize the dedupe-branch orchestrator.
+
+        Args:
+            config: Application configuration
+            client: SonarQube API client
+            ai_tool: AI tool for fixing duplications
+        """
+        from vibe_heal.git.branch_analyzer import BranchAnalyzer
+        from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
+        from vibe_heal.sonarqube.project_manager import ProjectManager
+
+        self.config = config
+        self.client = client
+        self.ai_tool = ai_tool
+        self.project_manager = ProjectManager(client)
+        self.analysis_runner = AnalysisRunner(config, client)
+        self.branch_analyzer = BranchAnalyzer(Path.cwd())
+        self.git_manager = GitManager(Path.cwd())
+        self.console = Console()
+
+    async def dedupe_branch(
+        self,
+        base_branch: str = "origin/main",
+        max_iterations: int = 10,
+        file_patterns: list[str] | None = None,
+        verbose: bool = False,
+    ) -> DedupeBranchResult:
+        """Remove duplications from all modified files in current branch.
+
+        Workflow:
+        1. Analyze branch to get modified files
+        2. Create temporary SonarQube project
+        3. Run SonarQube analysis
+        4. For each file with duplications, iteratively dedupe until clean
+        5. Delete temporary project
+
+        Args:
+            base_branch: Base branch to compare against (default: origin/main)
+            max_iterations: Maximum dedup iterations per file (default: 10)
+            file_patterns: Optional list of glob patterns to filter files
+            verbose: Enable verbose output
+
+        Returns:
+            DedupeBranchResult with success status and details
+        """
+        from vibe_heal.sonarqube.project_manager import TempProjectMetadata
+
+        temp_project: TempProjectMetadata | None = None
+        files_processed: list[FileDedupResult] = []
+
+        try:
+            # Step 1: Validate and filter modified files
+            modified_files = self._validate_and_filter_files(base_branch, file_patterns)
+
+            if not modified_files:
+                return DedupeBranchResult(
+                    success=True,
+                    files_processed=[],
+                    total_duplications_fixed=0,
+                )
+
+            # Step 2: Create temporary SonarQube project
+            temp_project = await self._create_temp_project()
+
+            # Step 3: Run SonarQube analysis
+            self.console.print("\n[dim]Running SonarQube analysis...[/dim]")
+            analysis_result = await self.analysis_runner.run_analysis(
+                project_key=temp_project.project_key,
+                project_name=temp_project.project_name,
+                project_dir=Path.cwd(),
+            )
+
+            if not analysis_result.success:
+                self.console.print(f"[red]Analysis failed: {analysis_result.error_message}[/red]")
+                return DedupeBranchResult(
+                    success=False,
+                    files_processed=[],
+                    temp_project=temp_project,
+                    analysis_result=analysis_result,
+                    error_message=f"Analysis failed: {analysis_result.error_message}",
+                )
+
+            self.console.print(f"[dim]Analysis completed. Dashboard: {analysis_result.dashboard_url}[/dim]")
+
+            # Step 4: Process each file
+            total_duplications_fixed = 0
+            for file_path in modified_files:
+                file_result = await self._dedupe_file(
+                    file_path=file_path,
+                    project_key=temp_project.project_key,
+                    max_iterations=max_iterations,
+                    verbose=verbose,
+                )
+                files_processed.append(file_result)
+                total_duplications_fixed += file_result.duplications_fixed
+
+            return DedupeBranchResult(
+                success=True,
+                files_processed=files_processed,
+                temp_project=temp_project,
+                analysis_result=analysis_result,
+                total_duplications_fixed=total_duplications_fixed,
+            )
+
+        except Exception as e:
+            logger.exception("Branch deduplication failed")
+            return DedupeBranchResult(
+                success=False,
+                files_processed=files_processed,
+                temp_project=temp_project,
+                error_message=str(e),
+            )
+
+        finally:
+            # Step 5: Always cleanup temporary project
+            if temp_project:
+                await self._cleanup_temp_project(temp_project)
+
+    def _validate_and_filter_files(
+        self,
+        base_branch: str,
+        file_patterns: list[str] | None,
+    ) -> list[Path]:
+        """Validate branch and filter modified files.
+
+        Args:
+            base_branch: Base branch to compare against
+            file_patterns: Optional file patterns to filter
+
+        Returns:
+            List of modified file paths to process
+        """
+        # Validate branch exists
+        self.branch_analyzer.validate_branch_exists(base_branch)
+
+        # Get modified files
+        modified_files = self.branch_analyzer.get_modified_files(base_branch)
+
+        if not modified_files:
+            self.console.print("[yellow]No modified files in branch[/yellow]")
+            return []
+
+        # Filter by patterns if provided
+        if file_patterns:
+            modified_files = self._filter_files(modified_files, file_patterns)
+
+        if not modified_files:
+            self.console.print("[yellow]No files match the specified patterns[/yellow]")
+            return []
+
+        self.console.print(f"\n[cyan]Found {len(modified_files)} modified file(s) to process[/cyan]")
+        for f in modified_files:
+            self.console.print(f"  - {f}")
+
+        return modified_files
+
+    def _filter_files(self, files: list[Path], patterns: list[str]) -> list[Path]:
+        """Filter files by glob patterns.
+
+        Args:
+            files: List of file paths
+            patterns: List of glob patterns
+
+        Returns:
+            Filtered list of file paths
+        """
+        from fnmatch import fnmatch
+
+        filtered = []
+        for file_path in files:
+            for pattern in patterns:
+                if fnmatch(str(file_path), pattern):
+                    filtered.append(file_path)
+                    break
+        return filtered
+
+    async def _create_temp_project(self) -> "TempProjectMetadata":
+        """Create temporary SonarQube project.
+
+        Returns:
+            Temporary project metadata
+        """
+        from vibe_heal.sonarqube.project_manager import TempProjectMetadata
+
+        branch_name = self.branch_analyzer.get_current_branch()
+        user_email = self.branch_analyzer.get_user_email()
+
+        self.console.print("\n[dim]Creating temporary SonarQube project...[/dim]")
+        temp_project: TempProjectMetadata = await self.project_manager.create_temp_project(
+            base_key=self.config.sonarqube_project_key,
+            branch_name=branch_name,
+            user_email=user_email,
+        )
+
+        self.console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
+        return temp_project
+
+    async def _cleanup_temp_project(self, temp_project: "TempProjectMetadata") -> None:
+        """Clean up temporary SonarQube project.
+
+        Args:
+            temp_project: Project metadata to cleanup
+        """
+        try:
+            self.console.print("\n[dim]Cleaning up temporary project...[/dim]")
+            await self.project_manager.delete_project(temp_project.project_key)
+            self.console.print("[dim]Temporary project deleted[/dim]")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary project: {e}")
+            self.console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
+
+    async def _dedupe_file(
+        self,
+        file_path: Path,
+        project_key: str,
+        max_iterations: int,
+        verbose: bool,
+    ) -> FileDedupResult:
+        """Deduplicate a single file iteratively.
+
+        Args:
+            file_path: Path to file to deduplicate
+            project_key: SonarQube project key
+            max_iterations: Maximum iterations
+
+        Returns:
+            File deduplication result
+        """
+        self.console.print(f"\n[bold cyan]Processing {file_path}[/bold cyan]")
+
+        total_fixed = 0
+
+        try:
+            # Create a modified config with the temp project key
+            temp_config = VibeHealConfig(env_file=None)
+            temp_config.sonarqube_url = self.config.sonarqube_url
+            temp_config.sonarqube_token = self.config.sonarqube_token
+            temp_config.sonarqube_username = self.config.sonarqube_username
+            temp_config.sonarqube_password = self.config.sonarqube_password
+            temp_config.sonarqube_project_key = project_key
+            temp_config.ai_tool = self.config.ai_tool
+            temp_config.code_context_lines = self.config.code_context_lines
+            temp_config.include_rule_description = self.config.include_rule_description
+
+            # Create dedupe orchestrator with temp config
+            dedupe_orch = DeduplicationOrchestrator(
+                config=temp_config,
+                ai_tool=self.ai_tool,
+                console=self.console,
+                git_manager=self.git_manager,
+            )
+
+            # Iteratively dedupe until no duplications or max iterations reached
+            for iteration in range(max_iterations):
+                if verbose:
+                    self.console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
+
+                # Run deduplication
+                summary = await dedupe_orch.dedupe_file(
+                    file_path=str(file_path),
+                    dry_run=False,
+                    max_duplications=None,
+                )
+
+                total_fixed += summary.fixed
+
+                # If no duplications were fixed, we're done
+                if summary.fixed == 0:
+                    if verbose:
+                        self.console.print("[dim]  No more duplications to fix[/dim]")
+                    break
+
+            return FileDedupResult(
+                file_path=file_path,
+                duplications_fixed=total_fixed,
+                success=True,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to dedupe {file_path}")
+            return FileDedupResult(
+                file_path=file_path,
+                duplications_fixed=total_fixed,
+                success=False,
+                error_message=str(e),
+            )
