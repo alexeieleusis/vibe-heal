@@ -238,6 +238,28 @@ def dedupe(
         sys.exit(1)
 
 
+def _display_branch_operation_header(
+    operation_name: str,
+    base_branch: str,
+    max_iterations: int,
+    file_patterns: list[str] | None,
+) -> None:
+    """Display header for branch operations.
+
+    Args:
+        operation_name: Name of the operation (e.g., "Branch Cleanup")
+        base_branch: Base branch being compared against
+        max_iterations: Maximum iterations per file
+        file_patterns: Optional file patterns to filter
+    """
+    console.print(f"\n[bold cyan]{operation_name}[/bold cyan]")
+    console.print(f"  Base branch: {base_branch}")
+    console.print(f"  Max iterations per file: {max_iterations}")
+    if file_patterns:
+        console.print(f"  File patterns: {', '.join(file_patterns)}")
+    console.print()
+
+
 def _display_cleanup_results(result: CleanupResult) -> None:
     """Display cleanup results.
 
@@ -348,12 +370,12 @@ def cleanup(
             config.ai_tool = ai_tool
 
         # Display what we're doing
-        console.print("\n[bold cyan]Branch Cleanup[/bold cyan]")
-        console.print(f"  Base branch: {base_branch}")
-        console.print(f"  Max iterations per file: {max_iterations}")
-        if file_patterns:
-            console.print(f"  File patterns: {', '.join(file_patterns)}")
-        console.print()
+        _display_branch_operation_header(
+            operation_name="Branch Cleanup",
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+        )
 
         # Initialize AI tool
         ai_tool_instance = initialize_ai_tool(config)
@@ -490,12 +512,12 @@ def dedupe_branch(
             config.ai_tool = ai_tool
 
         # Display what we're doing
-        console.print("\n[bold cyan]Branch Deduplication[/bold cyan]")
-        console.print(f"  Base branch: {base_branch}")
-        console.print(f"  Max iterations per file: {max_iterations}")
-        if file_patterns:
-            console.print(f"  File patterns: {', '.join(file_patterns)}")
-        console.print()
+        _display_branch_operation_header(
+            operation_name="Branch Deduplication",
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+        )
 
         # Initialize AI tool
         ai_tool_instance = initialize_ai_tool(config)
