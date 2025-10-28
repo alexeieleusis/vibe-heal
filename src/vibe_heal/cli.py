@@ -31,6 +31,9 @@ console = Console()
 # Error messages
 NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[/red]"
 
+# Help text constants
+VERBOSE_OUTPUT_HELP = "Verbose output"
+
 
 def setup_logging(verbose: bool) -> None:
     """Setup logging configuration.
@@ -79,7 +82,7 @@ def fix(
         False,
         "--verbose",
         "-v",
-        help="Verbose output",
+        help=VERBOSE_OUTPUT_HELP,
     ),
 ) -> None:
     """Fix SonarQube issues in a file."""
@@ -148,7 +151,7 @@ def dedupe(
         False,
         "--verbose",
         "-v",
-        help="Verbose output",
+        help=VERBOSE_OUTPUT_HELP,
     ),
 ) -> None:
     """Remove code duplications in a file."""
@@ -302,7 +305,7 @@ def cleanup(
         False,
         "--verbose",
         "-v",
-        help="Verbose output",
+        help=VERBOSE_OUTPUT_HELP,
     ),
 ) -> None:
     """Clean up all modified files in current branch.
@@ -460,7 +463,7 @@ def dedupe_branch(
         False,
         "--verbose",
         "-v",
-        help="Verbose output",
+        help=VERBOSE_OUTPUT_HELP,
     ),
 ) -> None:
     """Remove code duplications from all modified files in current branch.
