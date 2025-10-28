@@ -51,6 +51,41 @@ def setup_logging(verbose: bool) -> None:
     )
 
 
+def initialize_ai_tool(config: VibeHealConfig) -> AITool:
+    """Initialize and validate AI tool.
+
+    Args:
+        config: Configuration object with optional ai_tool setting
+
+    Returns:
+        Initialized AI tool instance
+
+    Raises:
+        SystemExit: If no AI tool is found or tool is not available
+    """
+    # Determine which AI tool to use
+    if config.ai_tool:
+        tool_type = config.ai_tool
+        console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
+    else:
+        detected_tool = AIToolFactory.detect_available()
+        if not detected_tool:
+            console.print(NO_AI_TOOL_ERROR)
+            sys.exit(1)
+        tool_type = detected_tool
+        console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
+
+    # Create AI tool instance
+    ai_tool_instance = AIToolFactory.create(tool_type, config)
+
+    # Validate AI tool is available
+    if not ai_tool_instance.is_available():
+        console.print(f"[red]{tool_type.display_name} is not available[/red]")
+        sys.exit(1)
+
+    return ai_tool_instance
+
+
 @app.command()
 def fix(
     file_path: str = typer.Argument(..., help="Path to file to fix"),
@@ -168,23 +203,7 @@ def dedupe(
             config.ai_tool = ai_tool
 
         # Initialize AI tool
-        if config.ai_tool:
-            tool_type = config.ai_tool
-            console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
-        else:
-            detected_tool = AIToolFactory.detect_available()
-            if not detected_tool:
-                console.print(NO_AI_TOOL_ERROR)
-                sys.exit(1)
-            tool_type = detected_tool
-            console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
-
-        ai_tool_instance = AIToolFactory.create(tool_type, config)
-
-        # Check AI tool is available
-        if not ai_tool_instance.is_available():
-            console.print(f"[red]{tool_type.display_name} is not available[/red]")
-            sys.exit(1)
+        ai_tool_instance = initialize_ai_tool(config)
 
         # Create orchestrator
         orchestrator = DeduplicationOrchestrator(
@@ -334,23 +353,7 @@ def cleanup(
         console.print()
 
         # Initialize AI tool
-        if config.ai_tool:
-            tool_type = config.ai_tool
-            console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
-        else:
-            detected_tool = AIToolFactory.detect_available()
-            if not detected_tool:
-                console.print(NO_AI_TOOL_ERROR)
-                sys.exit(1)
-            tool_type = detected_tool
-            console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
-
-        ai_tool_instance = AIToolFactory.create(tool_type, config)
-
-        # Check AI tool is available
-        if not ai_tool_instance.is_available():
-            console.print(f"[red]{tool_type.display_name} is not available[/red]")
-            sys.exit(1)
+        ai_tool_instance = initialize_ai_tool(config)
 
         # Run cleanup
         asyncio.run(
@@ -492,23 +495,7 @@ def dedupe_branch(
         console.print()
 
         # Initialize AI tool
-        if config.ai_tool:
-            tool_type = config.ai_tool
-            console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
-        else:
-            detected_tool = AIToolFactory.detect_available()
-            if not detected_tool:
-                console.print(NO_AI_TOOL_ERROR)
-                sys.exit(1)
-            tool_type = detected_tool
-            console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
-
-        ai_tool_instance = AIToolFactory.create(tool_type, config)
-
-        # Check AI tool is available
-        if not ai_tool_instance.is_available():
-            console.print(f"[red]{tool_type.display_name} is not available[/red]")
-            sys.exit(1)
+        ai_tool_instance = initialize_ai_tool(config)
 
         # Run deduplication
         asyncio.run(
