@@ -772,6 +772,23 @@ class DedupeBranchOrchestrator:
                 if verbose:
                     self.console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
 
+                # Re-run analysis to get fresh duplication data after fixes
+                if iteration > 0:
+                    if verbose:
+                        self.console.print("[dim]  Re-running SonarQube analysis...[/dim]")
+
+                    analysis_result = await self.analysis_runner.run_analysis(
+                        project_key=project_key,
+                        project_name=f"temp-{project_key}",
+                        project_dir=Path.cwd(),
+                    )
+
+                    if not analysis_result.success:
+                        logger.warning(f"Analysis failed at iteration {iteration + 1}: {analysis_result.error_message}")
+                        # Continue anyway - might still have cached data
+                    elif verbose:
+                        self.console.print("[dim]  Analysis completed[/dim]")
+
                 # Run deduplication
                 summary = await dedupe_orch.dedupe_file(
                     file_path=str(file_path),
