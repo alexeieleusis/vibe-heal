@@ -133,8 +133,11 @@ def fix(
         if ai_tool:
             config.ai_tool = ai_tool
 
+        # Initialize AI tool
+        ai_tool_instance = initialize_ai_tool(config)
+
         # Create orchestrator
-        orchestrator = VibeHealOrchestrator(config)
+        orchestrator = VibeHealOrchestrator(config, ai_tool_instance)
 
         # Run fix
         summary = asyncio.run(

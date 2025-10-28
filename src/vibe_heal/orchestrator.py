@@ -22,16 +22,17 @@ logger = logging.getLogger(__name__)
 class VibeHealOrchestrator:
     """Orchestrates the fix workflow."""
 
-    def __init__(self, config: VibeHealConfig) -> None:
+    def __init__(self, config: VibeHealConfig, ai_tool: AITool | None = None) -> None:
         """Initialize orchestrator.
 
         Args:
             config: Application configuration
+            ai_tool: Optional pre-initialized AI tool. If not provided, will auto-detect.
         """
         self.config = config
         self.console = Console()
         self.git_manager = GitManager()
-        self.ai_tool = self._initialize_ai_tool()
+        self.ai_tool = ai_tool if ai_tool is not None else self._initialize_ai_tool()
 
     def _initialize_ai_tool(self) -> AITool:
         """Initialize AI tool based on config or auto-detect.
