@@ -752,21 +752,16 @@ class DedupeBranchOrchestrator:
 
         total_fixed = 0
 
-        try:
-            # Create a modified config with the temp project key
-            temp_config = VibeHealConfig(env_file=None)
-            temp_config.sonarqube_url = self.config.sonarqube_url
-            temp_config.sonarqube_token = self.config.sonarqube_token
-            temp_config.sonarqube_username = self.config.sonarqube_username
-            temp_config.sonarqube_password = self.config.sonarqube_password
-            temp_config.sonarqube_project_key = project_key
-            temp_config.ai_tool = self.config.ai_tool
-            temp_config.code_context_lines = self.config.code_context_lines
-            temp_config.include_rule_description = self.config.include_rule_description
+        # Store original project key
+        original_project_key = self.config.sonarqube_project_key
 
-            # Create dedupe orchestrator with temp config
+        try:
+            # Override project key to use temp project (like cleanup orchestrator does)
+            self.config.sonarqube_project_key = project_key
+
+            # Create dedupe orchestrator with modified config
             dedupe_orch = DeduplicationOrchestrator(
-                config=temp_config,
+                config=self.config,
                 ai_tool=self.ai_tool,
                 console=self.console,
                 git_manager=self.git_manager,
@@ -806,3 +801,7 @@ class DedupeBranchOrchestrator:
                 success=False,
                 error_message=str(e),
             )
+
+        finally:
+            # Restore original project key
+            self.config.sonarqube_project_key = original_project_key
