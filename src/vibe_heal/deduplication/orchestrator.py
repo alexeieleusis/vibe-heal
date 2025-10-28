@@ -362,7 +362,6 @@ class DeduplicationOrchestrator:
         group: DuplicationGroup,
         target_ref: str,
         response: DuplicationsResponse,
-        file_path: str,
         dry_run: bool,
         summary: FixSummary,
         progress: Progress,
@@ -375,7 +374,6 @@ class DeduplicationOrchestrator:
             group: Duplication group that was fixed
             target_ref: Reference ID of target file
             response: Full duplications response (for file info lookup)
-            file_path: Path to file
             dry_run: Whether in dry-run mode
             summary: Summary to update
             progress: Progress bar
@@ -452,7 +450,6 @@ class DeduplicationOrchestrator:
                     group,
                     target_ref,
                     response,
-                    file_path,
                     dry_run,
                     summary,
                     progress,
