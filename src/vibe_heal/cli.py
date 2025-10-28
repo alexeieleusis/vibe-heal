@@ -33,6 +33,7 @@ NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[
 
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"
+ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -76,7 +77,7 @@ def fix(
     env_file: str | None = typer.Option(
         None,
         "--env-file",
-        help="Path to custom environment file (default: .env.vibeheal or .env)",
+        help=ENV_FILE_HELP,
     ),
     verbose: bool = typer.Option(
         False,
@@ -145,7 +146,7 @@ def dedupe(
     env_file: str | None = typer.Option(
         None,
         "--env-file",
-        help="Path to custom environment file (default: .env.vibeheal or .env)",
+        help=ENV_FILE_HELP,
     ),
     verbose: bool = typer.Option(
         False,
@@ -299,7 +300,7 @@ def cleanup(
     env_file: str | None = typer.Option(
         None,
         "--env-file",
-        help="Path to custom environment file (default: .env.vibeheal or .env)",
+        help=ENV_FILE_HELP,
     ),
     verbose: bool = typer.Option(
         False,
@@ -457,7 +458,7 @@ def dedupe_branch(
     env_file: str | None = typer.Option(
         None,
         "--env-file",
-        help="Path to custom environment file (default: .env.vibeheal or .env)",
+        help=ENV_FILE_HELP,
     ),
     verbose: bool = typer.Option(
         False,
@@ -535,7 +536,7 @@ def config(
     env_file: str | None = typer.Option(
         None,
         "--env-file",
-        help="Path to custom environment file (default: .env.vibeheal or .env)",
+        help=ENV_FILE_HELP,
     ),
 ) -> None:
     """Show current configuration."""
