@@ -34,6 +34,7 @@ NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
+AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -72,7 +73,7 @@ def fix(
     ai_tool: AIToolType | None = typer.Option(
         None,
         "--ai-tool",
-        help="AI tool to use (overrides config)",
+        help=AI_TOOL_OVERRIDE_HELP,
     ),
     env_file: str | None = typer.Option(
         None,
@@ -141,7 +142,7 @@ def dedupe(
     ai_tool: AIToolType | None = typer.Option(
         None,
         "--ai-tool",
-        help="AI tool to use (overrides config)",
+        help=AI_TOOL_OVERRIDE_HELP,
     ),
     env_file: str | None = typer.Option(
         None,
@@ -295,7 +296,7 @@ def cleanup(
     ai_tool: AIToolType | None = typer.Option(
         None,
         "--ai-tool",
-        help="AI tool to use (overrides config)",
+        help=AI_TOOL_OVERRIDE_HELP,
     ),
     env_file: str | None = typer.Option(
         None,
@@ -453,7 +454,7 @@ def dedupe_branch(
     ai_tool: AIToolType | None = typer.Option(
         None,
         "--ai-tool",
-        help="AI tool to use (overrides config)",
+        help=AI_TOOL_OVERRIDE_HELP,
     ),
     env_file: str | None = typer.Option(
         None,
