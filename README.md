@@ -44,6 +44,7 @@ See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
 ## Features
 
 - ✅ **Branch cleanup**: Automatically fix all modified files in a branch before code review
+- ✅ **Code deduplication**: AI-powered removal of duplicate code blocks
 - ✅ Fetch SonarQube issues for any file
 - ✅ AI-powered issue fixing with **Claude Code** or **Aider**
 - ✅ **Enriched AI prompts** with full rule documentation and code context
@@ -114,7 +115,7 @@ AIDER_API_BASE=http://127.0.0.1:11434
 EOF
 ```
 
-### 4. Fix issues!
+### 4. Fix issues and remove duplications!
 
 **Option A: Fix a single file**
 ```bash
@@ -131,7 +132,22 @@ vibe-heal fix src/main.py --min-severity MAJOR
 vibe-heal fix src/main.py --env-file .env.production
 ```
 
-**Option B: Clean up entire branch** (recommended before code review)
+**Option B: Remove code duplications from a file**
+```bash
+# Remove duplications with dry-run first
+vibe-heal dedupe src/main.py --dry-run
+
+# Remove all duplications
+vibe-heal dedupe src/main.py
+
+# Limit number of duplications to fix
+vibe-heal dedupe src/main.py --max-duplications 5
+
+# Use a custom environment file
+vibe-heal dedupe src/main.py --env-file .env.production
+```
+
+**Option C: Clean up entire branch** (recommended before code review)
 ```bash
 # Clean up all modified files in your branch
 vibe-heal cleanup
@@ -147,6 +163,24 @@ vibe-heal cleanup --max-iterations 20
 
 # Use a custom environment file
 vibe-heal cleanup --env-file .env.production
+```
+
+**Option D: Remove duplications from entire branch**
+```bash
+# Remove duplications from all modified files
+vibe-heal dedupe-branch
+
+# Remove duplications with custom base branch
+vibe-heal dedupe-branch --base-branch develop
+
+# Remove duplications only from Python files
+vibe-heal dedupe-branch --pattern "*.py"
+
+# More iterations per file for complex duplications
+vibe-heal dedupe-branch --max-iterations 20
+
+# Use a custom environment file
+vibe-heal dedupe-branch --env-file .env.production
 ```
 
 ## Development Setup
@@ -284,6 +318,7 @@ vibe-heal/
 │   ├── processor/       # Issue processing logic (✅ Complete)
 │   ├── git/             # Git operations & branch analysis (✅ Complete)
 │   ├── cleanup/         # Branch cleanup orchestration (✅ Complete)
+│   ├── deduplication/   # Code deduplication (✅ Complete)
 │   ├── cli.py           # Command-line interface (✅ Complete)
 │   ├── orchestrator.py  # Workflow orchestration (✅ Complete)
 │   └── models.py        # Top-level models (✅ Complete)
