@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -20,7 +20,6 @@ from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 
 if TYPE_CHECKING:
-    from vibe_heal.sonarqube.analysis_runner import AnalysisResult
     from vibe_heal.sonarqube.client import SonarQubeClient
     from vibe_heal.sonarqube.project_manager import TempProjectMetadata
 
@@ -412,8 +411,8 @@ class DedupeBranchResult(BaseModel):
 
     success: bool
     files_processed: list[FileDedupResult]
-    temp_project: "TempProjectMetadata | None" = None
-    analysis_result: "AnalysisResult | None" = None
+    temp_project: Any = None  # TempProjectMetadata
+    analysis_result: Any = None  # AnalysisResult
     total_duplications_fixed: int = 0
     error_message: str | None = None
 
