@@ -219,13 +219,16 @@ class DeduplicationOrchestrator:
                 if file_info:
                     prompt_parts.append(f"  - {file_info.key} (lines {block.from_line}-{block.to_line})")
 
-        # Add general refactoring guidance
-        prompt_parts.append("\n\nPlease refactor this duplicate code. Consider appropriate strategies such as:")
-        prompt_parts.append("- Extracting a function or method")
-        prompt_parts.append("- Finding a suitable class in the inheritance hierarchy")
-        prompt_parts.append("- Extracting a reusable component")
-        prompt_parts.append("- Using composition or dependency injection patterns")
-        prompt_parts.append("\nAnalyze the context and choose the most appropriate refactoring approach.")
+        # Add concise refactoring guidance
+        prompt_parts.append(
+            "\n\nRefactor to eliminate this duplication. Choose the best approach:\n"
+            "- Extract function/method (simple cases)\n"
+            "- Find suitable parent class (inheritance hierarchies)\n"
+            "- Extract reusable component (UI frameworks)\n"
+            "- Create utility/helper module (cross-file)\n"
+            "- Use composition/dependency injection\n\n"
+            "Important: Update ALL duplicate locations consistently."
+        )
 
         return "\n".join(prompt_parts)
 
