@@ -674,7 +674,8 @@ class DedupeBranchOrchestrator:
         Args:
             file_path: Path to file to deduplicate
             project_key: SonarQube project key
-            max_iterations: Maximum iterations
+            max_iterations: Maximum iterations per file
+            verbose: Enable verbose output
 
         Returns:
             File deduplication result
