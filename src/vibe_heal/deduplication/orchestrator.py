@@ -236,6 +236,7 @@ class DeduplicationOrchestrator:
         fix_result: FixResult,
         group: DuplicationGroup,
         target_ref: str,
+        response: DuplicationsResponse,
         file_path: str,
         dry_run: bool,
         summary: FixSummary,
@@ -248,6 +249,7 @@ class DeduplicationOrchestrator:
             fix_result: Result from AI tool
             group: Duplication group that was fixed
             target_ref: Reference ID of target file
+            response: Full duplications response (for file info lookup)
             file_path: Path to file
             dry_run: Whether in dry-run mode
             summary: Summary to update
@@ -265,11 +267,23 @@ class DeduplicationOrchestrator:
             if not dry_run:
                 try:
                     # Create a simplified "issue" representation for commit message
+                    # Build list of all duplicate locations
+                    duplicate_locations = []
+                    for block in group.blocks:
+                        file_info = response.get_file_info(block.ref)
+                        if file_info:
+                            # Extract file path from component key (format: "project:path/to/file.py")
+                            file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+                            duplicate_locations.append(f"  - {file_path} (lines {block.from_line}-{block.to_line})")
+
+                    locations_text = "\n".join(duplicate_locations)
+
                     commit_msg = (
                         f"refactor: [duplication] remove duplicate code at line {target_block.from_line}\n\n"
                         f"Refactored duplicate code block spanning lines {target_block.from_line}-{target_block.to_line} "
                         f"({target_block.size} lines).\n\n"
-                        f"This code was duplicated in {len(group.blocks)} location(s).\n\n"
+                        f"This code was duplicated in {len(group.blocks)} location(s):\n"
+                        f"{locations_text}\n\n"
                         f"AI tool: {self.ai_tool.tool_type.display_name}"
                     )
 
@@ -366,6 +380,7 @@ class DeduplicationOrchestrator:
                     fix_result,
                     group,
                     target_ref,
+                    response,
                     file_path,
                     dry_run,
                     summary,
