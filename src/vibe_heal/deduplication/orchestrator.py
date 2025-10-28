@@ -274,7 +274,8 @@ class DeduplicationOrchestrator:
                         f"AI tool: {self.ai_tool.tool_type.display_name}"
                     )
 
-                    sha = self.git_manager.create_commit(commit_msg, [file_path])
+                    # Include untracked files since AI might create new files (e.g., utility modules)
+                    sha = self.git_manager.create_commit(commit_msg, [file_path], include_untracked=True)
                     if sha:
                         summary.commits.append(sha)
                         summary.fixed += 1

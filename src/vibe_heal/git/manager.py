@@ -191,6 +191,7 @@ class GitManager:
         self,
         message: str,
         files: list[str] | None = None,
+        include_untracked: bool = False,
     ) -> str | None:
         """Create a commit with a custom message.
 
@@ -199,6 +200,7 @@ class GitManager:
         Args:
             message: Commit message
             files: List of files to commit, or None to auto-detect all modified files
+            include_untracked: If True, include untracked (new) files in auto-detection
 
         Returns:
             Commit SHA, or None if there were no changes to commit
@@ -209,6 +211,10 @@ class GitManager:
         # Auto-detect modified files if not provided
         if files is None:
             files = self.get_all_modified_files()
+            # Add untracked files if requested (e.g., for deduplication when AI creates new files)
+            if include_untracked:
+                untracked = self.repo.untracked_files
+                files.extend(untracked)
 
         if not files:
             msg = "No files to commit"
