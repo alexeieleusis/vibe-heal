@@ -165,27 +165,11 @@ class GitManager:
             msg = "No files to commit"
             raise GitOperationError(msg)
 
-        try:
-            # Stage files
-            self.repo.index.add(files)
+        # Create commit message
+        message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
 
-            # Check if there are any changes to commit
-            # This happens when one fix resolves multiple issues
-            if not self.repo.index.diff("HEAD"):
-                # No changes staged - return None to indicate no commit was created
-                return None
-
-            # Create commit message
-            message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
-
-            # Create commit
-            commit = self.repo.index.commit(message)
-
-            return commit.hexsha
-
-        except git.GitError as e:
-            msg = f"Failed to create commit: {e}"
-            raise GitOperationError(msg) from e
+        # Stage and commit using helper method
+        return self._stage_and_commit(files, message)
 
     def create_commit(
         self,
@@ -220,11 +204,28 @@ class GitManager:
             msg = "No files to commit"
             raise GitOperationError(msg)
 
+        # Stage and commit using helper method
+        return self._stage_and_commit(files, message)
+
+    def _stage_and_commit(self, files: list[str], message: str) -> str | None:
+        """Stage files and create a commit if there are changes.
+
+        Args:
+            files: List of files to stage
+            message: Commit message
+
+        Returns:
+            Commit SHA, or None if there were no changes to commit
+
+        Raises:
+            GitOperationError: If commit fails
+        """
         try:
             # Stage files
             self.repo.index.add(files)
 
             # Check if there are any changes to commit
+            # This happens when one fix resolves multiple issues
             if not self.repo.index.diff("HEAD"):
                 # No changes staged - return None to indicate no commit was created
                 return None
