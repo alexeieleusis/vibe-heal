@@ -28,6 +28,9 @@ app = typer.Typer(
 )
 console = Console()
 
+# Error messages
+NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[/red]"
+
 
 def setup_logging(verbose: bool) -> None:
     """Setup logging configuration.
@@ -166,7 +169,7 @@ def dedupe(
         else:
             detected_tool = AIToolFactory.detect_available()
             if not detected_tool:
-                console.print("[red]No AI tool found. Please install Claude Code or Aider.[/red]")
+                console.print(NO_AI_TOOL_ERROR)
                 sys.exit(1)
             tool_type = detected_tool
             console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
@@ -332,7 +335,7 @@ def cleanup(
         else:
             detected_tool = AIToolFactory.detect_available()
             if not detected_tool:
-                console.print("[red]No AI tool found. Please install Claude Code or Aider.[/red]")
+                console.print(NO_AI_TOOL_ERROR)
                 sys.exit(1)
             tool_type = detected_tool
             console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
@@ -490,7 +493,7 @@ def dedupe_branch(
         else:
             detected_tool = AIToolFactory.detect_available()
             if not detected_tool:
-                console.print("[red]No AI tool found. Please install Claude Code or Aider.[/red]")
+                console.print(NO_AI_TOOL_ERROR)
                 sys.exit(1)
             tool_type = detected_tool
             console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
