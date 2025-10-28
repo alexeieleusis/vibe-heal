@@ -231,6 +231,131 @@ class DeduplicationOrchestrator:
 
         return "\n".join(prompt_parts)
 
+    def _build_commit_message(
+        self,
+        group: DuplicationGroup,
+        target_block: Any,
+        response: DuplicationsResponse,
+    ) -> str:
+        """Build commit message for a duplication fix.
+
+        Args:
+            group: Duplication group
+            target_block: Target block that was fixed
+            response: Full duplications response
+
+        Returns:
+            Formatted commit message
+        """
+        duplicate_locations = []
+        for block in group.blocks:
+            file_info = response.get_file_info(block.ref)
+            if file_info:
+                # Extract file path from component key (format: "project:path/to/file.py")
+                block_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+                duplicate_locations.append(f"  - {block_file_path} (lines {block.from_line}-{block.to_line})")
+
+        locations_text = "\n".join(duplicate_locations)
+
+        return (
+            f"refactor: [duplication] remove duplicate code at line {target_block.from_line}\n\n"
+            f"Refactored duplicate code block spanning lines {target_block.from_line}-{target_block.to_line} "
+            f"({target_block.size} lines).\n\n"
+            f"This code was duplicated in {len(group.blocks)} location(s):\n"
+            f"{locations_text}\n\n"
+            f"AI tool: {self.ai_tool.tool_type.display_name}"
+        )
+
+    def _handle_successful_fix_commit(
+        self,
+        group: DuplicationGroup,
+        target_block: Any,
+        response: DuplicationsResponse,
+        summary: FixSummary,
+        progress: Progress,
+        task: TaskID,
+    ) -> None:
+        """Handle commit for a successful fix.
+
+        Args:
+            group: Duplication group
+            target_block: Target block that was fixed
+            response: Full duplications response
+            summary: Summary to update
+            progress: Progress bar
+            task: Progress task
+        """
+        try:
+            commit_msg = self._build_commit_message(group, target_block, response)
+
+            # Auto-detect all modified files since duplications may span multiple files
+            # and AI might create new utility modules. Pass None to auto-detect.
+            sha = self.git_manager.create_commit(commit_msg, None, include_untracked=True)
+            if sha:
+                summary.commits.append(sha)
+                summary.fixed += 1
+                progress.update(
+                    task,
+                    description=f"[green]✓ Fixed duplication at line {target_block.from_line}[/green]",
+                )
+            else:
+                summary.skipped += 1
+                progress.update(
+                    task,
+                    description=f"[yellow]⊘ Line {target_block.from_line} already fixed[/yellow]",
+                )
+        except Exception as e:
+            logger.exception("Failed to commit")
+            summary.failed += 1
+            progress.update(
+                task,
+                description=f"[red]✗ Commit failed: {e}[/red]",
+            )
+
+    def _handle_successful_fix_dry_run(
+        self,
+        target_block: Any,
+        summary: FixSummary,
+        progress: Progress,
+        task: TaskID,
+    ) -> None:
+        """Handle a successful fix in dry-run mode.
+
+        Args:
+            target_block: Target block that was fixed
+            summary: Summary to update
+            progress: Progress bar
+            task: Progress task
+        """
+        summary.fixed += 1
+        progress.update(
+            task,
+            description=f"[green]✓ Would fix duplication at line {target_block.from_line} (dry-run)[/green]",
+        )
+
+    def _handle_failed_fix(
+        self,
+        fix_result: FixResult,
+        summary: FixSummary,
+        progress: Progress,
+        task: TaskID,
+    ) -> None:
+        """Handle a failed fix attempt.
+
+        Args:
+            fix_result: Failed fix result
+            summary: Summary to update
+            progress: Progress bar
+            task: Progress task
+        """
+        summary.failed += 1
+        error = fix_result.error_message or "Unknown error"
+        progress.update(
+            task,
+            description=f"[red]✗ Failed: {error[:50]}[/red]",
+        )
+        logger.error(f"Failed to fix duplication: {fix_result.error_message}")
+
     def _handle_fix_result(
         self,
         fix_result: FixResult,
@@ -262,68 +387,14 @@ class DeduplicationOrchestrator:
             progress.update(task, description="[red]✗ Failed: target block not found[/red]")
             return
 
-        if fix_result.success:
-            # Commit if not dry-run
-            if not dry_run:
-                try:
-                    # Create a simplified "issue" representation for commit message
-                    # Build list of all duplicate locations
-                    duplicate_locations = []
-                    for block in group.blocks:
-                        file_info = response.get_file_info(block.ref)
-                        if file_info:
-                            # Extract file path from component key (format: "project:path/to/file.py")
-                            file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
-                            duplicate_locations.append(f"  - {file_path} (lines {block.from_line}-{block.to_line})")
+        if not fix_result.success:
+            self._handle_failed_fix(fix_result, summary, progress, task)
+            return
 
-                    locations_text = "\n".join(duplicate_locations)
-
-                    commit_msg = (
-                        f"refactor: [duplication] remove duplicate code at line {target_block.from_line}\n\n"
-                        f"Refactored duplicate code block spanning lines {target_block.from_line}-{target_block.to_line} "
-                        f"({target_block.size} lines).\n\n"
-                        f"This code was duplicated in {len(group.blocks)} location(s):\n"
-                        f"{locations_text}\n\n"
-                        f"AI tool: {self.ai_tool.tool_type.display_name}"
-                    )
-
-                    # Auto-detect all modified files since duplications may span multiple files
-                    # and AI might create new utility modules. Pass None to auto-detect.
-                    sha = self.git_manager.create_commit(commit_msg, None, include_untracked=True)
-                    if sha:
-                        summary.commits.append(sha)
-                        summary.fixed += 1
-                        progress.update(
-                            task,
-                            description=f"[green]✓ Fixed duplication at line {target_block.from_line}[/green]",
-                        )
-                    else:
-                        summary.skipped += 1
-                        progress.update(
-                            task,
-                            description=f"[yellow]⊘ Line {target_block.from_line} already fixed[/yellow]",
-                        )
-                except Exception as e:
-                    logger.exception("Failed to commit")
-                    summary.failed += 1
-                    progress.update(
-                        task,
-                        description=f"[red]✗ Commit failed: {e}[/red]",
-                    )
-            else:
-                summary.fixed += 1
-                progress.update(
-                    task,
-                    description=f"[green]✓ Would fix duplication at line {target_block.from_line} (dry-run)[/green]",
-                )
+        if dry_run:
+            self._handle_successful_fix_dry_run(target_block, summary, progress, task)
         else:
-            summary.failed += 1
-            error = fix_result.error_message or "Unknown error"
-            progress.update(
-                task,
-                description=f"[red]✗ Failed: {error[:50]}[/red]",
-            )
-            logger.error(f"Failed to fix duplication: {fix_result.error_message}")
+            self._handle_successful_fix_commit(group, target_block, response, summary, progress, task)
 
     async def _process_duplications(
         self,
