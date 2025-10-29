@@ -13,6 +13,7 @@ from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 console = Console()
@@ -265,16 +266,20 @@ class CleanupOrchestrator:
             files_with_issues: list[Path] = []
 
             for file_path in modified_files:
-                issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
-                fixable_issues = [issue for issue in issues if issue.is_fixable]
+                try:
+                    issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
+                    fixable_issues = [issue for issue in issues if issue.is_fixable]
 
-                if verbose and issues:
-                    console.print(f"[dim]  {file_path}: {len(issues)} total, {len(fixable_issues)} fixable[/dim]")
+                    if verbose and issues:
+                        console.print(f"[dim]  {file_path}: {len(issues)} total, {len(fixable_issues)} fixable[/dim]")
 
-                if fixable_issues:
-                    files_with_issues.append(file_path)
-                    total_fixable_issues += len(fixable_issues)
-                    console.print(f"[dim]  {file_path}: {len(fixable_issues)} fixable issues[/dim]")
+                    if fixable_issues:
+                        files_with_issues.append(file_path)
+                        total_fixable_issues += len(fixable_issues)
+                        console.print(f"[dim]  {file_path}: {len(fixable_issues)} fixable issues[/dim]")
+                except ComponentNotFoundError:
+                    if verbose:
+                        console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
 
             return total_fixable_issues, files_with_issues
 

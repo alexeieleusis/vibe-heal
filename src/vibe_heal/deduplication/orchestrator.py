@@ -18,6 +18,7 @@ from vibe_heal.deduplication.processor import (
 )
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.client import SonarQubeClient
@@ -74,8 +75,15 @@ class DeduplicationOrchestrator:
 
         # Step 2: Fetch duplications from SonarQube
         self.console.print(f"\n[yellow]Fetching duplications for {file_path}...[/yellow]")
-        async with DuplicationClient(self.config) as dup_client:
-            response = await dup_client.get_duplications_for_file(file_path)
+        try:
+            async with DuplicationClient(self.config) as dup_client:
+                response = await dup_client.get_duplications_for_file(file_path)
+        except ComponentNotFoundError:
+            self.console.print(
+                f"[yellow]File '{file_path}' not found in SonarQube project. "
+                f"It may not be included in the analysis sources.[/yellow]"
+            )
+            return FixSummary(total_issues=0)
 
         if not response.duplications:
             self.console.print("[green]No duplications found![/green]")
