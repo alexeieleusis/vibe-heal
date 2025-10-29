@@ -738,6 +738,76 @@ class DedupeBranchOrchestrator:
             logger.warning(f"Failed to delete temporary project: {e}")
             self.console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
 
+    async def _rerun_analysis(
+        self,
+        project_key: str,
+        iteration: int,
+        verbose: bool,
+    ) -> None:
+        """Re-run SonarQube analysis for updated duplication data.
+
+        Args:
+            project_key: SonarQube project key
+            iteration: Current iteration number (1-indexed)
+            verbose: Enable verbose output
+        """
+        if verbose:
+            self.console.print("[dim]  Re-running SonarQube analysis...[/dim]")
+
+        analysis_result = await self.analysis_runner.run_analysis(
+            project_key=project_key,
+            project_name=f"temp-{project_key}",
+            project_dir=Path.cwd(),
+        )
+
+        if not analysis_result.success:
+            logger.warning(f"Analysis failed at iteration {iteration}: {analysis_result.error_message}")
+            # Continue anyway - might still have cached data
+        elif verbose:
+            self.console.print("[dim]  Analysis completed[/dim]")
+
+    async def _run_dedupe_iteration(
+        self,
+        dedupe_orch: DeduplicationOrchestrator,
+        file_path: Path,
+        project_key: str,
+        iteration: int,
+        max_iterations: int,
+        verbose: bool,
+    ) -> int:
+        """Run a single deduplication iteration.
+
+        Args:
+            dedupe_orch: Deduplication orchestrator
+            file_path: Path to file
+            project_key: SonarQube project key
+            iteration: Current iteration (0-indexed)
+            max_iterations: Maximum iterations
+            verbose: Enable verbose output
+
+        Returns:
+            Number of duplications fixed in this iteration
+        """
+        if verbose:
+            self.console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
+
+        # Re-run analysis to get fresh duplication data after fixes
+        if iteration > 0:
+            await self._rerun_analysis(project_key, iteration + 1, verbose)
+
+        # Run deduplication
+        summary = await dedupe_orch.dedupe_file(
+            file_path=str(file_path),
+            dry_run=False,
+            max_duplications=None,
+        )
+
+        # If no duplications were fixed, print message
+        if summary.fixed == 0 and verbose:
+            self.console.print("[dim]  No more duplications to fix[/dim]")
+
+        return summary.fixed
+
     async def _dedupe_file(
         self,
         file_path: Path,
@@ -777,39 +847,19 @@ class DedupeBranchOrchestrator:
 
             # Iteratively dedupe until no duplications or max iterations reached
             for iteration in range(max_iterations):
-                if verbose:
-                    self.console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
-
-                # Re-run analysis to get fresh duplication data after fixes
-                if iteration > 0:
-                    if verbose:
-                        self.console.print("[dim]  Re-running SonarQube analysis...[/dim]")
-
-                    analysis_result = await self.analysis_runner.run_analysis(
-                        project_key=project_key,
-                        project_name=f"temp-{project_key}",
-                        project_dir=Path.cwd(),
-                    )
-
-                    if not analysis_result.success:
-                        logger.warning(f"Analysis failed at iteration {iteration + 1}: {analysis_result.error_message}")
-                        # Continue anyway - might still have cached data
-                    elif verbose:
-                        self.console.print("[dim]  Analysis completed[/dim]")
-
-                # Run deduplication
-                summary = await dedupe_orch.dedupe_file(
-                    file_path=str(file_path),
-                    dry_run=False,
-                    max_duplications=None,
+                fixed_count = await self._run_dedupe_iteration(
+                    dedupe_orch,
+                    file_path,
+                    project_key,
+                    iteration,
+                    max_iterations,
+                    verbose,
                 )
 
-                total_fixed += summary.fixed
+                total_fixed += fixed_count
 
                 # If no duplications were fixed, we're done
-                if summary.fixed == 0:
-                    if verbose:
-                        self.console.print("[dim]  No more duplications to fix[/dim]")
+                if fixed_count == 0:
                     break
 
             return FileDedupResult(
