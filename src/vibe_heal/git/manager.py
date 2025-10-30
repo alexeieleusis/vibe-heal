@@ -157,16 +157,38 @@ class GitManager:
         Raises:
             GitOperationError: If commit fails or no files to commit
         """
-        # Auto-detect modified files if not provided
-        if files is None:
-            files = self.get_all_modified_files()
-
-        if not files:
+        # Handle empty list case (explicit request with no files)
+        if files is not None and not files:
             msg = "No files to commit"
             raise GitOperationError(msg)
 
+        # Auto-detect modified files if not provided
+        auto_detect = files is None
+        if auto_detect:
+            files = self.get_all_modified_files()
+
+        # If no modified files in auto-detect mode, check if already fixed
+        # This handles the case where one fix resolved multiple issues
+        if auto_detect and not files and not self.repo.index.diff("HEAD"):
+            # No modified files and nothing staged - issue was already fixed
+            return None
+        # If there are staged changes, proceed with those
+        # (This shouldn't normally happen in auto-detect mode, but handle it gracefully)
+
+        # At this point, files must be a list (either from auto-detect or passed in)
+        # This should never happen due to the logic above, but satisfy type checker
+        if files is None:
+            msg = "Internal error: files should not be None at this point"
+            raise GitOperationError(msg)
+
+        # Determine correct file count for commit message
+        if auto_detect and not files:
+            staged_files_count = len(self.repo.index.diff("HEAD"))
+            file_count_for_message = staged_files_count
+        else:
+            file_count_for_message = len(files)
         # Create commit message
-        message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
+        message = self._create_commit_message(issue, ai_tool_type, rule, file_count_for_message)
 
         # Stage and commit using helper method
         return self._stage_and_commit(files, message)
@@ -221,10 +243,11 @@ class GitManager:
             GitOperationError: If commit fails
         """
         try:
-            # Stage files
-            self.repo.index.add(files)
+            # Stage files (if any)
+            if files:
+                self.repo.index.add(files)
 
-            # Check if there are any changes to commit
+            # Check if there are any changes to commit after staging
             # This happens when one fix resolves multiple issues
             if not self.repo.index.diff("HEAD"):
                 # No changes staged - return None to indicate no commit was created
