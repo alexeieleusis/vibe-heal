@@ -13,7 +13,7 @@ from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 from vibe_heal.processor import IssueProcessor
-from vibe_heal.sonarqube import SonarQubeClient
+from vibe_heal.sonarqube import ComponentNotFoundError, SonarQubeClient
 from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 
 logger = logging.getLogger(__name__)
@@ -22,16 +22,17 @@ logger = logging.getLogger(__name__)
 class VibeHealOrchestrator:
     """Orchestrates the fix workflow."""
 
-    def __init__(self, config: VibeHealConfig) -> None:
+    def __init__(self, config: VibeHealConfig, ai_tool: AITool | None = None) -> None:
         """Initialize orchestrator.
 
         Args:
             config: Application configuration
+            ai_tool: Optional pre-initialized AI tool. If not provided, will auto-detect.
         """
         self.config = config
         self.console = Console()
         self.git_manager = GitManager()
-        self.ai_tool = self._initialize_ai_tool()
+        self.ai_tool = ai_tool if ai_tool is not None else self._initialize_ai_tool()
 
     def _initialize_ai_tool(self) -> AITool:
         """Initialize AI tool based on config or auto-detect.
@@ -82,8 +83,15 @@ class VibeHealOrchestrator:
 
         # Step 2: Fetch issues from SonarQube
         self.console.print(f"\n[yellow]Fetching issues for {file_path}...[/yellow]")
-        async with SonarQubeClient(self.config) as sonar_client:
-            issues = await sonar_client.get_issues_for_file(file_path)
+        try:
+            async with SonarQubeClient(self.config) as sonar_client:
+                issues = await sonar_client.get_issues_for_file(file_path)
+        except ComponentNotFoundError:
+            self.console.print(
+                f"[yellow]File '{file_path}' not found in SonarQube project. "
+                f"It may not be included in the analysis sources.[/yellow]"
+            )
+            return FixSummary(total_issues=0)
 
         if not issues:
             self.console.print("[green]No issues found![/green]")

@@ -104,6 +104,48 @@ class AiderTool(AITool):
                 error_message=f"Error invoking Aider: {e}",
             )
 
+    async def fix_duplication(
+        self,
+        prompt: str,
+        file_path: str,
+    ) -> FixResult:
+        """Fix code duplication using Aider.
+
+        Args:
+            prompt: Detailed prompt describing the duplication
+            file_path: Path to the file containing the duplication
+
+        Returns:
+            Result of the fix attempt
+        """
+        if not self.is_available():
+            return FixResult(
+                success=False,
+                error_message="Aider CLI not found. Please install Aider first.",
+            )
+
+        # Verify file exists
+        if not Path(file_path).exists():
+            return FixResult(
+                success=False,
+                error_message=f"File not found: {file_path}",
+            )
+
+        # Invoke Aider with the duplication prompt
+        try:
+            result = await self._invoke_aider(prompt, file_path)
+            return result
+        except asyncio.TimeoutError:
+            return FixResult(
+                success=False,
+                error_message=f"Aider timed out after {self.timeout} seconds",
+            )
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_message=f"Error invoking Aider: {e}",
+            )
+
     async def _invoke_aider(
         self,
         prompt: str,

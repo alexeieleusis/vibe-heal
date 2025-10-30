@@ -243,13 +243,53 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Always cleans up temporary project in finally block
   - Supports file pattern filtering (e.g., `["*.py", "src/**/*.ts"]`)
 
+**`deduplication/`**: Code duplication removal module
+- `DuplicationClient` - SonarQube duplications API client
+  - `get_duplications_for_file(file_path)` - uses `/api/duplications/show` endpoint
+  - Wraps `SonarQubeClient` for auth and request handling
+- `DuplicationBlock` model - represents single duplication location with line range
+  - `from_line` - starting line number
+  - `size` - number of lines
+  - `to_line` property - calculated ending line number
+  - `get_snippet_lines(source_lines)` - extracts first 3 + last 3 lines for prompts
+- `DuplicationGroup` model - group of duplicate blocks (same code in multiple places)
+  - `get_target_block(target_file_ref)` - get block for specific file
+  - `get_other_blocks(target_file_ref)` - get blocks from other files
+- `DuplicationsResponse` model - API response wrapper with files map
+- `DuplicationProcessor` - sorts and filters duplications
+  - Processes in **reverse line order** (highest to lowest)
+  - Filters by target file
+  - Supports max duplications limit
+- `DeduplicationOrchestrator` - single file deduplication workflow
+  - `dedupe_file(file_path, dry_run, max_duplications)` - main workflow
+  - Generates context-aware AI prompts with refactoring guidance
+  - Creates commit per successful refactoring
+  - Loads source file directly (not from SonarQube API)
+  - Uses snippet-based prompts: first 3 + last 3 lines for blocks >6 lines
+- `DedupeBranchOrchestrator` - branch-wide deduplication workflow
+  - `dedupe_branch(base_branch, max_iterations, file_patterns, verbose)` - main workflow
+  - Creates temporary SonarQube project
+  - Runs analysis once, then iteratively dedupes each file
+  - Reuses `DeduplicationOrchestrator.dedupe_file()` for per-file processing
+  - Always cleans up temporary project in finally block
+- `FileDedupResult` model - tracks per-file deduplication results
+- `DedupeBranchResult` model - tracks overall branch deduplication results
+
 **`cli.py`**: Command-line interface with typer
 - `vibe-heal fix <file>` - fix issues in a single file
   - Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--env-file`, `--verbose`
+- `vibe-heal dedupe <file>` - remove code duplications from a single file
+  - Flags: `--dry-run`, `--max-duplications`, `--ai-tool`, `--env-file`, `--verbose`
+  - Generates AI prompts with refactoring guidance (general, not prescriptive)
+  - Creates commit per successful refactoring
 - `vibe-heal cleanup` - clean up all modified files in current branch
   - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--env-file`, `--verbose`
   - Creates temporary SonarQube project, runs analysis, fixes issues iteratively
   - Displays per-file results with issues fixed counts
+- `vibe-heal dedupe-branch` - remove duplications from all modified files in current branch
+  - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--env-file`, `--verbose`
+  - Creates temporary SonarQube project, runs analysis, dedupes files iteratively
+  - Displays per-file results with duplications fixed counts
 - `vibe-heal config` - shows current configuration
   - Flags: `--env-file`
 - `vibe-heal version` - shows version information
@@ -257,7 +297,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 ### Critical Implementation Details
 
-**Reverse Line Order**: Issues are fixed from highest line number to lowest. This prevents line number shifts from earlier fixes affecting later fixes.
+**Reverse Line Order**: Issues and duplications are fixed from highest line number to lowest. This prevents line number shifts from earlier fixes affecting later fixes.
 
 **Component Path Construction**: SonarQube API queries use `components=projectkey:filepath` (lowercase project key). The old approach of querying with `componentKeys` and filtering client-side was incorrect.
 
@@ -268,6 +308,13 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 **Async/Await**: SonarQube client and AI tool operations use async/await pattern. CLI wraps with `asyncio.run()`.
 
 **AI Tool Integration**: Claude Code is invoked with permission mode `acceptEdits` and tool restriction to `Edit,Read` only for security. Uses `--print` and `--output-format json` flags.
+
+**Deduplication Specifics**:
+- **Snippet-based prompts**: For duplication blocks >6 lines, shows first 3 + last 3 lines with omitted line count (token efficiency)
+- **General refactoring guidance**: Prompts don't prescribe specific strategies (e.g., extract function vs. extract component), letting AI choose the most appropriate approach based on context
+- **No min-line threshold**: If SonarQube reports it, we try to fix it (SonarQube default is typically 10 lines)
+- **Commit format**: `refactor: [duplication] remove duplicate code at line X` with duplication details in body
+- **Local source loading**: Reads source file directly instead of using SonarQube API for better performance
 
 ### Configuration (.env.vibeheal)
 
@@ -302,8 +349,10 @@ uv pip install -e .
 
 # Test with actual SonarQube (requires .env.vibeheal)
 vibe-heal config  # Verify configuration
-vibe-heal fix src/file.py --dry-run  # Preview
+vibe-heal fix src/file.py --dry-run  # Preview issue fixes
 vibe-heal fix src/file.py --max-issues 1  # Fix one issue
+vibe-heal dedupe src/file.py --dry-run  # Preview deduplication
+vibe-heal dedupe src/file.py --max-duplications 1  # Fix one duplication
 ```
 
 **Testing specific modules**:
@@ -335,17 +384,24 @@ uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
 - Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
 - Tests verify format in `tests/git/test_manager.py`
 
+### Completed Features
+
+✅ Phase 0-6: Core workflow (fix command)
+✅ Phase 8: Aider Integration
+✅ **Code Deduplication** (dedupe & dedupe-branch commands):
+  - Single file and branch-wide deduplication
+  - Snippet-based prompts for token efficiency
+  - General refactoring guidance
+  - Iterative per-file processing
+
 ### Next Planned Features
 
 Phase 7 (Safety Features):
 - Backup/rollback mechanisms
 - Enhanced validation
 
-Phase 8 (Aider Integration):
-- Implement `AiderTool` class
-- Update auto-detection to try both tools
-
 Future enhancements:
-- Fetch issue documentation from SonarQube API and include in AI prompt
-- Multi-file processing
+- Option to include full duplicate code in prompts (vs snippets)
+- Multi-file cross-duplication removal
 - Custom commit message templates
+- Enhanced test coverage for deduplication module

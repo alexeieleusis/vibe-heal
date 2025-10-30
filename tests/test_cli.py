@@ -17,17 +17,22 @@ runner = CliRunner()
 class TestFixCommand:
     """Tests for fix command."""
 
+    @patch("vibe_heal.cli.initialize_ai_tool")
     @patch("vibe_heal.cli.VibeHealConfig")
     @patch("vibe_heal.cli.VibeHealOrchestrator")
     def test_fix_basic(
         self,
         mock_orchestrator_class: MagicMock,
         mock_config_class: MagicMock,
+        mock_init_ai_tool: MagicMock,
     ) -> None:
         """Test basic fix command."""
         # Setup mocks
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config_class.return_value = mock_config
+
+        mock_ai_tool = MagicMock()
+        mock_init_ai_tool.return_value = mock_ai_tool
 
         mock_orchestrator = MagicMock()
         mock_orchestrator.fix_file = AsyncMock(
@@ -45,22 +50,29 @@ class TestFixCommand:
 
         # Assertions
         assert result.exit_code == 0
+        mock_init_ai_tool.assert_called_once_with(mock_config)
+        mock_orchestrator_class.assert_called_once_with(mock_config, mock_ai_tool)
         mock_orchestrator.fix_file.assert_called_once()
         call_kwargs = mock_orchestrator.fix_file.call_args.kwargs
         assert call_kwargs["file_path"] == "test.py"
         assert call_kwargs["dry_run"] is False
 
+    @patch("vibe_heal.cli.initialize_ai_tool")
     @patch("vibe_heal.cli.VibeHealConfig")
     @patch("vibe_heal.cli.VibeHealOrchestrator")
     def test_fix_with_options(
         self,
         mock_orchestrator_class: MagicMock,
         mock_config_class: MagicMock,
+        mock_init_ai_tool: MagicMock,
     ) -> None:
         """Test fix command with all options."""
         # Setup mocks
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config_class.return_value = mock_config
+
+        mock_ai_tool = MagicMock()
+        mock_init_ai_tool.return_value = mock_ai_tool
 
         mock_orchestrator = MagicMock()
         mock_orchestrator.fix_file = AsyncMock(return_value=FixSummary(total_issues=1, fixed=1))
@@ -91,17 +103,22 @@ class TestFixCommand:
         assert call_kwargs["min_severity"] == "MAJOR"
         assert mock_config.ai_tool == AIToolType.CLAUDE_CODE
 
+    @patch("vibe_heal.cli.initialize_ai_tool")
     @patch("vibe_heal.cli.VibeHealConfig")
     @patch("vibe_heal.cli.VibeHealOrchestrator")
     def test_fix_with_failures(
         self,
         mock_orchestrator_class: MagicMock,
         mock_config_class: MagicMock,
+        mock_init_ai_tool: MagicMock,
     ) -> None:
         """Test fix command exits with error when there are failures."""
         # Setup mocks
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config_class.return_value = mock_config
+
+        mock_ai_tool = MagicMock()
+        mock_init_ai_tool.return_value = mock_ai_tool
 
         mock_orchestrator = MagicMock()
         mock_orchestrator.fix_file = AsyncMock(

@@ -21,3 +21,11 @@ class SonarQubeAPIError(SonarQubeError):
         """
         super().__init__(message)
         self.status_code = status_code
+
+
+class ComponentNotFoundError(SonarQubeError):
+    """Component not found in SonarQube project.
+
+    This typically means the file was not included in the SonarQube analysis
+    (e.g., documentation files, test files excluded from sources).
+    """

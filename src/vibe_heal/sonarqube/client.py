@@ -6,6 +6,7 @@ import httpx
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.sonarqube.exceptions import (
+    ComponentNotFoundError,
     SonarQubeAPIError,
     SonarQubeAuthError,
 )
@@ -99,6 +100,16 @@ class SonarQubeClient:
 
             if response.status_code == 401:
                 raise SonarQubeAuthError("Authentication failed. Check your credentials.")
+
+            if response.status_code == 404:
+                # Check if this is a component not found error
+                try:
+                    error_data = response.json()
+                    errors = error_data.get("errors", [])
+                    if errors and any("not found" in str(err.get("msg", "")).lower() for err in errors):
+                        raise ComponentNotFoundError(f"Component not found: {response.text}")
+                except (ValueError, KeyError):
+                    pass  # Not a JSON response or missing expected fields
 
             if response.status_code >= 400:
                 raise SonarQubeAPIError(

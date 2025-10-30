@@ -69,3 +69,19 @@ class AITool(ABC):
         Returns:
             Result of the fix attempt
         """
+
+    @abstractmethod
+    async def fix_duplication(
+        self,
+        prompt: str,
+        file_path: str,
+    ) -> "FixResult":
+        """Attempt to fix code duplication.
+
+        Args:
+            prompt: Detailed prompt describing the duplication
+            file_path: Path to the file containing the duplication
+
+        Returns:
+            Result of the fix attempt
+        """

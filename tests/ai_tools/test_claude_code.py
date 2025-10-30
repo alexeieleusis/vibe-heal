@@ -260,14 +260,21 @@ class TestClaudeCodeTool:
 
         # Track created temp files
         created_temp_files = []
-        original_namedtempfile = tempfile.NamedTemporaryFile
+        original_mkstemp = tempfile.mkstemp
 
-        def track_namedtempfile(*args, **kwargs):
-            temp = original_namedtempfile(*args, **kwargs)
-            created_temp_files.append(temp.name)
-            return temp
+        def track_mkstemp(*args, **kwargs):
+            fd, temp_path = original_mkstemp(*args, **kwargs)
+            created_temp_files.append(temp_path)
+            return fd, temp_path
 
-        mocker.patch("tempfile.NamedTemporaryFile", side_effect=track_namedtempfile)
+        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+
+        # Mock aiofiles.open to avoid actual async file I/O
+        mock_file = mocker.AsyncMock()
+        mock_file.__aenter__.return_value = mock_file
+        mock_file.__aexit__.return_value = None
+        mock_file.write = mocker.AsyncMock()
+        mocker.patch("aiofiles.open", return_value=mock_file)
 
         # Mock subprocess
         mock_process = mocker.AsyncMock()

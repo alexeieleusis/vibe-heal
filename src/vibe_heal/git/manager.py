@@ -165,6 +165,61 @@ class GitManager:
             msg = "No files to commit"
             raise GitOperationError(msg)
 
+        # Create commit message
+        message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
+
+        # Stage and commit using helper method
+        return self._stage_and_commit(files, message)
+
+    def create_commit(
+        self,
+        message: str,
+        files: list[str] | None = None,
+        include_untracked: bool = False,
+    ) -> str | None:
+        """Create a commit with a custom message.
+
+        If files is None, automatically detects and commits all modified files.
+
+        Args:
+            message: Commit message
+            files: List of files to commit, or None to auto-detect all modified files
+            include_untracked: If True, include untracked (new) files in auto-detection
+
+        Returns:
+            Commit SHA, or None if there were no changes to commit
+
+        Raises:
+            GitOperationError: If commit fails or no files to commit
+        """
+        # Auto-detect modified files if not provided
+        if files is None:
+            files = self.get_all_modified_files()
+            # Add untracked files if requested (e.g., for deduplication when AI creates new files)
+            if include_untracked:
+                untracked = self.repo.untracked_files
+                files.extend(untracked)
+
+        if not files:
+            msg = "No files to commit"
+            raise GitOperationError(msg)
+
+        # Stage and commit using helper method
+        return self._stage_and_commit(files, message)
+
+    def _stage_and_commit(self, files: list[str], message: str) -> str | None:
+        """Stage files and create a commit if there are changes.
+
+        Args:
+            files: List of files to stage
+            message: Commit message
+
+        Returns:
+            Commit SHA, or None if there were no changes to commit
+
+        Raises:
+            GitOperationError: If commit fails
+        """
         try:
             # Stage files
             self.repo.index.add(files)
@@ -174,9 +229,6 @@ class GitManager:
             if not self.repo.index.diff("HEAD"):
                 # No changes staged - return None to indicate no commit was created
                 return None
-
-            # Create commit message
-            message = self._create_commit_message(issue, ai_tool_type, rule, len(files))
 
             # Create commit
             commit = self.repo.index.commit(message)
