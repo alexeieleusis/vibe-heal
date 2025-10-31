@@ -331,6 +331,9 @@ class VibeHealOrchestrator:
 
                 self._handle_fix_result(fix_result, issue, dry_run, summary, progress, task, rule)
 
+                # Remove the completed task to prevent duplicates in the display
+                progress.remove_task(task)
+
         return summary
 
     def _display_summary(self, summary: FixSummary, dry_run: bool) -> None:
