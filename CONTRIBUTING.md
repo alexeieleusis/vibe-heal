@@ -1,46 +1,64 @@
 # Contributing to `vibe-heal`
 
-Contributions are welcome, and they are greatly appreciated!
-Every little bit helps, and credit will always be given.
+Thank you for your interest in contributing to vibe-heal!
 
-You can contribute in many ways:
+## Project Philosophy
 
-# Types of Contributions
+vibe-heal is intentionally focused on doing **one thing well**: automatically fixing SonarQube issues using AI tools. We prioritize simplicity, reliability, and maintainability over feature breadth.
 
-## Report Bugs
+**Important**: There are no plans to add heavy new features that would increase complexity or bloat. We prefer incremental improvements to existing functionality over expansive new capabilities.
+
+## Before You Contribute
+
+### For New Features
+
+**IMPORTANT**: Before working on any new feature, you **must** file an issue first to discuss:
+- Why the feature is needed
+- How it aligns with the project's focused scope
+- Whether it adds unnecessary complexity
+- Alternative approaches
+
+New features that significantly expand scope or add complexity will likely be declined, even if well-implemented.
+
+### For Bug Fixes
+
+Bug fixes are always welcome! For bugs:
+1. Search existing issues first to avoid duplicates
+2. Create an issue with reproduction steps
+3. Link your PR to the issue
+
+### For Documentation
+
+Documentation improvements are greatly appreciated:
+- Fixing typos or clarifying unclear sections
+- Adding examples for existing features
+- Improving setup instructions
+
+## Types of Contributions
+
+### Report Bugs
 
 Report bugs at https://github.com/alexeieleusis/vibe-heal/issues
 
-If you are reporting a bug, please include:
+Please include:
+- Operating system name and version
+- Python version
+- SonarQube version (if applicable)
+- AI tool used (Claude Code or Aider)
+- Detailed steps to reproduce the bug
+- Expected vs actual behavior
 
-- Your operating system name and version.
-- Any details about your local setup that might be helpful in troubleshooting.
-- Detailed steps to reproduce the bug.
+### Fix Bugs
 
-## Fix Bugs
+Look through GitHub issues for bugs tagged with "bug" and "help wanted".
 
-Look through the GitHub issues for bugs.
-Anything tagged with "bug" and "help wanted" is open to whoever wants to implement a fix for it.
+### Improve Documentation
 
-## Implement Features
-
-Look through the GitHub issues for features.
-Anything tagged with "enhancement" and "help wanted" is open to whoever wants to implement it.
-
-## Write Documentation
-
-vibe-heal could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
-
-## Submit Feedback
-
-The best way to send feedback is to file an issue at https://github.com/alexeieleusis/vibe-heal/issues.
-
-If you are proposing a new feature:
-
-- Explain in detail how it would work.
-- Keep the scope as narrow as possible, to make it easier to implement.
-- Remember that this is a volunteer-driven project, and that contributions
-  are welcome :)
+Documentation can always be improved:
+- Official docs improvements
+- Better docstrings
+- Example configurations
+- Troubleshooting guides
 
 # Get Started!
 
@@ -120,7 +138,18 @@ git push origin name-of-your-bugfix-or-feature
 
 Before you submit a pull request, check that it meets these guidelines:
 
-1. The pull request should include tests.
+1. **Issue first**: For new features, you must have discussed the feature in an issue and received approval before submitting a PR.
 
-2. If the pull request adds functionality, the docs should be updated.
-   Put your new functionality into a function with a docstring, and add the feature to the list in `README.md`.
+2. **Tests required**: The pull request must include tests for new functionality or bug fixes.
+
+3. **Documentation**: If the PR changes user-facing behavior, update the relevant documentation.
+
+4. **Keep it focused**: PRs should address a single concern. Large PRs that try to do too much will be asked to be split.
+
+5. **Code quality**: Before submitting, run:
+   ```bash
+   make check                    # Type checking and linting
+   make test                     # Run test suite
+   vibe-heal cleanup             # Fix SonarQube issues in your changes
+   vibe-heal dedupe-branch       # Remove code duplications
+   ```
