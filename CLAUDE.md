@@ -149,8 +149,6 @@ vibe-heal is an AI-powered SonarQube issue remediation tool that automatically f
 3. For each issue: invoke AI tool → if successful, create git commit
 4. Display summary report
 
-**Current Status**: Phases 0-6 complete (141 tests, 82% coverage). Core workflow is working end-to-end!
-
 ### High-Level Architecture
 
 ```
@@ -383,25 +381,3 @@ uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
 **Changing commit message format**:
 - Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
 - Tests verify format in `tests/git/test_manager.py`
-
-### Completed Features
-
-✅ Phase 0-6: Core workflow (fix command)
-✅ Phase 8: Aider Integration
-✅ **Code Deduplication** (dedupe & dedupe-branch commands):
-  - Single file and branch-wide deduplication
-  - Snippet-based prompts for token efficiency
-  - General refactoring guidance
-  - Iterative per-file processing
-
-### Next Planned Features
-
-Phase 7 (Safety Features):
-- Backup/rollback mechanisms
-- Enhanced validation
-
-Future enhancements:
-- Option to include full duplicate code in prompts (vs snippets)
-- Multi-file cross-duplication removal
-- Custom commit message templates
-- Enhanced test coverage for deduplication module

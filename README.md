@@ -21,44 +21,23 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 - Creates a git commit for each successful fix
 - Provides detailed progress reporting
 
-## Current Status: ✅ Core Features Complete
-
-**Completed Phases**:
-- ✅ Phase 0: Project Setup
-- ✅ Phase 1: Configuration Management
-- ✅ Phase 2: SonarQube API Integration
-- ✅ Phase 3: Issue Processing Engine
-- ✅ Phase 4: AI Tool Integration (Claude Code)
-- ✅ Phase 5: Git Integration & Auto-Commit
-- ✅ Phase 6: CLI & Orchestration
-- ✅ Phase 8: Aider Integration
-
-**Overall Progress**: 157 tests passing, 82% code coverage
-
-**Status**: The core workflow is complete and working end-to-end! You can now use vibe-heal to automatically fix SonarQube issues with **Claude Code** or **Aider**.
-
-**Next Steps**: Phase 7 (Safety Features), Additional enhancements
-
-See [ROADMAP.md](docs/ROADMAP.md) for detailed development plan.
-
 ## Features
 
-- ✅ **Branch cleanup**: Automatically fix all modified files in a branch before code review
-- ✅ **Code deduplication**: AI-powered removal of duplicate code blocks
-- ✅ Fetch SonarQube issues for any file
-- ✅ AI-powered issue fixing with **Claude Code** or **Aider**
-- ✅ **Enriched AI prompts** with full rule documentation and code context
-- ✅ Automatic git commits per fix with conventional commit format
-- ✅ **Enhanced commit messages** with rule links and detailed context
-- ✅ Smart issue ordering (reverse line order to avoid line number shifts)
-- ✅ Safe operation (checks for uncommitted changes in target file)
-- ✅ Detailed progress indicators and summary reports
-- ✅ Support for both SonarQube old and new API formats
-- ✅ Dry-run mode for testing without committing
-- ✅ Configurable severity filtering and issue limits
-- ✅ AI tool auto-detection (tries Claude Code first, then Aider)
-- ✅ Aider integration with Ollama/OpenAI/Anthropic support
-- 🔜 Additional safety features (Phase 7)
+- **Branch cleanup**: Automatically fix all modified files in a branch before code review
+- **Code deduplication**: AI-powered removal of duplicate code blocks
+- Fetch SonarQube issues for any file
+- AI-powered issue fixing with **Claude Code** or **Aider**
+- **Enriched AI prompts** with full rule documentation and code context
+- Automatic git commits per fix with conventional commit format
+- **Enhanced commit messages** with rule links and detailed context
+- Smart issue ordering (reverse line order to avoid line number shifts)
+- Safe operation (checks for uncommitted changes in target file)
+- Detailed progress indicators and summary reports
+- Support for both SonarQube old and new API formats
+- Dry-run mode for testing without committing
+- Configurable severity filtering and issue limits
+- AI tool auto-detection (tries Claude Code first, then Aider)
+- Aider integration with Ollama/OpenAI/Anthropic support
 
 ## Quick Start
 
@@ -312,23 +291,32 @@ This is useful for:
 ```
 vibe-heal/
 ├── src/vibe_heal/
-│   ├── config/          # Configuration management (✅ Complete)
-│   ├── sonarqube/       # SonarQube API client (✅ Complete)
-│   ├── ai_tools/        # AI tool integrations (✅ Claude Code + Aider complete)
-│   ├── processor/       # Issue processing logic (✅ Complete)
-│   ├── git/             # Git operations & branch analysis (✅ Complete)
-│   ├── cleanup/         # Branch cleanup orchestration (✅ Complete)
-│   ├── deduplication/   # Code deduplication (✅ Complete)
-│   ├── cli.py           # Command-line interface (✅ Complete)
-│   ├── orchestrator.py  # Workflow orchestration (✅ Complete)
-│   └── models.py        # Top-level models (✅ Complete)
-├── tests/               # Comprehensive test suite (275 tests, 85%+ coverage)
-└── docs/                # Documentation and development guides
+│   ├── config/          # Configuration management
+│   ├── sonarqube/       # SonarQube API client
+│   ├── ai_tools/        # AI tool integrations (Claude Code + Aider)
+│   ├── processor/       # Issue processing logic
+│   ├── git/             # Git operations & branch analysis
+│   ├── cleanup/         # Branch cleanup orchestration
+│   ├── deduplication/   # Code deduplication
+│   ├── cli.py           # Command-line interface
+│   ├── orchestrator.py  # Workflow orchestration
+│   └── models.py        # Top-level models
+├── tests/               # Comprehensive test suite
+└── docs/                # Documentation
 ```
 
 ## Contributing
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the development roadmap and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system architecture.
+Contributions are welcome! However, vibe-heal is intentionally focused on doing one thing well: automatically fixing SonarQube issues using AI tools. There are no plans to add heavy new features that would increase complexity or bloat.
+
+**Before submitting a pull request**:
+1. **File an issue first** to discuss your proposed changes
+2. Ensure your contribution aligns with the project's focused scope
+3. Keep changes simple and well-tested
+
+For bug fixes and improvements to existing functionality, please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system architecture details.
 
 
 
