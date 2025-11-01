@@ -50,6 +50,11 @@ def setup_logging(verbose: bool) -> None:
         handlers=[RichHandler(console=console, rich_tracebacks=True)],
     )
 
+    # Suppress httpx logs unless in verbose mode
+    # These INFO-level HTTP request logs break the progress display
+    if not verbose:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def initialize_ai_tool(config: VibeHealConfig) -> AITool:
     """Initialize and validate AI tool.
