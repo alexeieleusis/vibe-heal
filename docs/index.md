@@ -5,4 +5,4 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/alexeieleusis/vibe-heal)](https://img.shields.io/github/commit-activity/m/alexeieleusis/vibe-heal)
 [![License](https://img.shields.io/github/license/alexeieleusis/vibe-heal)](https://img.shields.io/github/license/alexeieleusis/vibe-heal)
 
-AI-powered SonarQube issue remediation that automatically fixes your code quality problems.
+AI-powered SonarQube issue remediation that automatically fixes your code quality problems using Claude Code or Aider.
