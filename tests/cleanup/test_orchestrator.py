@@ -49,6 +49,19 @@ def orchestrator(
     return CleanupOrchestrator(config, mock_client, mock_ai_tool)
 
 
+@pytest.fixture
+def temp_project() -> TempProjectMetadata:
+    """Create a test temporary project metadata."""
+    return TempProjectMetadata(
+        project_key="test-project-user_example_com-feature",
+        project_name="Test Project (user@example.com - feature)",
+        created_at="2024-01-01T00:00:00Z",
+        base_project_key="test-project",
+        branch_name="feature",
+        user_email="user@example.com",
+    )
+
+
 class TestCleanupOrchestratorInit:
     """Tests for CleanupOrchestrator initialization."""
 
@@ -104,17 +117,12 @@ class TestCleanupBranch:
         assert result.temp_project is None
 
     @pytest.mark.asyncio
-    async def test_initial_analysis_fails(self, orchestrator: CleanupOrchestrator) -> None:
+    async def test_initial_analysis_fails(
+        self,
+        orchestrator: CleanupOrchestrator,
+        temp_project: TempProjectMetadata,
+    ) -> None:
         """Test when initial SonarQube analysis fails."""
-        temp_project = TempProjectMetadata(
-            project_key="test-project-user_example_com-feature",
-            project_name="Test Project (user@example.com - feature)",
-            created_at="2024-01-01T00:00:00Z",
-            base_project_key="test-project",
-            branch_name="feature",
-            user_email="user@example.com",
-        )
-
         with (
             patch.object(
                 orchestrator.branch_analyzer,
@@ -179,17 +187,9 @@ class TestCleanupBranch:
     async def test_project_cleanup_on_exception(
         self,
         orchestrator: CleanupOrchestrator,
+        temp_project: TempProjectMetadata,
     ) -> None:
         """Test that temporary project is deleted even on exception."""
-        temp_project = TempProjectMetadata(
-            project_key="test-project-user_example_com-feature",
-            project_name="Test Project (user@example.com - feature)",
-            created_at="2024-01-01T00:00:00Z",
-            base_project_key="test-project",
-            branch_name="feature",
-            user_email="user@example.com",
-        )
-
         with (
             patch.object(
                 orchestrator.branch_analyzer,
