@@ -130,6 +130,53 @@ class SonarQubeClient:
         except httpx.HTTPError as e:
             raise SonarQubeAPIError(f"HTTP error: {e}") from e
 
+    def _log_first_page_raw_response(self, data: dict) -> None:
+        """Log raw API response details for the first page.
+
+        Args:
+            data: Raw API response data
+        """
+        raw_issues = data.get("issues", [])
+        if raw_issues:
+            logger.debug(f"First issue raw data: {raw_issues[0]}")
+        else:
+            logger.debug(f"API returned 0 issues. Full response keys: {list(data.keys())}")
+            logger.debug(f"Full paging info: {data.get('paging', {})}")
+
+    def _log_first_page_parsed_issues(self, response: IssuesResponse) -> None:
+        """Log parsed issue details for the first page.
+
+        Args:
+            response: Parsed issues response
+        """
+        for idx, issue in enumerate(response.issues[:3], 1):
+            logger.debug(
+                f"Issue {idx}: key={issue.key}, rule={issue.rule}, line={issue.line}, "
+                f"status={issue.status!r}, issue_status={issue.issue_status!r}, "
+                f"severity={issue.severity!r}, message={issue.message[:50]}..."
+            )
+
+    def _build_issues_params(self, component: str, page: int, page_size: int, resolved: bool) -> dict[str, Any]:
+        """Build query parameters for issues API request.
+
+        Args:
+            component: Component identifier
+            page: Page number
+            page_size: Page size
+            resolved: Include resolved issues
+
+        Returns:
+            Query parameters dictionary
+        """
+        params = {
+            "components": component,
+            "p": page,
+            "ps": page_size,
+        }
+        if not resolved:
+            params["issueStatuses"] = "OPEN,CONFIRMED"
+        return params
+
     async def get_issues_for_file(self, file_path: str, resolved: bool = False) -> list[SonarQubeIssue]:
         """Get all issues for a specific file.
 
@@ -153,15 +200,7 @@ class SonarQubeClient:
         component = f"{self.config.sonarqube_project_key}:{file_path}"
 
         while True:
-            params = {
-                "components": component,  # Use components (not componentKeys) for specific file
-                "p": page,
-                "ps": page_size,
-            }
-
-            # Use issueStatuses instead of resolved for more precise filtering
-            if not resolved:
-                params["issueStatuses"] = "OPEN,CONFIRMED"
+            params = self._build_issues_params(component, page, page_size, resolved)
 
             logger.debug(f"Fetching issues for component={component}, params={params}")
             data = await self._request("GET", "/api/issues/search", params=params)
@@ -169,13 +208,7 @@ class SonarQubeClient:
             # Log raw API response before parsing
             logger.debug(f"Raw API response: total={data.get('total')}, issues count={len(data.get('issues', []))}")
             if page == 1:
-                # Show what components are in the response
-                raw_issues = data.get("issues", [])
-                if raw_issues:
-                    logger.debug(f"First issue raw data: {raw_issues[0]}")
-                else:
-                    logger.debug(f"API returned 0 issues. Full response keys: {list(data.keys())}")
-                    logger.debug(f"Full paging info: {data.get('paging', {})}")
+                self._log_first_page_raw_response(data)
 
             response = IssuesResponse(**data)
 
@@ -183,12 +216,7 @@ class SonarQubeClient:
 
             # Log raw issue data for the first few issues on the first page
             if page == 1 and response.issues:
-                for idx, issue in enumerate(response.issues[:3], 1):
-                    logger.debug(
-                        f"Issue {idx}: key={issue.key}, rule={issue.rule}, line={issue.line}, "
-                        f"status={issue.status!r}, issue_status={issue.issue_status!r}, "
-                        f"severity={issue.severity!r}, message={issue.message[:50]}..."
-                    )
+                self._log_first_page_parsed_issues(response)
 
             # Add all issues from this page (already filtered by component)
             issues.extend(response.issues)
