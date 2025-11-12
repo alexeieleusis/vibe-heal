@@ -153,7 +153,7 @@ class SonarQubeClient:
             logger.debug(
                 f"Issue {idx}: key={issue.key}, rule={issue.rule}, line={issue.line}, "
                 f"status={issue.status!r}, issue_status={issue.issue_status!r}, "
-                f"severity={issue.severity!r}, message={issue.message[:50]}..."
+                f"severity={issue.severity!r}, message={issue.message[:50]}{'...' if len(issue.message) > 50 else ''}"
             )
 
     def _build_issues_params(self, component: str, page: int, page_size: int, resolved: bool) -> dict[str, Any]:
