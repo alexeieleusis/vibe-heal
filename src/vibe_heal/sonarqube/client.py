@@ -1,5 +1,6 @@
 """SonarQube API client."""
 
+import logging
 from typing import Any
 
 import httpx
@@ -18,6 +19,8 @@ from vibe_heal.sonarqube.models import (
     SourceLine,
     SourceLinesResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SonarQubeClient:
@@ -146,8 +149,8 @@ class SonarQubeClient:
         page_size = 100
 
         # Build component identifier: projectKey:filePath
-        # SonarQube uses lowercase project key in component paths
-        component = f"{self.config.sonarqube_project_key.lower()}:{file_path}"
+        # Use the project key as-is (case-sensitive)
+        component = f"{self.config.sonarqube_project_key}:{file_path}"
 
         while True:
             params = {
@@ -160,8 +163,32 @@ class SonarQubeClient:
             if not resolved:
                 params["issueStatuses"] = "OPEN,CONFIRMED"
 
+            logger.debug(f"Fetching issues for component={component}, params={params}")
             data = await self._request("GET", "/api/issues/search", params=params)
+
+            # Log raw API response before parsing
+            logger.debug(f"Raw API response: total={data.get('total')}, issues count={len(data.get('issues', []))}")
+            if page == 1:
+                # Show what components are in the response
+                raw_issues = data.get("issues", [])
+                if raw_issues:
+                    logger.debug(f"First issue raw data: {raw_issues[0]}")
+                else:
+                    logger.debug(f"API returned 0 issues. Full response keys: {list(data.keys())}")
+                    logger.debug(f"Full paging info: {data.get('paging', {})}")
+
             response = IssuesResponse(**data)
+
+            logger.debug(f"Received {len(response.issues)} issues from page {page} (total={response.total})")
+
+            # Log raw issue data for the first few issues on the first page
+            if page == 1 and response.issues:
+                for idx, issue in enumerate(response.issues[:3], 1):
+                    logger.debug(
+                        f"Issue {idx}: key={issue.key}, rule={issue.rule}, line={issue.line}, "
+                        f"status={issue.status!r}, issue_status={issue.issue_status!r}, "
+                        f"severity={issue.severity!r}, message={issue.message[:50]}..."
+                    )
 
             # Add all issues from this page (already filtered by component)
             issues.extend(response.issues)
@@ -176,6 +203,7 @@ class SonarQubeClient:
 
             page += 1
 
+        logger.debug(f"Total issues fetched: {len(issues)}")
         return issues
 
     async def get_rule_details(self, rule_key: str) -> SonarQubeRule:

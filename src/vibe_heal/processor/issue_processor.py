@@ -1,7 +1,11 @@
 """Issue processor for sorting and filtering SonarQube issues."""
 
+import logging
+
 from vibe_heal.processor.models import ProcessingResult
 from vibe_heal.sonarqube.models import SonarQubeIssue
+
+logger = logging.getLogger(__name__)
 
 
 class IssueProcessor:
@@ -52,13 +56,37 @@ class IssueProcessor:
         """
         total = len(issues)
 
+        logger.debug(f"Processing {total} issues")
+
         # Step 1: Filter fixable issues
-        fixable = [issue for issue in issues if issue.is_fixable]
+        fixable = []
+        for issue in issues:
+            if issue.is_fixable:
+                fixable.append(issue)
+            else:
+                # Log why each issue is not fixable
+                if issue.line is None:
+                    logger.debug(
+                        f"Issue {issue.key} not fixable: no line number (rule={issue.rule}, "
+                        f"message={issue.message[:50]}...)"
+                    )
+                else:
+                    logger.debug(
+                        f"Issue {issue.key} not fixable: status={issue.status!r} "
+                        f"(rule={issue.rule}, line={issue.line}, message={issue.message[:50]}...)"
+                    )
+
+        logger.debug(f"Step 1: {len(fixable)}/{total} issues are fixable")
 
         # Step 2: Filter by severity if specified
         if self.min_severity:
             min_rank = self._severity_rank.get(self.min_severity.upper(), 0)
+            before_count = len(fixable)
             fixable = [issue for issue in fixable if self._severity_rank.get(issue.severity or "INFO", 0) >= min_rank]
+            logger.debug(
+                f"Step 2: {len(fixable)}/{before_count} issues meet severity threshold "
+                f"(min_severity={self.min_severity})"
+            )
 
         # Step 3: Sort issues in reverse line order (high to low)
         # This ensures fixes don't affect line numbers of subsequent issues
@@ -66,7 +94,11 @@ class IssueProcessor:
 
         # Step 4: Limit number of issues if specified
         if self.max_issues and self.max_issues > 0:
+            before_count = len(sorted_issues)
             sorted_issues = sorted_issues[: self.max_issues]
+            logger.debug(
+                f"Step 4: limited to {len(sorted_issues)}/{before_count} issues (max_issues={self.max_issues})"
+            )
 
         return ProcessingResult(
             total_issues=total,
