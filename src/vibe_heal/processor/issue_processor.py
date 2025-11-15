@@ -68,12 +68,12 @@ class IssueProcessor:
                 if issue.line is None:
                     logger.debug(
                         f"Issue {issue.key} not fixable: no line number (rule={issue.rule}, "
-                        f"message={issue.message[:50]}{'...' if len(issue.message) > 50 else ''})"
+                        f"message={issue.message[:50]}{'...' if issue.message and len(issue.message) > 50 else ''})"
                     )
                 else:
                     logger.debug(
                         f"Issue {issue.key} not fixable: status={issue.status!r} "
-                        f"(rule={issue.rule}, line={issue.line}, message={issue.message[:50]}{'...' if len(issue.message) > 50 else ''})"
+                        f"(rule={issue.rule}, line={issue.line}, message={issue.message[:50]}{'...' if issue.message and len(issue.message) > 50 else ''})"
                     )
 
         logger.debug(f"Step 1: {len(fixable)}/{total} issues are fixable")
