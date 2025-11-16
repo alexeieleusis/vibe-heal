@@ -288,16 +288,38 @@ class TestSonarQubeClient:
     @pytest.mark.asyncio
     @respx.mock
     async def test_component_path_construction(self, config: VibeHealConfig, api_responses: dict) -> None:
-        """Test component path is constructed correctly with lowercase project key."""
+        """Test component path preserves project key case."""
         route = respx.get("https://sonar.test.com/api/issues/search").mock(
             return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
         )
 
         async with SonarQubeClient(config) as client:
-            # Component path should be: lowercase_project_key:file_path
+            # Component path should use project key as-is (case-sensitive)
             await client.get_issues_for_file("src/main.py")
 
+            # Config has "my-project" (lowercase) so component should be "my-project:src/main.py"
             assert route.calls.last.request.url.params["components"] == "my-project:src/main.py"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_component_path_case_sensitive(self, api_responses: dict) -> None:
+        """Test component path respects uppercase project keys (case-sensitive)."""
+        # Create config with uppercase project key
+        config_uppercase = VibeHealConfig(
+            sonarqube_url="https://sonar.test.com",
+            sonarqube_token="test-token",
+            sonarqube_project_key="MY-PROJECT",  # Uppercase
+        )
+
+        route = respx.get("https://sonar.test.com/api/issues/search").mock(
+            return_value=httpx.Response(200, json=api_responses["issues_response_main_py"])
+        )
+
+        async with SonarQubeClient(config_uppercase) as client:
+            await client.get_issues_for_file("src/main.py")
+
+            # Component should preserve uppercase: "MY-PROJECT:src/main.py"
+            assert route.calls.last.request.url.params["components"] == "MY-PROJECT:src/main.py"
 
     @pytest.mark.asyncio
     @respx.mock

@@ -1,5 +1,6 @@
 """SonarQube API client."""
 
+import logging
 from typing import Any
 
 import httpx
@@ -18,6 +19,8 @@ from vibe_heal.sonarqube.models import (
     SourceLine,
     SourceLinesResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SonarQubeClient:
@@ -127,6 +130,103 @@ class SonarQubeClient:
         except httpx.HTTPError as e:
             raise SonarQubeAPIError(f"HTTP error: {e}") from e
 
+    def _log_first_page_raw_response(self, data: dict) -> None:
+        """Log raw API response details for the first page.
+
+        Args:
+            data: Raw API response data
+        """
+        raw_issues = data.get("issues", [])
+        if raw_issues:
+            logger.debug(f"First issue raw data: {raw_issues[0]}")
+        else:
+            logger.debug(f"API returned 0 issues. Full response keys: {list(data.keys())}")
+            logger.debug(f"Full paging info: {data.get('paging', {})}")
+
+    def _log_first_page_parsed_issues(self, response: IssuesResponse) -> None:
+        """Log parsed issue details for the first page.
+
+        Args:
+            response: Parsed issues response
+        """
+        for idx, issue in enumerate(response.issues[:3], 1):
+            logger.debug(
+                f"Issue {idx}: key={issue.key}, rule={issue.rule}, line={issue.line}, "
+                f"status={issue.status!r}, issue_status={issue.issue_status!r}, "
+                f"severity={issue.severity!r}, message={issue.message[:50]}{'...' if issue.message and len(issue.message) > 50 else ''}"
+            )
+
+    async def get_issues(
+        self,
+        component: str | None = None,
+        resolved: bool = False,
+        page_size: int = 100,
+    ) -> list[SonarQubeIssue]:
+        """Get issues with optional filtering.
+
+        Args:
+            component: Optional component identifier (e.g., "projectKey:file/path.py").
+                      If None, fetches all project issues.
+            resolved: Include resolved issues (default: False)
+            page_size: Number of issues per page (default: 100)
+
+        Returns:
+            List of SonarQube issues
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        issues: list[SonarQubeIssue] = []
+        page = 1
+
+        while True:
+            params: dict[str, Any] = {
+                "p": page,
+                "ps": page_size,
+            }
+
+            # Add component filter if specified
+            if component:
+                params["components"] = component
+            else:
+                # No file filter - get all project issues
+                params["componentKeys"] = self.config.sonarqube_project_key
+
+            # Add status filter
+            if not resolved:
+                params["issueStatuses"] = "OPEN,CONFIRMED"
+
+            logger.debug(f"Fetching issues with params={params}")
+            data = await self._request("GET", "/api/issues/search", params=params)
+
+            # Log raw API response before parsing
+            logger.debug(f"Raw API response: total={data.get('total')}, issues count={len(data.get('issues', []))}")
+            if page == 1:
+                self._log_first_page_raw_response(data)
+
+            response = IssuesResponse(**data)
+
+            logger.debug(f"Received {len(response.issues)} issues from page {page} (total={response.total})")
+
+            # Log raw issue data for the first few issues on the first page
+            if page == 1 and response.issues:
+                self._log_first_page_parsed_issues(response)
+
+            issues.extend(response.issues)
+
+            # Check if there are more pages
+            if response.total is None:
+                raise SonarQubeAPIError("API response missing total count")
+            total_pages = (response.total + page_size - 1) // page_size
+            if page >= total_pages:
+                break
+
+            page += 1
+
+        logger.debug(f"Total issues fetched: {len(issues)}")
+        return issues
+
     async def get_issues_for_file(self, file_path: str, resolved: bool = False) -> list[SonarQubeIssue]:
         """Get all issues for a specific file.
 
@@ -141,42 +241,10 @@ class SonarQubeClient:
             SonarQubeAuthError: Authentication failed
             SonarQubeAPIError: API request failed
         """
-        issues: list[SonarQubeIssue] = []
-        page = 1
-        page_size = 100
-
         # Build component identifier: projectKey:filePath
-        # SonarQube uses lowercase project key in component paths
-        component = f"{self.config.sonarqube_project_key.lower()}:{file_path}"
-
-        while True:
-            params = {
-                "components": component,  # Use components (not componentKeys) for specific file
-                "p": page,
-                "ps": page_size,
-            }
-
-            # Use issueStatuses instead of resolved for more precise filtering
-            if not resolved:
-                params["issueStatuses"] = "OPEN,CONFIRMED"
-
-            data = await self._request("GET", "/api/issues/search", params=params)
-            response = IssuesResponse(**data)
-
-            # Add all issues from this page (already filtered by component)
-            issues.extend(response.issues)
-
-            # Check if there are more pages
-            # Model validator ensures total is never None, but check for safety
-            if response.total is None:
-                raise SonarQubeAPIError("API response missing total count")
-            total_pages = (response.total + page_size - 1) // page_size
-            if page >= total_pages:
-                break
-
-            page += 1
-
-        return issues
+        # Use the project key as-is (case-sensitive)
+        component = f"{self.config.sonarqube_project_key}:{file_path}"
+        return await self.get_issues(component=component, resolved=resolved)
 
     async def get_rule_details(self, rule_key: str) -> SonarQubeRule:
         """Get detailed information about a specific rule.

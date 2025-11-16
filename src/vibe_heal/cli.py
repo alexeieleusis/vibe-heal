@@ -582,5 +582,62 @@ def version() -> None:
     console.print(f"vibe-heal version {__version__}")
 
 
+@app.command()
+def debug_issues(
+    file_path: str | None = typer.Argument(None, help="Optional file path to check"),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        "-n",
+        help="Maximum number of issues to show",
+    ),
+) -> None:
+    """Debug: show raw issues from SonarQube (with or without file filter)."""
+    setup_logging(True)  # Always verbose for debug command
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        async def _debug() -> None:
+            async with SonarQubeClient(config) as client:
+                if file_path:
+                    console.print(f"[yellow]Fetching issues for file: {file_path}[/yellow]\n")
+                    issues = await client.get_issues_for_file(file_path)
+                else:
+                    console.print("[yellow]Fetching ALL project issues (no file filter)[/yellow]\n")
+                    # Fetch all project issues without file filter
+                    issues = await client.get_issues(component=None, page_size=limit)
+
+                console.print(f"[bold]Found {len(issues)} issues[/bold]\n")
+
+                for idx, issue in enumerate(issues[:limit], 1):
+                    console.print(f"[cyan]Issue {idx}:[/cyan]")
+                    console.print(f"  Key: {issue.key}")
+                    console.print(f"  Rule: {issue.rule}")
+                    console.print(f"  Component: {issue.component}")
+                    console.print(f"  Line: {issue.line}")
+                    console.print(f"  Status: {issue.status!r}")
+                    console.print(f"  Issue Status: {issue.issue_status!r}")
+                    console.print(f"  Severity: {issue.severity}")
+                    console.print(f"  Message: {issue.message}")
+                    console.print(f"  Is Fixable: {issue.is_fixable}")
+                    console.print()
+
+        asyncio.run(_debug())
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print_exception()
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     app()
