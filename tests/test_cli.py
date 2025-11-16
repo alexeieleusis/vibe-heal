@@ -10,6 +10,7 @@ from vibe_heal.cleanup.orchestrator import CleanupResult, FileCleanupResult
 from vibe_heal.cli import app
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.models import FixSummary
+from vibe_heal.sonarqube.models import SonarQubeIssue
 
 runner = CliRunner()
 
@@ -439,3 +440,252 @@ class TestVersionCommand:
 
         assert result.exit_code == 0
         assert "vibe-heal version" in result.stdout
+
+
+class TestDebugIssuesCommand:
+    """Tests for debug-issues command."""
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_with_file(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command with file path."""
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues_for_file = AsyncMock(
+            return_value=[
+                SonarQubeIssue(
+                    key="AXtest123",
+                    rule="python:S1234",
+                    component="project:src/test.py",
+                    message="Test issue message",
+                    line=10,
+                    status="OPEN",
+                    severity="MAJOR",
+                ),
+            ]
+        )
+        mock_client_class.return_value = mock_client
+
+        # Run command
+        result = runner.invoke(app, ["debug-issues", "src/test.py"])
+
+        # Assertions
+        assert result.exit_code == 0
+        assert "Fetching issues for file: src/test.py" in result.stdout
+        assert "Found 1 issues" in result.stdout
+        assert "Issue 1:" in result.stdout
+        assert "Key: AXtest123" in result.stdout
+        assert "Rule: python:S1234" in result.stdout
+        assert "Line: 10" in result.stdout
+        assert "Message: Test issue message" in result.stdout
+        mock_client.get_issues_for_file.assert_called_once_with("src/test.py")
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_without_file(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command without file path (all project issues)."""
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues = AsyncMock(
+            return_value=[
+                SonarQubeIssue(
+                    key="AXtest456",
+                    rule="python:S5678",
+                    component="project:src/other.py",
+                    message="Another issue",
+                    line=20,
+                    status="CONFIRMED",
+                    severity="CRITICAL",
+                ),
+            ]
+        )
+        mock_client_class.return_value = mock_client
+
+        # Run command
+        result = runner.invoke(app, ["debug-issues"])
+
+        # Assertions
+        assert result.exit_code == 0
+        assert "Fetching ALL project issues" in result.stdout
+        assert "Found 1 issues" in result.stdout
+        assert "Key: AXtest456" in result.stdout
+        mock_client.get_issues.assert_called_once_with(component=None, page_size=10)
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_with_limit(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command respects limit option."""
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock with multiple issues
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues = AsyncMock(
+            return_value=[
+                SonarQubeIssue(
+                    key=f"AXtest{i}",
+                    rule="python:S1234",
+                    component="project:src/test.py",
+                    message=f"Issue {i}",
+                    line=i * 10,
+                    status="OPEN",
+                    severity="MAJOR",
+                )
+                for i in range(5)
+            ]
+        )
+        mock_client_class.return_value = mock_client
+
+        # Run command with custom limit
+        result = runner.invoke(app, ["debug-issues", "--limit", "3"])
+
+        # Assertions
+        assert result.exit_code == 0
+        assert "Found 5 issues" in result.stdout
+        # Should only display first 3 issues
+        assert "Issue 1:" in result.stdout
+        assert "Issue 2:" in result.stdout
+        assert "Issue 3:" in result.stdout
+        assert "Issue 4:" not in result.stdout
+        mock_client.get_issues.assert_called_once_with(component=None, page_size=3)
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_shows_all_fields(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command displays all issue fields."""
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock with issue having all fields
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues_for_file = AsyncMock(
+            return_value=[
+                SonarQubeIssue(
+                    key="AXfull123",
+                    rule="python:S999",
+                    component="myproject:src/module/file.py",
+                    message="Complete issue with all fields",
+                    line=42,
+                    status="OPEN",
+                    issue_status="OPEN",
+                    severity="BLOCKER",
+                ),
+            ]
+        )
+        mock_client_class.return_value = mock_client
+
+        # Run command
+        result = runner.invoke(app, ["debug-issues", "src/module/file.py"])
+
+        # Assertions - verify all fields are displayed
+        assert result.exit_code == 0
+        assert "Key: AXfull123" in result.stdout
+        assert "Rule: python:S999" in result.stdout
+        assert "Component: myproject:src/module/file.py" in result.stdout
+        assert "Line: 42" in result.stdout
+        assert "Status:" in result.stdout
+        assert "Issue Status:" in result.stdout
+        assert "Severity: BLOCKER" in result.stdout
+        assert "Message: Complete issue with all fields" in result.stdout
+        assert "Is Fixable:" in result.stdout
+
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_config_error(self, mock_config_class: MagicMock) -> None:
+        """Test debug-issues command handles configuration errors."""
+        from vibe_heal.config.exceptions import ConfigurationError
+
+        mock_config_class.side_effect = ConfigurationError("Missing SONARQUBE_URL")
+
+        result = runner.invoke(app, ["debug-issues"])
+
+        assert result.exit_code == 1
+        assert "Configuration error" in result.stdout
+        assert "Missing SONARQUBE_URL" in result.stdout
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_api_error(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command handles API errors."""
+        from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
+
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock that raises an error
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues_for_file = AsyncMock(side_effect=SonarQubeAPIError("API request failed"))
+        mock_client_class.return_value = mock_client
+
+        # Run command
+        result = runner.invoke(app, ["debug-issues", "src/test.py"])
+
+        # Assertions
+        assert result.exit_code == 1
+        assert "Error:" in result.stdout
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_debug_issues_empty_results(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test debug-issues command handles empty results."""
+        # Setup config mock
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config_class.return_value = mock_config
+
+        # Setup client mock returning no issues
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.get_issues_for_file = AsyncMock(return_value=[])
+        mock_client_class.return_value = mock_client
+
+        # Run command
+        result = runner.invoke(app, ["debug-issues", "src/clean.py"])
+
+        # Assertions
+        assert result.exit_code == 0
+        assert "Found 0 issues" in result.stdout
