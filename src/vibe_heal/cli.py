@@ -610,17 +610,8 @@ def debug_issues(
                     issues = await client.get_issues_for_file(file_path)
                 else:
                     console.print("[yellow]Fetching ALL project issues (no file filter)[/yellow]\n")
-                    # Fetch without file filter
-                    params = {
-                        "componentKeys": config.sonarqube_project_key,
-                        "ps": limit,
-                        "issueStatuses": "OPEN,CONFIRMED",
-                    }
-                    data = await client._request("GET", "/api/issues/search", params=params)
-                    from vibe_heal.sonarqube.models import IssuesResponse
-
-                    response = IssuesResponse(**data)
-                    issues = response.issues
+                    # Fetch all project issues without file filter
+                    issues = await client.get_issues(component=None, page_size=limit)
 
                 console.print(f"[bold]Found {len(issues)} issues[/bold]\n")
 
