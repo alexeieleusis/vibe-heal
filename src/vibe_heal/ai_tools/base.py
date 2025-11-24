@@ -12,8 +12,9 @@ if TYPE_CHECKING:
 class AIToolType(str, Enum):
     """Supported AI coding tools."""
 
-    CLAUDE_CODE = "claude-code"
     AIDER = "aider"
+    CLAUDE_CODE = "claude-code"
+    GEMINI = "gemini"
 
     @property
     def cli_command(self) -> str:
@@ -34,6 +35,7 @@ class AIToolType(str, Enum):
         return {
             AIToolType.CLAUDE_CODE: "Claude Code",
             AIToolType.AIDER: "Aider",
+            AIToolType.GEMINI: "Gemini",
         }[self]
 
 

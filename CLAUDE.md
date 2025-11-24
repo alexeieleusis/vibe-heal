@@ -17,6 +17,7 @@ make install  # Sets up environment and pre-commit hooks
 ```
 
 This command:
+
 - Creates virtual environment with `uv sync`
 - Installs pre-commit hooks
 
@@ -56,6 +57,7 @@ uv run deptry src
 ### Linting & Formatting
 
 The project uses **ruff** for linting and formatting (not black or flake8). Configuration is in `pyproject.toml`:
+
 - Line length: 120 characters
 - Target Python version: 3.11+
 - Auto-fix enabled
@@ -98,6 +100,7 @@ Build uses hatchling as the backend. Package source is in `src/vibe_heal/`.
 ## Type Checking
 
 mypy is configured with strict settings:
+
 - `disallow_untyped_defs = true`
 - `disallow_any_unimported = true`
 - Only checks files in `src/`
@@ -125,6 +128,7 @@ uv add --dev <package>
 ## CI/CD
 
 The project has GitHub Actions workflows for:
+
 - Main workflow on pull requests and pushes to main
 - Release workflow when creating releases
 - Codecov validation
@@ -144,6 +148,7 @@ Supports Python 3.11 through 3.13. The `tox.ini` configuration tests against all
 vibe-heal is an AI-powered SonarQube issue remediation tool that automatically fixes code quality problems using AI coding assistants (Claude Code or Aider).
 
 **Core Workflow**:
+
 1. Fetch SonarQube issues for a file
 2. Sort issues in reverse line order (high to low - prevents line number shifts)
 3. For each issue: invoke AI tool → if successful, create git commit
@@ -151,7 +156,7 @@ vibe-heal is an AI-powered SonarQube issue remediation tool that automatically f
 
 ### High-Level Architecture
 
-```
+```txt
 CLI Layer (cli.py)
     ↓
 Orchestrator (orchestrator.py) - coordinates entire workflow
@@ -166,6 +171,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 ### Module Responsibilities
 
 **`config/`**: Pydantic-based configuration from `.env.vibeheal` or `.env`
+
 - `VibeHealConfig` model with validation
 - Supports token auth (preferred) or basic auth
 - AI tool auto-detection if not specified
@@ -173,6 +179,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - CLI commands accept `--env-file` option to override default config file
 
 **`sonarqube/`**: Async HTTP client for SonarQube Web API
+
 - `SonarQubeClient.get_issues_for_file(file_path)` - uses `components` parameter for file-specific queries
 - `SonarQubeClient.create_project(key, name)` - creates new SonarQube project
 - `SonarQubeClient.delete_project(key)` - deletes SonarQube project
@@ -196,14 +203,16 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `AnalysisResult` model - returns success status, task_id, dashboard_url, error details
   - Supports both token and basic auth
   - Optional sources parameter for partial analysis optimization
-  - **Requirement**: `sonar-scanner` CLI must be installed (https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/)
+  - **Requirement**: `sonar-scanner` CLI must be installed [Download](https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/)
 
 **`processor/`**: Business logic for issue handling
+
 - Sorts issues by line number descending (fixes high line numbers first)
 - Filters by fixability (`is_fixable` property checks for line number, non-resolved status)
 - Supports severity filtering and max issue limits
 
 **`ai_tools/`**: Abstract interface + implementations
+
 - `AITool` ABC with `fix_issue()` method
 - `AIToolType` enum (CLAUDE_CODE, AIDER)
 - `ClaudeCodeTool` - invokes `claude` CLI with `--print --output-format json`
@@ -211,6 +220,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - `FixResult` model for fix outcomes
 
 **`git/`**: Git operations via GitPython
+
 - `GitManager.commit_fix()` - creates conventional commits
 - Commit format: `fix: [SQ-RULE] message` with full issue details in body
 - Validates file has no uncommitted changes before processing
@@ -224,12 +234,14 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `get_user_email()` - retrieves git user email for project naming
 
 **`orchestrator.py`**: Main workflow coordination
+
 - `VibeHealOrchestrator.fix_file()` - end-to-end flow for fixing a single file
 - Validates preconditions (git state, file exists, AI tool available)
 - Progress indicators with rich library
 - User confirmation before processing (unless dry-run)
 
 **`cleanup/`**: Branch cleanup workflow
+
 - `CleanupOrchestrator` - orchestrates branch cleanup workflow
   - `cleanup_branch(base_branch, max_iterations, file_patterns)` - cleans up all modified files
   - Workflow: analyze branch → create temp project → run analysis → fix files iteratively → delete temp project
@@ -242,6 +254,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Supports file pattern filtering (e.g., `["*.py", "src/**/*.ts"]`)
 
 **`deduplication/`**: Code duplication removal module
+
 - `DuplicationClient` - SonarQube duplications API client
   - `get_duplications_for_file(file_path)` - uses `/api/duplications/show` endpoint
   - Wraps `SonarQubeClient` for auth and request handling
@@ -274,6 +287,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - `DedupeBranchResult` model - tracks overall branch deduplication results
 
 **`cli.py`**: Command-line interface with typer
+
 - `vibe-heal fix <file>` - fix issues in a single file
   - Flags: `--dry-run`, `--max-issues`, `--min-severity`, `--ai-tool`, `--env-file`, `--verbose`
 - `vibe-heal dedupe <file>` - remove code duplications from a single file
@@ -308,6 +322,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 **AI Tool Integration**: Claude Code is invoked with permission mode `acceptEdits` and tool restriction to `Edit,Read` only for security. Uses `--print` and `--output-format json` flags.
 
 **Deduplication Specifics**:
+
 - **Snippet-based prompts**: For duplication blocks >6 lines, shows first 3 + last 3 lines with omitted line count (token efficiency)
 - **General refactoring guidance**: Prompts don't prescribe specific strategies (e.g., extract function vs. extract component), letting AI choose the most appropriate approach based on context
 - **No min-line threshold**: If SonarQube reports it, we try to fix it (SonarQube default is typically 10 lines)
@@ -341,6 +356,7 @@ vibe-heal config --env-file .env.staging
 ### Development Workflow
 
 **Running vibe-heal locally**:
+
 ```bash
 # Install in development mode
 uv pip install -e .
@@ -354,6 +370,7 @@ vibe-heal dedupe src/file.py --max-duplications 1  # Fix one duplication
 ```
 
 **Testing specific modules**:
+
 ```bash
 # Run specific test file
 uv run pytest tests/sonarqube/test_client.py -v
@@ -368,16 +385,19 @@ uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
 ### Common Development Patterns
 
 **Adding a new AI tool**:
+
 1. Create `src/vibe_heal/ai_tools/new_tool.py` implementing `AITool` ABC
 2. Add to `AIToolType` enum in `base.py`
 3. Update `AIToolFactory._tool_map`
 4. Add tests in `tests/ai_tools/test_new_tool.py`
 
 **Modifying SonarQube API queries**:
+
 - Client is in `src/vibe_heal/sonarqube/client.py`
 - Models support both old and new API formats (use `model_config = {"extra": "ignore"}`)
 - Test fixtures are in `tests/sonarqube/fixtures/api_responses.json`
 
 **Changing commit message format**:
+
 - Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
 - Tests verify format in `tests/git/test_manager.py`
