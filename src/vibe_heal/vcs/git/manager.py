@@ -25,6 +25,7 @@ class GitManager(VCSManager):
         Raises:
             NotARepositoryError: If path is not a Git repository
         """
+        super().__init__(repo_path)
         self.repo_path = Path(repo_path or Path.cwd())
 
         try:

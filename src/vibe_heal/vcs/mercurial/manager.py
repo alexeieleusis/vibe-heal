@@ -25,6 +25,7 @@ class MercurialManager(VCSManager):
         Raises:
             NotARepositoryError: If path is not a Mercurial repository
         """
+        super().__init__(repo_path)
         self.repo_path = Path(repo_path or Path.cwd())
 
         try:

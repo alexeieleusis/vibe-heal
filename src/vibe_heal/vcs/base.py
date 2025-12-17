@@ -19,8 +19,7 @@ class VCSManager(ABC):
     Each concrete implementation must provide all the methods defined here.
     """
 
-    @abstractmethod
-    def __init__(self, repo_path: str | Path | None = None) -> None:
+    def __init__(self, repo_path: str | Path | None = None) -> None:  # noqa: B027
         """Initialize VCS manager.
 
         Args:
@@ -29,6 +28,9 @@ class VCSManager(ABC):
         Raises:
             NotARepositoryError: If path is not a valid repository
         """
+        # Base implementation - subclasses should call super().__init__(repo_path)
+        # and then initialize their specific VCS client
+        pass
 
     @abstractmethod
     def is_repository(self) -> bool:
@@ -246,8 +248,7 @@ class BranchAnalyzer(ABC):
     Provides common interface for analyzing branch differences across VCS.
     """
 
-    @abstractmethod
-    def __init__(self, repo_path: Path) -> None:
+    def __init__(self, repo_path: Path) -> None:  # noqa: B027
         """Initialize the branch analyzer.
 
         Args:
@@ -256,6 +257,9 @@ class BranchAnalyzer(ABC):
         Raises:
             InvalidRepositoryError: If repo_path is not a valid repository
         """
+        # Base implementation - subclasses should call super().__init__(repo_path)
+        # and then initialize their specific VCS client
+        pass
 
     @abstractmethod
     def get_modified_files(self, base_branch: str = "origin/main") -> list[Path]:

@@ -28,6 +28,7 @@ class MercurialBranchAnalyzer(BranchAnalyzer):
         Raises:
             InvalidRepositoryError: If repo_path is not a valid Mercurial repository
         """
+        super().__init__(repo_path)
         try:
             self.client = hglib.open(str(repo_path))
         except hglib.error.ServerError as e:

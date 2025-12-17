@@ -29,6 +29,7 @@ class GitBranchAnalyzer(BranchAnalyzer):
         Raises:
             InvalidRepositoryError: If repo_path is not a valid git repository
         """
+        super().__init__(repo_path)
         try:
             self.repo = Repo(repo_path, search_parent_directories=True)
         except GitInvalidRepoError as e:
