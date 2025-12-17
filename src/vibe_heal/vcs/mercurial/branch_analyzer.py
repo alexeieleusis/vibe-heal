@@ -175,7 +175,7 @@ class MercurialBranchAnalyzer(BranchAnalyzer):
 
             if not username_bytes:
                 raise BranchAnalyzerError(  # noqa: TRY301
-                    "Mercurial user.username not configured. "
+                    "Mercurial ui.username not configured. "
                     "Run: hg config --global ui.username 'Your Name <your@email.com>'"
                 )
 
@@ -191,7 +191,7 @@ class MercurialBranchAnalyzer(BranchAnalyzer):
 
             if not email:
                 raise BranchAnalyzerError(  # noqa: TRY301
-                    "Mercurial user.username not configured. "
+                    "Mercurial ui.username not configured. "
                     "Run: hg config --global ui.username 'Your Name <your@email.com>'"
                 )
 
