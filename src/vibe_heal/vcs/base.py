@@ -228,7 +228,11 @@ class VCSManager(ABC):
                 "",
             ])
 
-        body_parts.append(f"Fixed by: vibe-heal using {ai_tool_type.display_name}")
+        body_parts.extend([
+            f"Fixed by: vibe-heal using {ai_tool_type.display_name}",
+            "",
+            "[vibe-heal](https://github.com/alexeieleusis/vibe-heal)",
+        ])
 
         body = "\n".join(body_parts)
 

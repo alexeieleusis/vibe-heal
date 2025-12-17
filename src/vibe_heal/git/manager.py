@@ -4,11 +4,6 @@ Git operations manager - now imported from vcs.git.manager for backwards compati
 """
 
 import warnings
-        body_parts.extend([
-            f"Fixed by: vibe-heal using {ai_tool_type.display_name}",
-            "",
-            "[vibe-heal](https://github.com/alexeieleusis/vibe-heal)",
-        ])
 
 from vibe_heal.vcs.git.manager import GitManager as _GitManager
 
