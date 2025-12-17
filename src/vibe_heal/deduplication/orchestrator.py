@@ -16,9 +16,10 @@ from vibe_heal.deduplication.models import DuplicationGroup, DuplicationsRespons
 from vibe_heal.deduplication.processor import (
     DuplicationProcessor,
 )
-from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.vcs.base import VCSManager
+from vibe_heal.vcs.factory import VCSFactory
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.client import SonarQubeClient
@@ -35,7 +36,7 @@ class DeduplicationOrchestrator:
         config: VibeHealConfig,
         ai_tool: AITool,
         console: Console | None = None,
-        git_manager: GitManager | None = None,
+        vcs_manager: VCSManager | None = None,
     ) -> None:
         """Initialize deduplication orchestrator.
 
@@ -43,12 +44,12 @@ class DeduplicationOrchestrator:
             config: Application configuration
             ai_tool: AI tool instance
             console: Rich console for output (creates new if None)
-            git_manager: Git manager instance (creates new if None)
+            vcs_manager: VCS manager instance (creates new if None)
         """
         self.config = config
         self.ai_tool = ai_tool
         self.console = console or Console()
-        self.git_manager = git_manager or GitManager()
+        self.vcs_manager = vcs_manager or VCSFactory.create_manager()
 
     async def dedupe_file(
         self,
@@ -138,9 +139,9 @@ class DeduplicationOrchestrator:
             RuntimeError: If not a Git repository or AI tool unavailable
             FileNotFoundError: If the specified file does not exist
         """
-        # Check Git repository
-        if not self.git_manager.is_repository():
-            msg = "Not a Git repository"
+        # Check VCS repository
+        if not self.vcs_manager.is_repository():
+            msg = "Not a version control repository"
             raise RuntimeError(msg)
 
         # Check file exists
@@ -150,7 +151,7 @@ class DeduplicationOrchestrator:
 
         # Check working directory is clean unless dry-run
         if not dry_run:
-            self.git_manager.require_clean_working_directory()
+            self.vcs_manager.require_clean_working_directory()
 
         # Check AI tool is available
         if not self.ai_tool.is_available():
@@ -299,7 +300,7 @@ class DeduplicationOrchestrator:
 
             # Auto-detect all modified files since duplications may span multiple files
             # and AI might create new utility modules. Pass None to auto-detect.
-            sha = self.git_manager.create_commit(commit_msg, None, include_untracked=True)
+            sha = self.vcs_manager.create_commit(commit_msg, None, include_untracked=True)
             if sha:
                 summary.commits.append(sha)
                 summary.fixed += 1
@@ -540,7 +541,6 @@ class DedupeBranchOrchestrator:
             client: SonarQube API client
             ai_tool: AI tool for fixing duplications
         """
-        from vibe_heal.git.branch_analyzer import BranchAnalyzer
         from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
         from vibe_heal.sonarqube.project_manager import ProjectManager
 
@@ -549,8 +549,8 @@ class DedupeBranchOrchestrator:
         self.ai_tool = ai_tool
         self.project_manager = ProjectManager(client)
         self.analysis_runner = AnalysisRunner(config, client)
-        self.branch_analyzer = BranchAnalyzer(Path.cwd())
-        self.git_manager = GitManager(Path.cwd())
+        self.branch_analyzer = VCSFactory.create_branch_analyzer(Path.cwd())
+        self.vcs_manager = VCSFactory.create_manager(Path.cwd())
         self.console = Console()
 
     async def dedupe_branch(
@@ -848,7 +848,7 @@ class DedupeBranchOrchestrator:
                 config=self.config,
                 ai_tool=self.ai_tool,
                 console=self.console,
-                git_manager=self.git_manager,
+                vcs_manager=self.vcs_manager,
             )
 
             # Iteratively dedupe until no duplications or max iterations reached

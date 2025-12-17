@@ -10,11 +10,11 @@ from vibe_heal.ai_tools import AIToolFactory
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 from vibe_heal.processor import IssueProcessor
 from vibe_heal.sonarqube import ComponentNotFoundError, SonarQubeClient
 from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
+from vibe_heal.vcs.factory import VCSFactory
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class VibeHealOrchestrator:
         """
         self.config = config
         self.console = Console()
-        self.git_manager = GitManager()
+        self.vcs_manager = VCSFactory.create_manager()
         self.ai_tool = ai_tool if ai_tool is not None else self._initialize_ai_tool()
 
     def _initialize_ai_tool(self) -> AITool:
@@ -142,9 +142,9 @@ class VibeHealOrchestrator:
             RuntimeError: If not a Git repository, working directory has uncommitted changes, or AI tool unavailable
             FileNotFoundError: If the specified file does not exist
         """
-        # Check Git repository
-        if not self.git_manager.is_repository():
-            msg = "Not a Git repository"
+        # Check VCS repository
+        if not self.vcs_manager.is_repository():
+            msg = "Not a version control repository"
             raise RuntimeError(msg)
 
         # Check file exists
@@ -154,7 +154,7 @@ class VibeHealOrchestrator:
 
         # Check working directory is clean (no modified/staged files, untracked OK) unless dry-run
         if not dry_run:
-            self.git_manager.require_clean_working_directory()
+            self.vcs_manager.require_clean_working_directory()
 
         # Check AI tool is available
         if not self.ai_tool.is_available():
@@ -246,7 +246,7 @@ class VibeHealOrchestrator:
             if not dry_run:
                 try:
                     # Pass None to auto-detect all modified files
-                    sha = self.git_manager.commit_fix(
+                    sha = self.vcs_manager.commit_fix(
                         issue,
                         None,  # Auto-detect all modified files
                         self.ai_tool.tool_type,
