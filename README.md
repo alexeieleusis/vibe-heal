@@ -18,7 +18,7 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 - Fetches issues from your SonarQube server
 - Processes issues in reverse line order (to avoid line number shifts)
 - Invokes AI tools (Claude Code or Aider) to fix each issue
-- Creates a git commit for each successful fix
+- Creates a version control commit for each successful fix
 - Provides detailed progress reporting
 
 ## Features
@@ -38,6 +38,26 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 - Configurable severity filtering and issue limits
 - AI tool auto-detection (tries Claude Code first, then Aider)
 - Aider integration with Ollama/OpenAI/Anthropic support
+
+## Version Control Support
+
+vibe-heal supports both **Git** and **Mercurial** repositories:
+
+- **Git**: Automatically detected via `.git` directory
+- **Mercurial**: Automatically detected via `.hg` directory
+
+No configuration required - vibe-heal detects your VCS type automatically.
+
+### Requirements
+
+- **Git users**: `git` command-line tool must be installed
+- **Mercurial users**: `hg` command-line tool must be installed
+  ```bash
+  # Install Mercurial via pip
+  pip install mercurial
+  ```
+
+When working in a Git repository, vibe-heal will use Git operations. When working in a Mercurial repository, it will automatically use Mercurial operations. All features (fixing issues, deduplication, branch cleanup) work identically with both version control systems.
 
 ## Quick Start
 
@@ -295,7 +315,9 @@ vibe-heal/
 │   ├── sonarqube/       # SonarQube API client
 │   ├── ai_tools/        # AI tool integrations (Claude Code + Aider)
 │   ├── processor/       # Issue processing logic
-│   ├── git/             # Git operations & branch analysis
+│   ├── vcs/             # Version control abstraction (Git & Mercurial)
+│   │   ├── git/         # Git implementation
+│   │   └── mercurial/   # Mercurial implementation
 │   ├── cleanup/         # Branch cleanup orchestration
 │   ├── deduplication/   # Code deduplication
 │   ├── cli.py           # Command-line interface
