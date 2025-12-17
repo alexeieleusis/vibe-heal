@@ -8,7 +8,6 @@ from vibe_heal.ai_tools.base import AIToolType
 from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 from vibe_heal.vcs.base import VCSManager
 from vibe_heal.vcs.exceptions import (
-    DirtyWorkingDirectoryError,
     NotARepositoryError,
     VCSOperationError,
 )
@@ -309,87 +308,3 @@ class MercurialManager(VCSManager):
         except Exception as e:
             msg = f"Failed to create commit: {e}"
             raise VCSOperationError(msg) from e
-
-    def _create_commit_message(
-        self,
-        issue: SonarQubeIssue,
-        ai_tool_type: AIToolType,
-        rule: SonarQubeRule | None = None,
-        file_count: int = 1,
-    ) -> str:
-        """Create a formatted commit message for a fix.
-
-        Args:
-            issue: The SonarQube issue that was fixed
-            ai_tool_type: The AI tool used for the fix
-            rule: Detailed rule information (optional)
-            file_count: Number of files modified in this fix (default: 1)
-
-        Returns:
-            Formatted commit message
-        """
-        # Extract rule name (e.g., "python:S1481" -> "S1481")
-        rule_short = issue.rule.split(":")[-1] if ":" in issue.rule else issue.rule
-
-        # Create subject line (use rule name if available)
-        if rule:
-            subject = f"fix: [{issue.rule}] {issue.message[:50]}"
-        else:
-            subject = f"fix: [SQ-{rule_short}] {issue.message[:50]}"
-
-        if len(issue.message) > 50:
-            subject = subject.rstrip() + "..."
-
-        # Create body
-        body_parts = [
-            f"SonarQube Issue: {issue.key}",
-        ]
-
-        if rule:
-            body_parts.append(f"Rule: {issue.rule} - {rule.name}")
-        else:
-            body_parts.append(f"Rule: {issue.rule}")
-
-        body_parts.extend([
-            f"Severity: {issue.severity}",
-            f"Location: {issue.component}:{issue.line}",
-        ])
-
-        # Add file count if multiple files were modified
-        if file_count > 1:
-            body_parts.append(f"Files modified: {file_count}")
-
-        body_parts.append("")
-
-        # Add public documentation link
-        if rule:
-            body_parts.extend([
-                f"Rationale: {rule.public_doc_url}",
-                "",
-            ])
-
-        body_parts.append(f"Fixed by: vibe-heal using {ai_tool_type.display_name}")
-
-        body = "\n".join(body_parts)
-
-        # Combine subject and body
-        return f"{subject}\n\n{body}"
-
-    def require_clean_working_directory(self) -> None:
-        """Ensure working directory has no modified or staged files.
-
-        Untracked files are allowed, but modified or staged files must be committed first.
-
-        Raises:
-            DirtyWorkingDirectoryError: If there are modified or staged files
-        """
-        modified_or_staged = self.get_modified_or_staged_files()
-        if modified_or_staged:
-            msg = (
-                "Working directory has uncommitted changes. Please commit or stash modified files first.\n"
-                "Modified or staged files:\n"
-                + "\n".join(f"  - {f}" for f in modified_or_staged[:10])
-                + ("\n  ..." if len(modified_or_staged) > 10 else "")
-                + "\n\nNote: Untracked files are OK and won't block processing."
-            )
-            raise DirtyWorkingDirectoryError(msg)
