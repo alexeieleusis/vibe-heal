@@ -106,7 +106,7 @@ class TestOrchestratorValidation:
         test_file = tmp_path / "test.py"
         test_file.write_text("code")
 
-        with pytest.raises(RuntimeError, match="Not a Git repository"):
+        with pytest.raises(RuntimeError, match="Not a version control repository"):
             orchestrator._validate_preconditions(str(test_file), dry_run=False)
 
     def test_validate_preconditions_working_directory_has_uncommitted_changes(

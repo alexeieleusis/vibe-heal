@@ -10,11 +10,10 @@ from vibe_heal.cleanup.orchestrator import (
     CleanupOrchestrator,
 )
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.git.branch_analyzer import BranchAnalyzer
-from vibe_heal.git.manager import GitManager
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
+from vibe_heal.vcs.base import BranchAnalyzer, VCSManager
 
 
 @pytest.fixture
@@ -80,7 +79,7 @@ class TestCleanupOrchestratorInit:
         assert isinstance(orchestrator.project_manager, ProjectManager)
         assert isinstance(orchestrator.analysis_runner, AnalysisRunner)
         assert isinstance(orchestrator.branch_analyzer, BranchAnalyzer)
-        assert isinstance(orchestrator.git_manager, GitManager)
+        assert isinstance(orchestrator.vcs_manager, VCSManager)
 
 
 class TestCleanupBranch:
