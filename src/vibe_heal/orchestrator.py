@@ -357,3 +357,5 @@ class VibeHealOrchestrator:
 
         if dry_run:
             self.console.print("\n[yellow]Dry-run mode: no changes committed[/yellow]")
+
+        self.console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
