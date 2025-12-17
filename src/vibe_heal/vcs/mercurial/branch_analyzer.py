@@ -36,14 +36,22 @@ class MercurialBranchAnalyzer(BranchAnalyzer):
 
         self.repo_path = Path(repo_path)
 
-    def __del__(self) -> None:
-        """Close the Mercurial client on cleanup."""
+    def close(self) -> None:
+        """Close the underlying Mercurial client."""
         if hasattr(self, "client"):
             try:  # noqa: SIM105
                 self.client.close()
             except Exception:  # noqa: S110
+                # Intentionally ignore errors on close to avoid masking earlier exceptions
                 pass
 
+    def __enter__(self) -> "MercurialBranchAnalyzer":
+        """Enter context manager, returning the analyzer instance itself."""
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Ensure the Mercurial client is closed when leaving a context manager block."""
+        self.close()
     def get_modified_files(self, base_branch: str = "default") -> list[Path]:
         """Get list of files modified in current branch vs. base branch.
 

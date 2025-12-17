@@ -38,14 +38,24 @@ class MercurialManager(VCSManager):
             msg = f"Mercurial error: {e}"
             raise VCSOperationError(msg) from e
 
-    def __del__(self) -> None:
-        """Close the Mercurial client on cleanup."""
-        if hasattr(self, "client"):
-            try:  # noqa: SIM105
-                self.client.close()
-            except Exception:  # noqa: S110
-                pass
+    def close(self) -> None:
+        """Close the Mercurial client."""
+        client = getattr(self, "client", None)
+        if client is None:
+            return
+        try:  # noqa: SIM105
+            client.close()
+        except Exception:  # noqa: S110
+            # Swallow exceptions to preserve previous best-effort cleanup behavior.
+            pass
 
+    def __enter__(self) -> "MercurialManager":
+        """Enter the runtime context related to this object."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the runtime context and close the Mercurial client."""
+        self.close()
     def is_repository(self) -> bool:
         """Check if current directory is a Mercurial repository.
 
@@ -274,17 +284,18 @@ class MercurialManager(VCSManager):
                 # Convert file paths to be relative to repo root
                 relative_files = []
                 for f in files:
+                    original_path_str = f
                     file_path = Path(f)
                     # If relative, make it relative to repo root
                     if not file_path.is_absolute():
                         file_path = self.repo_path / file_path
                     # Make absolute path relative to repo root
-                    try:  # noqa: SIM105
+                    try:
                         file_path = file_path.relative_to(self.repo_path.resolve())
+                        relative_files.append(str(file_path))
                     except ValueError:
-                        # File is not under repo root - use as-is
-                        pass
-                    relative_files.append(str(file_path))
+                        # File is not under repo root - use original path as-is
+                        relative_files.append(original_path_str)
 
                 files_bytes = [f.encode("utf-8") for f in relative_files]
                 self.client.add(files_bytes)
