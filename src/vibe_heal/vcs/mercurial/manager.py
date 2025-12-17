@@ -1,6 +1,7 @@
 """Mercurial operations manager."""
 
 from pathlib import Path
+from types import TracebackType
 
 import hglib  # type: ignore[import-untyped]
 
@@ -53,9 +54,15 @@ class MercurialManager(VCSManager):
         """Enter the runtime context related to this object."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Exit the runtime context and close the Mercurial client."""
         self.close()
+
     def is_repository(self) -> bool:
         """Check if current directory is a Mercurial repository.
 

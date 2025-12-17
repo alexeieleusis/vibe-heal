@@ -1,6 +1,7 @@
 """Mercurial branch analysis for identifying modified files."""
 
 from pathlib import Path
+from types import TracebackType
 
 import hglib  # type: ignore[import-untyped]
 
@@ -49,9 +50,15 @@ class MercurialBranchAnalyzer(BranchAnalyzer):
         """Enter context manager, returning the analyzer instance itself."""
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         """Ensure the Mercurial client is closed when leaving a context manager block."""
         self.close()
+
     def get_modified_files(self, base_branch: str = "default") -> list[Path]:
         """Get list of files modified in current branch vs. base branch.
 
