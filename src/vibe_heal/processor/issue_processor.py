@@ -40,72 +40,69 @@ class IssueProcessor:
         }
 
     def process(self, issues: list[SonarQubeIssue]) -> ProcessingResult:
-        """Process issues: filter and sort.
-
-        Processing steps:
-        1. Filter fixable issues (those with line numbers and not resolved)
-        2. Filter by severity if min_severity is specified
-        3. Sort issues in reverse line order (high to low)
-        4. Limit number of issues if max_issues is specified
-
-        Args:
-            issues: List of SonarQube issues
-
-        Returns:
-            ProcessingResult with processed issues
-        """
+        """Process issues: filter, sort, and limit."""
         total = len(issues)
-
         logger.debug(f"Processing {total} issues")
 
-        # Step 1: Filter fixable issues
+        fixable_issues = self._filter_fixable_issues(issues, total)
+        severity_filtered_issues = self._filter_by_severity(fixable_issues)
+        sorted_issues = self._sort_by_line_descending(severity_filtered_issues)
+        final_issues = self._limit_issues(sorted_issues)
+
+        return ProcessingResult(
+            total_issues=total,
+            fixable_issues=len(severity_filtered_issues),
+            skipped_issues=total - len(final_issues),
+            issues_to_fix=final_issues,
+        )
+
+    def _filter_fixable_issues(self, issues: list[SonarQubeIssue], total: int) -> list[SonarQubeIssue]:
+        """Filter for issues that are fixable and log unfixable ones."""
         fixable = []
         for issue in issues:
             if issue.is_fixable:
                 fixable.append(issue)
             else:
-                # Log why each issue is not fixable
-                if issue.line is None:
-                    logger.debug(
-                        f"Issue {issue.key} not fixable: no line number (rule={issue.rule}, "
-                        f"message={issue.message[:50]}{'...' if issue.message and len(issue.message) > 50 else ''})"
-                    )
-                else:
-                    logger.debug(
-                        f"Issue {issue.key} not fixable: status={issue.status!r} "
-                        f"(rule={issue.rule}, line={issue.line}, message={issue.message[:50]}{'...' if issue.message and len(issue.message) > 50 else ''})"
-                    )
+                self._log_unfixable_issue(issue)
 
         logger.debug(f"Step 1: {len(fixable)}/{total} issues are fixable")
+        return fixable
 
-        # Step 2: Filter by severity if specified
-        if self.min_severity:
-            min_rank = self._severity_rank.get(self.min_severity.upper(), 0)
-            before_count = len(fixable)
-            fixable = [issue for issue in fixable if self._severity_rank.get(issue.severity or "INFO", 0) >= min_rank]
+    def _log_unfixable_issue(self, issue: SonarQubeIssue) -> None:
+        """Log why an issue is not fixable."""
+        message_preview = f"{issue.message[:50]}..." if issue.message and len(issue.message) > 50 else issue.message
+        if issue.line is None:
             logger.debug(
-                f"Step 2: {len(fixable)}/{before_count} issues meet severity threshold "
-                f"(min_severity={self.min_severity})"
+                f"Issue {issue.key} not fixable: no line number (rule={issue.rule}, message={message_preview})"
+            )
+        else:
+            logger.debug(
+                f"Issue {issue.key} not fixable: status={issue.status!r} "
+                f"(rule={issue.rule}, line={issue.line}, message={message_preview})"
             )
 
-        # Step 3: Sort issues in reverse line order (high to low)
-        # This ensures fixes don't affect line numbers of subsequent issues
-        sorted_issues = self._sort_by_line_descending(fixable)
+    def _filter_by_severity(self, issues: list[SonarQubeIssue]) -> list[SonarQubeIssue]:
+        """Filter issues by minimum severity."""
+        if not self.min_severity:
+            return issues
 
-        # Step 4: Limit number of issues if specified
-        if self.max_issues and self.max_issues > 0:
-            before_count = len(sorted_issues)
-            sorted_issues = sorted_issues[: self.max_issues]
-            logger.debug(
-                f"Step 4: limited to {len(sorted_issues)}/{before_count} issues (max_issues={self.max_issues})"
-            )
-
-        return ProcessingResult(
-            total_issues=total,
-            fixable_issues=len(fixable),
-            skipped_issues=total - len(sorted_issues),
-            issues_to_fix=sorted_issues,
+        min_rank = self._severity_rank.get(self.min_severity.upper(), 0)
+        before_count = len(issues)
+        filtered = [issue for issue in issues if self._severity_rank.get(issue.severity or "INFO", 0) >= min_rank]
+        logger.debug(
+            f"Step 2: {len(filtered)}/{before_count} issues meet severity threshold (min_severity={self.min_severity})"
         )
+        return filtered
+
+    def _limit_issues(self, issues: list[SonarQubeIssue]) -> list[SonarQubeIssue]:
+        """Limit the number of issues to process."""
+        if not self.max_issues or self.max_issues <= 0:
+            return issues
+
+        before_count = len(issues)
+        limited = issues[: self.max_issues]
+        logger.debug(f"Step 4: limited to {len(limited)}/{before_count} issues (max_issues={self.max_issues})")
+        return limited
 
     def _sort_by_line_descending(
         self,

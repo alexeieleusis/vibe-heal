@@ -1,4 +1,4 @@
-"""Claude Code AI tool implementation."""
+"Gemini CLI AI tool implementation."
 
 import asyncio
 import json
@@ -18,13 +18,13 @@ if TYPE_CHECKING:
     from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
 
 
-class ClaudeCodeTool(AITool):
-    """Claude Code AI tool implementation."""
+class GeminiCliTool(AITool):
+    """Gemini CLI AI tool implementation."""
 
-    tool_type = AIToolType.CLAUDE_CODE
+    tool_type = AIToolType.GEMINI
 
     def __init__(self, timeout: int = 300) -> None:
-        """Initialize Claude Code tool.
+        """Initialize Gemini CLI tool.
 
         Args:
             timeout: Timeout in seconds for AI operations (default: 5 minutes)
@@ -32,12 +32,12 @@ class ClaudeCodeTool(AITool):
         self.timeout = timeout
 
     def is_available(self) -> bool:
-        """Check if Claude CLI is installed.
+        """Check if Gemini CLI is installed.
 
         Returns:
-            True if claude command is available
+            True if gemini command is available
         """
-        return shutil.which("claude") is not None
+        return shutil.which("gemini") is not None
 
     async def fix_issue(
         self,
@@ -46,7 +46,7 @@ class ClaudeCodeTool(AITool):
         rule: "SonarQubeRule | None" = None,
         code_context: "list[SourceLine] | None" = None,
     ) -> FixResult:
-        """Fix an issue using Claude Code.
+        """Fix an issue using Gemini CLI.
 
         Args:
             issue: The SonarQube issue to fix
@@ -63,7 +63,7 @@ class ClaudeCodeTool(AITool):
         if not self.is_available():
             return FixResult(
                 success=False,
-                error_message="Claude CLI not found. Please install Claude Code first.",
+                error_message="Gemini CLI not found. Please install it first.",
             )
 
         # Verify file exists
@@ -76,19 +76,19 @@ class ClaudeCodeTool(AITool):
         # Create prompt with enriched context
         prompt = create_fix_prompt(issue, file_path, rule=rule, code_context=code_context)
 
-        # Invoke Claude
+        # Invoke Gemini
         try:
-            result = await self._invoke_claude(prompt, file_path)
+            result = await self._invoke_gemini(prompt, file_path)
             return result
         except asyncio.TimeoutError:
             return FixResult(
                 success=False,
-                error_message=f"Claude timed out after {self.timeout} seconds",
+                error_message=f"Gemini timed out after {self.timeout} seconds",
             )
         except Exception as e:
             return FixResult(
                 success=False,
-                error_message=f"Error invoking Claude: {e}",
+                error_message=f"Error invoking Gemini: {e}",
             )
 
     async def fix_duplication(
@@ -96,7 +96,7 @@ class ClaudeCodeTool(AITool):
         prompt: str,
         file_path: str,
     ) -> FixResult:
-        """Fix code duplication using Claude Code.
+        """Fix code duplication using Gemini CLI.
 
         Args:
             prompt: Detailed prompt describing the duplication
@@ -108,7 +108,7 @@ class ClaudeCodeTool(AITool):
         if not self.is_available():
             return FixResult(
                 success=False,
-                error_message="Claude CLI not found. Please install Claude Code first.",
+                error_message="Gemini CLI not found. Please install it first.",
             )
 
         # Verify file exists
@@ -118,56 +118,57 @@ class ClaudeCodeTool(AITool):
                 error_message=f"File not found: {file_path}",
             )
 
-        # Invoke Claude with the duplication prompt
+        # Invoke Gemini with the duplication prompt
         try:
-            result = await self._invoke_claude(prompt, file_path)
+            result = await self._invoke_gemini(prompt, file_path)
             return result
         except asyncio.TimeoutError:
             return FixResult(
                 success=False,
-                error_message=f"Claude timed out after {self.timeout} seconds",
+                error_message=f"Gemini timed out after {self.timeout} seconds",
             )
         except Exception as e:
             return FixResult(
                 success=False,
-                error_message=f"Error invoking Claude: {e}",
+                error_message=f"Error invoking Gemini: {e}",
             )
 
-    async def _invoke_claude(
+    async def _invoke_gemini(
         self,
         prompt: str,
         file_path: str,
     ) -> FixResult:
-        """Invoke Claude CLI.
+        """Invoke Gemini CLI.
 
         Args:
-            prompt: The prompt to send to Claude
+            prompt: The prompt to send to Gemini
             file_path: File to fix
 
         Returns:
             FixResult with outcome
         """
-        # Create a temporary file for the detailed instructions
-        temp_file = None
+        # Create a temporary file for the detailed instructions.
+        # We create it in the current working directory to ensure it's accessible by `gemini`,
+        # as there might be issues with system-level temporary directories.
+        temp_file_path: Path | None = None
         try:
             # Create temp file with the prompt asynchronously
-            fd, temp_file = tempfile.mkstemp(suffix=".txt", text=True)
+            fd, temp_file_str = tempfile.mkstemp(suffix=".txt", text=True, dir=Path.cwd())
             os.close(fd)  # Close the file descriptor immediately
-            async with aiofiles.open(temp_file, mode="w", encoding="utf-8") as tf:
+            temp_file_path = Path(temp_file_str)
+
+            async with aiofiles.open(temp_file_path, mode="w", encoding="utf-8") as tf:
                 await tf.write(prompt)
 
             # Build command with JSON output for structured parsing
-            # Pass a simple prompt that references the temp file
+            # Pass a simple prompt that references the temp file using its name (relative path)
             cmd = [
-                "claude",
-                "--print",
-                f'Please implement the changes specified in "{temp_file}"',
+                "gemini",
+                f'Please implement the changes specified in "{temp_file_path.name}"',
                 "--output-format",
                 "json",
-                "--permission-mode",
-                "acceptEdits",
-                "--allowedTools",
-                "Edit,Read",
+                "--approval-mode",
+                "auto_edit",
             ]
 
             command_result = await run_command(cmd, 600)
@@ -189,22 +190,25 @@ class ClaudeCodeTool(AITool):
 
         finally:
             # Clean up temporary file
-            if temp_file and Path(temp_file).exists():
-                Path(temp_file).unlink()
+            if temp_file_path and temp_file_path.exists():
+                temp_file_path.unlink()
 
     def _parse_modified_files(self, json_output: str, file_path: str) -> list[str]:
         """Parse JSON output to extract modified files.
 
         Args:
-            json_output: JSON output from Claude CLI
-            file_path: The file we asked Claude to fix
+            json_output: JSON output from Gemini CLI
+            file_path: The file we asked Gemini to fix
 
         Returns:
             List of modified file paths
         """
         try:
-            data = json.loads(json_output)
-        except json.JSONDecodeError:
+            # Gemini may output multiple JSON objects in a stream
+            # We are interested in the last one which is a summary
+            *_, last_json_output = json_output.strip().split("\n")
+            data = json.loads(last_json_output)
+        except ValueError:
             # If JSON parsing fails, assume the file was modified
             return [file_path]
 
@@ -219,10 +223,10 @@ class ClaudeCodeTool(AITool):
         return [file_path]
 
     def _extract_modified_files_from_data(self, data: dict | list) -> set[str]:
-        """Extract modified files from Claude CLI JSON data.
+        """Extract modified files from Gemini CLI JSON data.
 
         Args:
-            data: Parsed JSON data from Claude CLI
+            data: Parsed JSON data from Gemini CLI
 
         Returns:
             Set of modified file paths
@@ -232,8 +236,8 @@ class ClaudeCodeTool(AITool):
         if not isinstance(data, dict):
             return modified_files
 
-        # Check for 'toolUses' or similar fields that indicate Edit/Write operations
-        tool_uses = data.get("toolUses", [])
+        # Check for 'tool_code' that indicate Edit/Write operations
+        tool_uses = data.get("tool_code", [])
         for tool_use in tool_uses:
             file_path = self._extract_file_path_from_tool_use(tool_use)
             if file_path:
@@ -255,7 +259,7 @@ class ClaudeCodeTool(AITool):
 
         tool_name = tool_use.get("name", "")
         # Edit and Write tools modify files
-        if tool_name not in ("Edit", "Write"):
+        if tool_name not in ("edit", "write_file"):
             return None
 
         # Extract file_path parameter if present

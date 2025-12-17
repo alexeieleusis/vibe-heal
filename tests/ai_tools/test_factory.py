@@ -4,7 +4,13 @@ from pathlib import Path
 
 from pytest_mock import MockerFixture
 
-from vibe_heal.ai_tools import AiderTool, AIToolFactory, AIToolType, ClaudeCodeTool
+from vibe_heal.ai_tools import (
+    AiderTool,
+    AIToolFactory,
+    AIToolType,
+    ClaudeCodeTool,
+    GeminiCliTool,
+)
 
 
 class TestAIToolFactory:
@@ -23,6 +29,13 @@ class TestAIToolFactory:
 
         assert isinstance(tool, AiderTool)
         assert tool.tool_type == AIToolType.AIDER
+
+    def test_create_gemini_tool(self) -> None:
+        """Test creating Gemini CLI tool."""
+        tool = AIToolFactory.create(AIToolType.GEMINI)
+
+        assert isinstance(tool, GeminiCliTool)
+        assert tool.tool_type == AIToolType.GEMINI
 
     def test_detect_available_when_claude_exists(self, mocker: MockerFixture) -> None:
         """Test auto-detection when Claude is available."""
@@ -49,6 +62,22 @@ class TestAIToolFactory:
         detected = AIToolFactory.detect_available()
 
         assert detected == AIToolType.AIDER
+
+    def test_detect_available_when_gemini_exists(self, mocker: MockerFixture) -> None:
+        """Test auto-detection when Gemini is available but others are not."""
+
+        def which_mock(cmd: str) -> str | None:
+            if cmd in ("claude", "aider"):
+                return None
+            if cmd == "gemini":
+                return "/usr/local/bin/gemini"
+            return None
+
+        mocker.patch("shutil.which", side_effect=which_mock)
+
+        detected = AIToolFactory.detect_available()
+
+        assert detected == AIToolType.GEMINI
 
     def test_detect_available_when_no_tools(self, mocker: MockerFixture) -> None:
         """Test auto-detection when no tools available."""
