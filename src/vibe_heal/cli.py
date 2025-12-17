@@ -23,7 +23,7 @@ from vibe_heal.sonarqube.client import SonarQubeClient
 
 app = typer.Typer(
     name="vibe-heal",
-    help="AI-powered SonarQube issue remediation tool",
+    help="AI-powered SonarQube issue remediation tool\n\nGitHub: https://github.com/alexeieleusis/vibe-heal",
     add_completion=False,
 )
 console = Console()
@@ -289,6 +289,7 @@ def _display_cleanup_results(result: CleanupResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch cleanup complete![/green]")
+    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
 
 
 async def _run_cleanup(
@@ -431,6 +432,7 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch deduplication complete![/green]")
+    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
 
 
 async def _run_dedupe_branch(

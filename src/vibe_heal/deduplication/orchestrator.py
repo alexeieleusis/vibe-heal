@@ -271,7 +271,8 @@ class DeduplicationOrchestrator:
             f"({target_block.size} lines).\n\n"
             f"This code was duplicated in {len(group.blocks)} location(s):\n"
             f"{locations_text}\n\n"
-            f"AI tool: {self.ai_tool.tool_type.display_name}"
+            f"AI tool: {self.ai_tool.tool_type.display_name}\n\n"
+            f"[vibe-heal](https://github.com/alexeieleusis/vibe-heal)"
         )
 
     def _handle_successful_fix_commit(
@@ -490,6 +491,8 @@ class DeduplicationOrchestrator:
 
         if dry_run:
             self.console.print("\n[yellow]Dry-run mode: no changes committed[/yellow]")
+
+        self.console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
 
 
 class FileDedupResult(BaseModel):
