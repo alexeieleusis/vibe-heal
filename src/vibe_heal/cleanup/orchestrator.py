@@ -8,13 +8,12 @@ from rich.console import Console
 
 from vibe_heal.ai_tools.base import AITool
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.git.branch_analyzer import BranchAnalyzer
-from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
+from vibe_heal.vcs.factory import VCSFactory
 
 console = Console()
 
@@ -68,8 +67,8 @@ class CleanupOrchestrator:
         self.ai_tool = ai_tool
         self.project_manager = ProjectManager(client)
         self.analysis_runner = AnalysisRunner(config, client)
-        self.branch_analyzer = BranchAnalyzer(Path.cwd())
-        self.git_manager = GitManager(Path.cwd())
+        self.branch_analyzer = VCSFactory.create_branch_analyzer(Path.cwd())
+        self.vcs_manager = VCSFactory.create_manager(Path.cwd())
 
     async def cleanup_branch(
         self,

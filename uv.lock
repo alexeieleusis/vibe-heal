@@ -1100,6 +1100,12 @@ wheels = [
 ]
 
 [[package]]
+name = "python-hglib"
+version = "2.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/11/1cfa47d5e2aa45f6a803fcdf4484f8255383221ccb2f521d9010afca0d8d/python-hglib-2.6.2.tar.gz", hash = "sha256:b18bd1ed53c90ee57d5714d66ad6bb72b64e930d4aeca9830892c08bb28da608", size = 35514, upload-time = "2020-11-17T18:36:17.579Z" }
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1467,6 +1473,7 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-hglib" },
     { name = "rich" },
     { name = "typer" },
     { name = "typing-extensions" },
@@ -1498,6 +1505,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.12.3" },
     { name = "pydantic-settings", specifier = ">=2.11.0" },
+    { name = "python-hglib", specifier = ">=2.6.2" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "typer", specifier = ">=0.19.2" },
     { name = "typing-extensions", specifier = ">=4.15.0" },

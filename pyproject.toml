@@ -21,6 +21,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.12.3",
     "pydantic-settings>=2.11.0",
+    "python-hglib>=2.6.2",
     "rich>=14.2.0",
     "typer>=0.19.2",
     "typing-extensions>=4.15.0",

@@ -1,17 +1,32 @@
-"""Git-specific exceptions."""
+"""DEPRECATED: Use vibe_heal.vcs.exceptions instead.
 
+Git-specific exceptions - now imported from vcs.exceptions for backwards compatibility.
+"""
 
-class GitError(Exception):
-    """Base exception for Git errors."""
+import warnings
 
+from vibe_heal.vcs.exceptions import (
+    DirtyWorkingDirectoryError,
+)
+from vibe_heal.vcs.exceptions import (
+    NotARepositoryError as NotAGitRepositoryError,
+)
+from vibe_heal.vcs.exceptions import (
+    VCSError as GitError,
+)
+from vibe_heal.vcs.exceptions import (
+    VCSOperationError as GitOperationError,
+)
 
-class NotAGitRepositoryError(GitError):
-    """Directory is not a Git repository."""
+warnings.warn(
+    "vibe_heal.git.exceptions is deprecated. Use vibe_heal.vcs.exceptions instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-
-class DirtyWorkingDirectoryError(GitError):
-    """Working directory has uncommitted changes."""
-
-
-class GitOperationError(GitError):
-    """Git operation failed."""
+__all__ = [
+    "DirtyWorkingDirectoryError",
+    "GitError",
+    "GitOperationError",
+    "NotAGitRepositoryError",
+]
