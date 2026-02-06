@@ -151,7 +151,7 @@ vibe-heal is an AI-powered SonarQube issue remediation tool that automatically f
 
 1. Fetch SonarQube issues for a file
 2. Sort issues in reverse line order (high to low - prevents line number shifts)
-3. For each issue: invoke AI tool → if successful, create git commit
+3. For each issue: invoke AI tool → if successful, create version control commit
 4. Display summary report
 
 ### High-Level Architecture
@@ -165,7 +165,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 ├─ SonarQubeClient (sonarqube/) - fetches issues via API
 ├─ IssueProcessor (processor/) - sorts/filters issues
 ├─ AITool (ai_tools/) - fixes issues (ClaudeCodeTool implemented)
-└─ GitManager (git/) - creates commits
+└─ VCSManager (vcs/) - creates commits (Git & Mercurial)
 ```
 
 ### Module Responsibilities
@@ -219,24 +219,58 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - `AIToolFactory` with auto-detection (tries Claude Code first)
 - `FixResult` model for fix outcomes
 
-**`git/`**: Git operations via GitPython
+**`vcs/`**: Version control abstraction layer (supports Git & Mercurial)
 
-- `GitManager.commit_fix()` - creates conventional commits
-- Commit format: `fix: [SQ-RULE] message` with full issue details in body
-- Validates file has no uncommitted changes before processing
-- Each fix gets its own commit (easy rollback)
-- `BranchAnalyzer` - analyzes branch differences for branch cleanup feature
-  - `get_modified_files(base_branch='origin/main')` - returns files modified vs base branch
-  - Uses git three-dot diff syntax to compare from merge base
-  - Filters out deleted files, returns only existing files
+**Architecture**: Factory pattern with abstract base classes for VCS-agnostic operations
+
+**Key Components**:
+
+- **`VCSFactory`** - Auto-detects and creates VCS instances
+  - `detect_vcs(repo_path)` - searches parent directories for `.git` or `.hg`
+  - Precedence: Git > Mercurial (if both exist)
+  - Default: Git (for backwards compatibility)
+  - `create_manager(repo_path, vcs_type)` - creates VCSManager instance
+  - `create_branch_analyzer(repo_path, vcs_type)` - creates BranchAnalyzer instance
+
+- **`VCSManager` (ABC)** - Abstract interface for version control operations
+  - `commit_fix(issue, files, ai_tool_type, rule)` - creates commits for fixes
+  - `is_repository()` - checks if directory is a repository
+  - `is_clean()` - checks for uncommitted changes
   - `get_current_branch()` - returns active branch name
-  - `validate_branch_exists(branch)` - checks local and remote branches
-  - `get_user_email()` - retrieves git user email for project naming
+  - `require_clean_working_directory()` - validates clean state
+  - Commit format: `fix: [SQ-RULE] message` with full issue details in body
+  - Each fix gets its own commit (easy rollback)
+
+- **`BranchAnalyzer` (ABC)** - Abstract interface for branch analysis
+  - `get_modified_files(base_branch)` - returns files modified vs base branch
+  - `get_current_branch()` - returns active branch name
+  - `validate_branch_exists(branch)` - checks branch existence
+  - `get_user_email()` - retrieves user email for project naming
+  - Filters out deleted files, returns only existing files
+
+**Git Implementation** (`vcs/git/`):
+- Uses **GitPython** library
+- `GitManager` - implements VCSManager for Git
+- `GitBranchAnalyzer` - implements BranchAnalyzer for Git
+- Uses three-dot diff syntax for merge-base comparison
+- Returns 40-character SHA-1 hashes
+
+**Mercurial Implementation** (`vcs/mercurial/`):
+- Uses **python-hglib** library (official Mercurial Python binding)
+- `MercurialManager` - implements VCSManager for Mercurial
+- `MercurialBranchAnalyzer` - implements BranchAnalyzer for Mercurial
+- Uses `ancestor()` revset function for merge-base comparison
+- Returns 12-character changeset hashes
+- Status codes: `b'M'` (modified), `b'A'` (added), `b'R'` (removed), `b'?'` (untracked)
+
+**Backwards Compatibility**:
+- Old `vibe_heal.git` module re-exports from `vibe_heal.vcs.git` with deprecation warnings
+- All orchestrators updated to use `VCSFactory` for auto-detection
 
 **`orchestrator.py`**: Main workflow coordination
 
 - `VibeHealOrchestrator.fix_file()` - end-to-end flow for fixing a single file
-- Validates preconditions (git state, file exists, AI tool available)
+- Validates preconditions (VCS state, file exists, AI tool available)
 - Progress indicators with rich library
 - User confirmation before processing (unless dry-run)
 
@@ -315,7 +349,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 **Issue Status Filtering**: Use `issueStatuses=OPEN,CONFIRMED` instead of `resolved=false` for more precise filtering.
 
-**Git Safety**: Only checks that the specific file being fixed has no uncommitted changes. Other files can have changes (requirement was relaxed from "clean working directory").
+**VCS Safety**: Only checks that the specific file being fixed has no uncommitted changes. Other files can have changes (requirement was relaxed from "clean working directory"). Works identically with both Git and Mercurial.
 
 **Async/Await**: SonarQube client and AI tool operations use async/await pattern. CLI wraps with `asyncio.run()`.
 
@@ -399,5 +433,16 @@ uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
 
 **Changing commit message format**:
 
-- Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
-- Tests verify format in `tests/git/test_manager.py`
+- Logic is in `VCSManager._create_commit_message()` methods
+- Git implementation: `src/vibe_heal/vcs/git/manager.py`
+- Mercurial implementation: `src/vibe_heal/vcs/mercurial/manager.py`
+- Tests verify format in `tests/vcs/git/test_manager.py` and `tests/vcs/mercurial/test_manager.py`
+
+**Adding support for a new VCS**:
+
+1. Create `src/vibe_heal/vcs/newvcs/manager.py` implementing `VCSManager` ABC
+2. Create `src/vibe_heal/vcs/newvcs/branch_analyzer.py` implementing `BranchAnalyzer` ABC
+3. Add to `VCSType` enum in `factory.py`
+4. Update `VCSFactory.detect_vcs()` to detect new VCS directory (e.g., `.svn`)
+5. Update `VCSFactory.create_manager()` and `create_branch_analyzer()` factory methods
+6. Add tests in `tests/vcs/newvcs/` mirroring existing Git/Mercurial tests

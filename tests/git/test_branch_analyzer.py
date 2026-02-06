@@ -26,7 +26,7 @@ def mock_repo(tmp_path: Path) -> MagicMock:
 @pytest.fixture
 def branch_analyzer(tmp_path: Path, mock_repo: MagicMock) -> BranchAnalyzer:
     """Create a BranchAnalyzer instance with mocked repo."""
-    with patch("vibe_heal.git.branch_analyzer.Repo", return_value=mock_repo):
+    with patch("vibe_heal.vcs.git.branch_analyzer.Repo", return_value=mock_repo):
         analyzer = BranchAnalyzer(tmp_path)
     return analyzer
 
@@ -36,7 +36,7 @@ class TestBranchAnalyzerInit:
 
     def test_init_valid_repo(self, tmp_path: Path, mock_repo: MagicMock) -> None:
         """Test initialization with valid repository."""
-        with patch("vibe_heal.git.branch_analyzer.Repo", return_value=mock_repo):
+        with patch("vibe_heal.vcs.git.branch_analyzer.Repo", return_value=mock_repo):
             analyzer = BranchAnalyzer(tmp_path)
 
         assert analyzer.repo == mock_repo
@@ -46,7 +46,7 @@ class TestBranchAnalyzerInit:
         """Test initialization with invalid repository raises error."""
         with (
             patch(
-                "vibe_heal.git.branch_analyzer.Repo",
+                "vibe_heal.vcs.git.branch_analyzer.Repo",
                 side_effect=InvalidGitRepositoryError("Not a git repo"),
             ),
             pytest.raises(InvalidRepositoryError, match="Not a valid git repository"),
@@ -55,7 +55,7 @@ class TestBranchAnalyzerInit:
 
     def test_init_searches_parent_directories(self, tmp_path: Path, mock_repo: MagicMock) -> None:
         """Test that initialization searches parent directories for git repo."""
-        with patch("vibe_heal.git.branch_analyzer.Repo", return_value=mock_repo) as mock_repo_cls:
+        with patch("vibe_heal.vcs.git.branch_analyzer.Repo", return_value=mock_repo) as mock_repo_cls:
             BranchAnalyzer(tmp_path)
 
         mock_repo_cls.assert_called_once_with(tmp_path, search_parent_directories=True)
