@@ -213,10 +213,13 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 
 **`ai_tools/`**: Abstract interface + implementations
 
-- `AITool` ABC with `fix_issue()` method
-- `AIToolType` enum (CLAUDE_CODE, AIDER)
+- `AITool` ABC with `fix_issue()` and `fix_duplication()` abstract methods
+- `AIToolType` enum (CLAUDE_CODE, AIDER, GEMINI)
 - `ClaudeCodeTool` - invokes `claude` CLI with `--print --output-format json`
-- `AIToolFactory` with auto-detection (tries Claude Code first)
+- `GeminiCliTool` - invokes `gemini` CLI with `--output-format json --approval-mode auto_edit`; writes prompt to a temp file in cwd (not system temp dir) and passes the filename as the CLI prompt argument
+- `AiderTool` - invokes `aider` with optional model/api-key/api-base from config
+- `AIToolFactory` with auto-detection (priority order: Claude Code → Aider → Gemini)
+- `run_command()` in `ai_tools/utils.py` - shared async subprocess helper used by all tool implementations
 - `FixResult` model for fix outcomes
 
 **`git/`**: Git operations via GitPython

@@ -197,6 +197,93 @@ class TestGetModifiedFiles:
         # Only file should be returned
         assert files == [Path("file1.py")]
 
+    def test_get_modified_files_repo_root_behavior_preserved(
+        self, branch_analyzer: BranchAnalyzer, tmp_path: Path
+    ) -> None:
+        """Test that paths are unchanged when CWD equals repo root."""
+        file1 = tmp_path / "src" / "main.py"
+        file1.parent.mkdir(parents=True)
+        file1.write_text("content")
+
+        branch_analyzer.repo.git.diff.return_value = "src/main.py"
+
+        with (
+            patch.object(branch_analyzer, "validate_branch_exists", return_value=True),
+            patch("vibe_heal.git.branch_analyzer.Path.cwd", return_value=tmp_path),
+        ):
+            files = branch_analyzer.get_modified_files()
+
+        assert files == [Path("src/main.py")]
+
+    def test_get_modified_files_monorepo_subdir_path_stripped(
+        self, branch_analyzer: BranchAnalyzer, tmp_path: Path
+    ) -> None:
+        """Test that paths are stripped to CWD-relative when running from a monorepo subdirectory."""
+        # Simulate repo root at tmp_path, CWD at tmp_path/foo
+        subdir = tmp_path / "foo"
+        file1 = subdir / "src" / "main.py"
+        file1.parent.mkdir(parents=True)
+        file1.write_text("content")
+
+        # Git diff returns repo-relative path
+        branch_analyzer.repo.git.diff.return_value = "foo/src/main.py"
+
+        with (
+            patch.object(branch_analyzer, "validate_branch_exists", return_value=True),
+            patch("vibe_heal.git.branch_analyzer.Path.cwd", return_value=subdir),
+        ):
+            files = branch_analyzer.get_modified_files()
+
+        # Should be relative to CWD (foo/), not repo root
+        assert files == [Path("src/main.py")]
+
+    def test_get_modified_files_monorepo_subdir_cross_project_filtered(
+        self, branch_analyzer: BranchAnalyzer, tmp_path: Path
+    ) -> None:
+        """Test that files from other monorepo projects are excluded when running from a subdir."""
+        # CWD is tmp_path/foo, but bar/file.py is in a sibling project
+        subdir = tmp_path / "foo"
+        subdir.mkdir()
+        foo_file = subdir / "main.py"
+        foo_file.write_text("content")
+
+        bar_dir = tmp_path / "bar"
+        bar_file = bar_dir / "main.py"
+        bar_file.parent.mkdir(parents=True)
+        bar_file.write_text("content")
+
+        # Git diff returns both files
+        branch_analyzer.repo.git.diff.return_value = "foo/main.py\nbar/main.py"
+
+        with (
+            patch.object(branch_analyzer, "validate_branch_exists", return_value=True),
+            patch("vibe_heal.git.branch_analyzer.Path.cwd", return_value=subdir),
+        ):
+            files = branch_analyzer.get_modified_files()
+
+        # Only foo/main.py should be returned, as bar/ is outside CWD
+        assert files == [Path("main.py")]
+
+    def test_get_modified_files_monorepo_deleted_files_still_excluded(
+        self, branch_analyzer: BranchAnalyzer, tmp_path: Path
+    ) -> None:
+        """Test that deleted files are excluded even in monorepo subdir mode."""
+        subdir = tmp_path / "foo"
+        existing_file = subdir / "main.py"
+        existing_file.parent.mkdir(parents=True)
+        existing_file.write_text("content")
+
+        # Git diff shows two files, but deleted.py doesn't exist on disk
+        branch_analyzer.repo.git.diff.return_value = "foo/main.py\nfoo/deleted.py"
+
+        with (
+            patch.object(branch_analyzer, "validate_branch_exists", return_value=True),
+            patch("vibe_heal.git.branch_analyzer.Path.cwd", return_value=subdir),
+        ):
+            files = branch_analyzer.get_modified_files()
+
+        assert files == [Path("main.py")]
+
 
 class TestGetCurrentBranch:
     """Tests for get_current_branch method."""
