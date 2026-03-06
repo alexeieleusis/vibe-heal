@@ -57,7 +57,8 @@ class BranchAnalyzer:
             base_branch: Name of the base branch to compare against. Defaults to 'origin/main'.
 
         Returns:
-            List of Path objects for modified files, relative to repository root.
+            List of Path objects for modified files, relative to the current working directory.
+            When running from a monorepo subdirectory, only files under that directory are returned.
             Returns empty list if no files are modified.
 
         Raises:
@@ -79,13 +80,38 @@ class BranchAnalyzer:
             # Parse file paths from diff output
             file_paths = [line.strip() for line in diff_output.split("\n") if line.strip()]
 
+            # Determine if we're running from a subdirectory of the repo (monorepo support)
+            cwd = Path.cwd().resolve()
+            repo_root = self.repo_path.resolve()
+
+            try:
+                cwd_relative_to_repo = cwd.relative_to(repo_root)
+            except ValueError:
+                # CWD is not under repo root (shouldn't happen) — use repo root behavior
+                cwd_relative_to_repo = Path(".")
+
+            running_from_subdir = cwd_relative_to_repo != Path(".")
+
             # Filter to only existing files (exclude deletions)
             existing_files: list[Path] = []
             for file_path in file_paths:
+                repo_relative_path = Path(file_path)
                 full_path = self.repo_path / file_path
-                if full_path.exists() and full_path.is_file():
-                    # Return path relative to repo root
-                    existing_files.append(Path(file_path))
+
+                if not (full_path.exists() and full_path.is_file()):
+                    continue
+
+                if running_from_subdir:
+                    # Only include files under CWD; return path relative to CWD
+                    try:
+                        local_path = repo_relative_path.relative_to(cwd_relative_to_repo)
+                    except ValueError:
+                        # File belongs to a different project — skip
+                        continue
+                    existing_files.append(local_path)
+                else:
+                    # Running from repo root — keep original behavior
+                    existing_files.append(repo_relative_path)
 
             return existing_files
 
