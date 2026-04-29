@@ -64,6 +64,15 @@ class VibeHealConfig(BaseSettings):
         description="Include full rule description in AI prompts",
     )
 
+    # Pre-commit hook settings
+    pre_commit_command: str | None = Field(
+        default=None,
+        description=(
+            "Command to run before committing (e.g. 'pre-commit run --files'). "
+            "Set to empty string to disable. Auto-detects pre-commit if not set."
+        ),
+    )
+
     model_config = SettingsConfigDict(
         env_file=[".env.vibeheal", ".env"],
         env_file_encoding="utf-8",

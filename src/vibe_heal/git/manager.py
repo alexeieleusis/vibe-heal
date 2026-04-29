@@ -1,5 +1,8 @@
 """Git operations manager."""
 
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import git
@@ -17,16 +20,23 @@ from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 class GitManager:
     """Manages Git operations for vibe-heal."""
 
-    def __init__(self, repo_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        repo_path: str | Path | None = None,
+        pre_commit_command: str | None = None,
+    ) -> None:
         """Initialize Git manager.
 
         Args:
             repo_path: Path to Git repository (default: current directory)
+            pre_commit_command: Command to run before committing. None means auto-detect,
+                empty string means disabled.
 
         Raises:
             NotAGitRepositoryError: If path is not a Git repository
         """
         self.repo_path = Path(repo_path or Path.cwd())
+        self._pre_commit_command = pre_commit_command
 
         try:
             self.repo = git.Repo(self.repo_path, search_parent_directories=True)
@@ -229,6 +239,49 @@ class GitManager:
         # Stage and commit using helper method
         return self._stage_and_commit(files, message)
 
+    def _do_commit(self, message: str) -> git.Commit:
+        """Delegate to repo.index.commit; extracted for testability.
+
+        Args:
+            message: Commit message
+
+        Returns:
+            Created commit object
+        """
+        return self.repo.index.commit(message)
+
+    def _run_pre_commit_hooks(self, files: list[str]) -> list[str]:
+        """Run pre-commit hooks on staged files and return files modified by hooks.
+
+        Args:
+            files: List of files that were staged
+
+        Returns:
+            List of files modified by hooks that need to be re-staged
+        """
+        if self._pre_commit_command == "":
+            return []
+
+        repo_root = str(self.repo.working_dir)
+        files_set = set(files)
+
+        if self._pre_commit_command is not None:
+            cmd = shlex.split(self._pre_commit_command) + files
+        elif shutil.which("pre-commit"):
+            cmd = ["pre-commit", "run", "--files", *files]
+        else:
+            cmd = ["git", "hook", "run", "--ignore-missing", "pre-commit"]
+
+        try:
+            subprocess.run(cmd, cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        except OSError as e:
+            msg = f"Pre-commit hook failed to run: {e}"
+            raise GitOperationError(msg) from e
+        # Ignore return code; what matters is whether files were modified by hooks
+
+        # Detect files modified by hooks (working tree differs from index)
+        return [item.a_path for item in self.repo.index.diff(None) if item.a_path in files_set]
+
     def _stage_and_commit(self, files: list[str], message: str) -> str | None:
         """Stage files and create a commit if there are changes.
 
@@ -247,16 +300,36 @@ class GitManager:
             if files:
                 self.repo.index.add(files)
 
+            # Run pre-commit hooks and re-stage any auto-fixed files
+            hook_modified = self._run_pre_commit_hooks(files)
+            if hook_modified:
+                self.repo.index.add(hook_modified)
+
+            # Limit retry re-staging to files belonging to this commit
+            staged_files = set(files) | set(hook_modified)
+
             # Check if there are any changes to commit after staging
             # This happens when one fix resolves multiple issues
             if not self.repo.index.diff("HEAD"):
                 # No changes staged - return None to indicate no commit was created
                 return None
 
-            # Create commit
-            commit = self.repo.index.commit(message)
-
-            return commit.hexsha
+            # Commit with one retry on failure (safety net for hooks that modify files)
+            last_error: git.GitError = git.GitError("commit not attempted")
+            for attempt in range(2):
+                try:
+                    commit = self._do_commit(message)
+                    return commit.hexsha
+                except git.GitError as exc:
+                    last_error = exc
+                    if attempt == 1:
+                        break
+                    # Re-stage only files from this commit modified by hooks during commit attempt
+                    retry_dirty = [item.a_path for item in self.repo.index.diff(None) if item.a_path in staged_files]
+                    if not retry_dirty:
+                        break
+                    self.repo.index.add(retry_dirty)
+            raise last_error
 
         except git.GitError as e:
             msg = f"Failed to create commit: {e}"

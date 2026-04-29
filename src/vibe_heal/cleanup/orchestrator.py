@@ -69,7 +69,7 @@ class CleanupOrchestrator:
         self.project_manager = ProjectManager(client)
         self.analysis_runner = AnalysisRunner(config, client)
         self.branch_analyzer = BranchAnalyzer(Path.cwd())
-        self.git_manager = GitManager(Path.cwd())
+        self.git_manager = GitManager(Path.cwd(), pre_commit_command=config.pre_commit_command)
 
     async def cleanup_branch(
         self,

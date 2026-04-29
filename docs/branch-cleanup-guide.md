@@ -65,6 +65,10 @@ SONARQUBE_PROJECT_KEY=your_project_key
 
 # Optional - AI tool will be auto-detected if not specified
 AI_TOOL=claude-code  # or "aider"
+
+# Optional - pre-commit hook behaviour (see Pre-commit Hook Compatibility below)
+# PRE_COMMIT_COMMAND=            # empty string = disabled
+# PRE_COMMIT_COMMAND=pre-commit run --files  # explicit command
 ```
 
 ## Basic Usage
@@ -250,6 +254,59 @@ Fixed by: Claude Code
 
 🤖 Generated with Claude Code
 Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+## Pre-commit Hook Compatibility
+
+vibe-heal automatically handles projects that use [pre-commit](https://pre-commit.com/) hooks (e.g. `ruff-format`, `ruff-check --fix`).
+
+### The Problem
+
+Hooks like `ruff-format` that auto-fix staged files exit with a non-zero code, which would normally abort the commit and leave orphaned staged changes — interrupting batch commands like `cleanup` and `dedupe-branch`.
+
+### How vibe-heal Solves It
+
+Before calling `git commit`, vibe-heal runs your pre-commit hooks itself, detects any files they modified, and re-stages those files. By the time the actual commit runs, all hook-modified files are already staged, so hooks exit 0 and the commit succeeds.
+
+```
+Stage AI-fixed files
+      ↓
+Run pre-commit hooks manually
+      ↓
+Re-stage hook-modified files (e.g. ruff-formatted output)
+      ↓
+git commit  ← hooks run again here, but files are clean → exit 0
+```
+
+### Hook Runner Priority
+
+vibe-heal selects the hook runner in this order:
+
+1. **Custom command** — `PRE_COMMIT_COMMAND` in `.env.vibeheal`
+2. **`pre-commit` CLI** — if `pre-commit` is on your PATH: `pre-commit run --files <files>`
+3. **Native git fallback** — `git hook run --ignore-missing pre-commit` (safe even if no hook exists)
+
+### Configuration Options
+
+```bash
+# Auto-detect (default) — uses pre-commit CLI if installed, otherwise native git
+# PRE_COMMIT_COMMAND is unset
+
+# Disable hooks entirely (skip all pre-commit processing)
+PRE_COMMIT_COMMAND=
+
+# Use a custom hook runner
+PRE_COMMIT_COMMAND=my-hook-runner --check
+```
+
+### If Commits Still Fail Due to Hooks
+
+vibe-heal includes a one-retry safety net: if `git commit` fails, it re-stages any files modified during the commit attempt and tries once more. If the second attempt also fails, a `GitOperationError` is raised with details.
+
+If you're still seeing failures, try disabling hooks temporarily to isolate the issue:
+
+```bash
+PRE_COMMIT_COMMAND=  # in .env.vibeheal
 ```
 
 ## Troubleshooting

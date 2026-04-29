@@ -86,6 +86,22 @@ src/vibe_heal/
   - Validation of required fields
   - Smart defaults
 
+**Key fields**:
+| Field | Default | Description |
+|---|---|---|
+| `sonarqube_url` | — | SonarQube server URL |
+| `sonarqube_token` | `None` | Auth token (preferred over username/password) |
+| `sonarqube_project_key` | — | SonarQube project key |
+| `ai_tool` | `None` | AI tool to use; auto-detected if not set |
+| `code_context_lines` | `5` | Lines of context shown around issue for AI |
+| `include_rule_description` | `True` | Include full rule docs in AI prompts |
+| `pre_commit_command` | `None` | Pre-commit hook command (see below) |
+
+**`pre_commit_command` values**:
+- `None` (default) — auto-detect: uses `pre-commit run --files` if `pre-commit` is installed, otherwise falls back to `git hook run --ignore-missing pre-commit`
+- `""` (empty string) — disabled: skip pre-commit hooks entirely
+- Any other string — used as-is, e.g. `"my-hook-runner --check"`
+
 **Example**:
 ```python
 class VibeHealConfig(BaseSettings):
@@ -95,21 +111,13 @@ class VibeHealConfig(BaseSettings):
     sonarqube_password: str | None = None
     sonarqube_project_key: str
     ai_tool: AIToolType | None = None  # auto-detect if None
+    pre_commit_command: str | None = None  # auto-detect if None
 
     model_config = SettingsConfigDict(
         env_file=['.env.vibeheal', '.env'],
         env_file_encoding='utf-8',
         env_prefix='',
     )
-
-    @field_validator('ai_tool', mode='before')
-    @classmethod
-    def parse_ai_tool(cls, v):
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return AIToolType(v.lower())
-        return v
 ```
 
 ### 2. SonarQube Client (`sonarqube/`)
@@ -262,20 +270,45 @@ Please fix this issue while maintaining code functionality and style.
 
 **Key Classes**:
 - `GitManager`: Wrapper around GitPython
+  - `__init__(repo_path, pre_commit_command)` — `pre_commit_command=None` auto-detects, `""` disables
   - `is_repository() -> bool`
   - `is_clean() -> bool`
-  - `commit_fix(issue: SonarQubeIssue, files: list[str], ai_tool_type: AIToolType)`
+  - `commit_fix(issue, files, ai_tool_type) -> str | None`
   - `get_current_branch() -> str`
+  - `_run_pre_commit_hooks(files) -> list[str]` — runs hooks, returns files modified by them
+  - `_stage_and_commit(files, message) -> str | None` — stages, hooks, re-stages, commits with retry
+
+**Pre-commit Hook Integration**:
+
+`_stage_and_commit()` runs pre-commit hooks *before* calling `repo.index.commit()` so that formatters like `ruff-format` can auto-fix staged files without causing the commit to fail:
+
+```
+1. Stage files (repo.index.add)
+2. Run _run_pre_commit_hooks(files)
+   └─ pre-commit CLI (if installed) or git hook run fallback
+3. If hooks modified files → re-stage them
+4. Check if index differs from HEAD (skip if nothing to commit)
+5. repo.index.commit(message) with one retry
+   └─ On GitError: re-stage any newly dirty files and retry once
+```
+
+Hook runner priority:
+1. Custom `pre_commit_command` from config (if set)
+2. `pre-commit run --files <files>` (if `pre-commit` CLI is on PATH)
+3. `git hook run --ignore-missing pre-commit` (native git fallback)
 
 **Commit Message Format**:
 ```
-fix: [SQ-ABC123] Remove unused import
+fix: [SQ-S1481] Remove unused import
 
-Fixes SonarQube issue on line 42
+SonarQube Issue: ABC123
 Rule: python:S1481
-Message: Remove this unused import
+Severity: MAJOR
+Location: project:src/foo.py:42
 
-Fixed by vibe-heal using Claude Code
+Fixed by: vibe-heal using Claude Code
+
+[vibe-heal](https://github.com/alexeieleusis/vibe-heal)
 ```
 
 ### 6. Orchestrator (`orchestrator.py`)

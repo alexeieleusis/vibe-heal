@@ -31,7 +31,7 @@ class VibeHealOrchestrator:
         """
         self.config = config
         self.console = Console()
-        self.git_manager = GitManager()
+        self.git_manager = GitManager(pre_commit_command=config.pre_commit_command)
         self.ai_tool = ai_tool if ai_tool is not None else self._initialize_ai_tool()
 
     def _initialize_ai_tool(self) -> AITool:
