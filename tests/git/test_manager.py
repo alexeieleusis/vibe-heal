@@ -1,6 +1,7 @@
 """Tests for Git manager."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import git
 import pytest
@@ -593,3 +594,138 @@ class TestGitManagerModifiedFiles:
         modified = manager.get_all_modified_files()
 
         assert "test.py" in modified
+
+
+class TestPreCommitHooks:
+    """Tests for pre-commit hook integration."""
+
+    def test_run_pre_commit_hooks_with_pre_commit_installed(self, git_repo: Path) -> None:
+        """Test pre-commit CLI is used when available."""
+        manager = GitManager(git_repo)
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/pre-commit") as mock_which,
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            manager._run_pre_commit_hooks(["test.py"])
+
+        mock_which.assert_called_once_with("pre-commit")
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["pre-commit", "run", "--files"]
+        assert "test.py" in call_args
+
+    def test_run_pre_commit_hooks_fallback_to_git_hook_run(self, git_repo: Path) -> None:
+        """Test fallback to 'git hook run' when pre-commit not installed."""
+        manager = GitManager(git_repo)
+
+        with patch("shutil.which", return_value=None), patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            manager._run_pre_commit_hooks(["test.py"])
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["git", "hook", "run", "--ignore-missing", "pre-commit"]
+
+    def test_run_pre_commit_hooks_disabled_when_empty_string(self, git_repo: Path) -> None:
+        """Test hooks are skipped when pre_commit_command is empty string."""
+        manager = GitManager(git_repo, pre_commit_command="")
+
+        with patch("subprocess.run") as mock_run:
+            result = manager._run_pre_commit_hooks(["test.py"])
+
+        mock_run.assert_not_called()
+        assert result == []
+
+    def test_run_pre_commit_hooks_restages_modified_files(self, git_repo: Path) -> None:
+        """Test that files modified by hooks are detected and returned for re-staging."""
+        manager = GitManager(git_repo)
+
+        # Stage the file first
+        (git_repo / "test.py").write_text("print('modified')")
+        manager.repo.index.add(["test.py"])
+
+        def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            # Simulate hook modifying the file (different content from staged)
+            (git_repo / "test.py").write_text("print('hook-fixed')")
+            return MagicMock(returncode=1)
+
+        with patch("shutil.which", return_value=None), patch("subprocess.run", side_effect=fake_run):
+            dirty = manager._run_pre_commit_hooks(["test.py"])
+
+        assert "test.py" in dirty
+
+    def test_custom_pre_commit_command_used_when_configured(self, git_repo: Path) -> None:
+        """Test that a custom pre_commit_command is used when set."""
+        manager = GitManager(git_repo, pre_commit_command="my-hook-runner --check")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            manager._run_pre_commit_hooks(["test.py"])
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["my-hook-runner", "--check", "test.py"]
+
+    def test_stage_and_commit_restages_hook_modified_files(
+        self,
+        git_repo: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """Test that _stage_and_commit re-stages files modified by hooks."""
+        manager = GitManager(git_repo)
+
+        (git_repo / "test.py").write_text("print('ai-fixed')")
+
+        def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            # Simulate ruff-format changing the file after staging
+            (git_repo / "test.py").write_text('print("ruff-formatted")\n')
+            return MagicMock(returncode=1)
+
+        with patch("shutil.which", return_value=None), patch("subprocess.run", side_effect=fake_run):
+            sha = manager._stage_and_commit(["test.py"], "test commit")
+
+        assert sha is not None
+        commit = manager.repo.head.commit
+        assert "test.py" in commit.stats.files
+        # The committed content should be the hook-modified version
+        blob = commit.tree["test.py"]
+        assert b"ruff-formatted" in blob.data_stream.read()
+
+    def test_stage_and_commit_retries_on_hook_modified_files(self, git_repo: Path) -> None:
+        """Test retry logic when commit fails due to dirty files."""
+        manager = GitManager(git_repo, pre_commit_command="")
+
+        (git_repo / "test.py").write_text("print('modified')")
+
+        call_count = 0
+        original_do_commit = manager._do_commit
+
+        def failing_then_succeeding(msg: str) -> object:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Simulate hook modifying file during commit
+                (git_repo / "test.py").write_text('print("retry-version")\n')
+                raise git.GitError("pre-commit hook failed")
+            return original_do_commit(msg)
+
+        with patch.object(manager, "_do_commit", side_effect=failing_then_succeeding):
+            sha = manager._stage_and_commit(["test.py"], "retry test")
+
+        assert sha is not None
+        assert call_count == 2
+
+    def test_stage_and_commit_raises_after_two_failures(self, git_repo: Path) -> None:
+        """Test GitOperationError raised when both commit attempts fail."""
+        manager = GitManager(git_repo, pre_commit_command="")
+
+        (git_repo / "test.py").write_text("print('modified')")
+        manager.repo.index.add(["test.py"])
+
+        with (
+            patch.object(manager, "_do_commit", side_effect=git.GitError("persistent hook failure")),
+            pytest.raises(GitOperationError, match="Failed to create commit"),
+        ):
+            manager._stage_and_commit(["test.py"], "will fail")
