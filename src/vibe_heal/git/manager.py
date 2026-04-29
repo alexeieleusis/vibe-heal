@@ -305,6 +305,9 @@ class GitManager:
             if hook_modified:
                 self.repo.index.add(hook_modified)
 
+            # Limit retry re-staging to files belonging to this commit
+            staged_files = set(files) | set(hook_modified)
+
             # Check if there are any changes to commit after staging
             # This happens when one fix resolves multiple issues
             if not self.repo.index.diff("HEAD"):
@@ -321,8 +324,8 @@ class GitManager:
                     last_error = exc
                     if attempt == 1:
                         break
-                    # Re-stage any files modified by hooks during commit
-                    retry_dirty = [item.a_path for item in self.repo.index.diff(None) if item.a_path]
+                    # Re-stage only files from this commit modified by hooks during commit attempt
+                    retry_dirty = [item.a_path for item in self.repo.index.diff(None) if item.a_path in staged_files]
                     if not retry_dirty:
                         break
                     self.repo.index.add(retry_dirty)

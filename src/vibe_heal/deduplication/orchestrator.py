@@ -48,7 +48,7 @@ class DeduplicationOrchestrator:
         self.config = config
         self.ai_tool = ai_tool
         self.console = console or Console()
-        self.git_manager = git_manager or GitManager()
+        self.git_manager = git_manager or GitManager(pre_commit_command=config.pre_commit_command)
 
     async def dedupe_file(
         self,
