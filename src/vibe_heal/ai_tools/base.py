@@ -15,6 +15,7 @@ class AIToolType(str, Enum):
     AIDER = "aider"
     CLAUDE_CODE = "claude-code"
     GEMINI = "gemini"
+    OPENCODE = "opencode"
 
     @property
     def cli_command(self) -> str:
@@ -36,6 +37,7 @@ class AIToolType(str, Enum):
             AIToolType.CLAUDE_CODE: "Claude Code",
             AIToolType.AIDER: "Aider",
             AIToolType.GEMINI: "Gemini",
+            AIToolType.OPENCODE: "OpenCode",
         }[self]
 
 
