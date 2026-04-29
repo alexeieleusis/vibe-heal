@@ -604,8 +604,8 @@ class TestPreCommitHooks:
         manager = GitManager(git_repo)
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pre-commit") as mock_which,
-            patch("subprocess.run") as mock_run,
+            patch("vibe_heal.git.manager.shutil.which", return_value="/usr/bin/pre-commit") as mock_which,
+            patch("vibe_heal.git.manager.subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0)
             manager._run_pre_commit_hooks(["test.py"])
@@ -620,7 +620,10 @@ class TestPreCommitHooks:
         """Test fallback to 'git hook run' when pre-commit not installed."""
         manager = GitManager(git_repo)
 
-        with patch("shutil.which", return_value=None), patch("subprocess.run") as mock_run:
+        with (
+            patch("vibe_heal.git.manager.shutil.which", return_value=None),
+            patch("vibe_heal.git.manager.subprocess.run") as mock_run,
+        ):
             mock_run.return_value = MagicMock(returncode=0)
             manager._run_pre_commit_hooks(["test.py"])
 
@@ -632,7 +635,7 @@ class TestPreCommitHooks:
         """Test hooks are skipped when pre_commit_command is empty string."""
         manager = GitManager(git_repo, pre_commit_command="")
 
-        with patch("subprocess.run") as mock_run:
+        with patch("vibe_heal.git.manager.subprocess.run") as mock_run:
             result = manager._run_pre_commit_hooks(["test.py"])
 
         mock_run.assert_not_called()
@@ -651,7 +654,10 @@ class TestPreCommitHooks:
             (git_repo / "test.py").write_text("print('hook-fixed')")
             return MagicMock(returncode=1)
 
-        with patch("shutil.which", return_value=None), patch("subprocess.run", side_effect=fake_run):
+        with (
+            patch("vibe_heal.git.manager.shutil.which", return_value=None),
+            patch("vibe_heal.git.manager.subprocess.run", side_effect=fake_run),
+        ):
             dirty = manager._run_pre_commit_hooks(["test.py"])
 
         assert "test.py" in dirty
@@ -660,7 +666,7 @@ class TestPreCommitHooks:
         """Test that a custom pre_commit_command is used when set."""
         manager = GitManager(git_repo, pre_commit_command="my-hook-runner --check")
 
-        with patch("subprocess.run") as mock_run:
+        with patch("vibe_heal.git.manager.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             manager._run_pre_commit_hooks(["test.py"])
 
@@ -683,7 +689,10 @@ class TestPreCommitHooks:
             (git_repo / "test.py").write_text('print("ruff-formatted")\n')
             return MagicMock(returncode=1)
 
-        with patch("shutil.which", return_value=None), patch("subprocess.run", side_effect=fake_run):
+        with (
+            patch("vibe_heal.git.manager.shutil.which", return_value=None),
+            patch("vibe_heal.git.manager.subprocess.run", side_effect=fake_run),
+        ):
             sha = manager._stage_and_commit(["test.py"], "test commit")
 
         assert sha is not None

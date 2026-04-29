@@ -1,5 +1,6 @@
 """Git operations manager."""
 
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -265,13 +266,17 @@ class GitManager:
         files_set = set(files)
 
         if self._pre_commit_command is not None:
-            cmd = self._pre_commit_command.split() + files
+            cmd = shlex.split(self._pre_commit_command) + files
         elif shutil.which("pre-commit"):
             cmd = ["pre-commit", "run", "--files", *files]
         else:
             cmd = ["git", "hook", "run", "--ignore-missing", "pre-commit"]
 
-        subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)  # noqa: S603
+        try:
+            subprocess.run(cmd, cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        except OSError as e:
+            msg = f"Pre-commit hook failed to run: {e}"
+            raise GitOperationError(msg) from e
         # Ignore return code; what matters is whether files were modified by hooks
 
         # Detect files modified by hooks (working tree differs from index)
@@ -307,25 +312,25 @@ class GitManager:
                 return None
 
             # Commit with one retry on failure (safety net for hooks that modify files)
+            last_error: git.GitError = git.GitError("commit not attempted")
             for attempt in range(2):
                 try:
                     commit = self._do_commit(message)
                     return commit.hexsha
-                except git.GitError:
+                except git.GitError as exc:
+                    last_error = exc
                     if attempt == 1:
-                        raise
+                        break
                     # Re-stage any files modified by hooks during commit
                     retry_dirty = [item.a_path for item in self.repo.index.diff(None) if item.a_path]
-                    if retry_dirty:
-                        self.repo.index.add(retry_dirty)
-                    else:
-                        raise
+                    if not retry_dirty:
+                        break
+                    self.repo.index.add(retry_dirty)
+            raise last_error
 
         except git.GitError as e:
             msg = f"Failed to create commit: {e}"
             raise GitOperationError(msg) from e
-
-        return None  # unreachable, satisfies type checker
 
     def _create_commit_message(
         self,

@@ -404,3 +404,17 @@ uv run pytest tests/processor/ -v --cov=src/vibe_heal/processor
 
 - Logic is in `GitManager._create_commit_message()` in `src/vibe_heal/git/manager.py`
 - Tests verify format in `tests/git/test_manager.py`
+
+**Subprocess conventions**:
+
+- Use `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL` when output is not consumed — `capture_output=True` buffers output into memory for nothing and hides diagnostics.
+- Parse user-supplied command strings with `shlex.split()`, not `str.split()` — the latter breaks on quoted arguments and paths with spaces.
+- Always wrap `subprocess.run` calls that can fail due to misconfiguration in `try/except OSError` and raise a domain-specific error (e.g. `GitOperationError`).
+
+**Mocking stdlib symbols in tests**:
+
+- Patch at the module that imports the symbol, not at the stdlib level. For example, use `patch("vibe_heal.git.manager.subprocess.run")` and `patch("vibe_heal.git.manager.shutil.which")` rather than `patch("subprocess.run")` or `patch("shutil.which")`. This keeps mocks scoped to the unit under test and prevents leakage across tests.
+
+**Retry loops and mypy**:
+
+- Avoid `return None  # unreachable` at the end of functions — mypy accepts it but it's misleading dead code. Instead, collect the last exception in a `last_error` variable, `break` out of the loop, then `assert last_error is not None` followed by `raise last_error`. The assert is genuinely reachable (any failure path sets `last_error`), mypy is satisfied, and there is no dead code.
