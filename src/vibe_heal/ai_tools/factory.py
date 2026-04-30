@@ -66,6 +66,7 @@ class AIToolFactory:
         1. Claude Code
         2. Aider
         3. Gemini
+        4. OpenCode
 
         Returns:
             AIToolType of first available tool, or None if none found
