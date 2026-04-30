@@ -6,6 +6,7 @@ from vibe_heal.ai_tools.aider import AiderTool
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.claude_code import ClaudeCodeTool
 from vibe_heal.ai_tools.gemini import GeminiCliTool
+from vibe_heal.ai_tools.opencode import OpenCodeTool
 
 if TYPE_CHECKING:
     from vibe_heal.config import VibeHealConfig
@@ -18,6 +19,7 @@ class AIToolFactory:
         AIToolType.CLAUDE_CODE: ClaudeCodeTool,
         AIToolType.AIDER: AiderTool,
         AIToolType.GEMINI: GeminiCliTool,
+        AIToolType.OPENCODE: OpenCodeTool,
     }
 
     @staticmethod
@@ -51,6 +53,9 @@ class AIToolFactory:
         if tool_type == AIToolType.GEMINI:
             return GeminiCliTool()
 
+        if tool_type == AIToolType.OPENCODE:
+            return OpenCodeTool()
+
         raise ValueError(f"Unsupported AI tool type: {tool_type}")
 
     @staticmethod
@@ -61,12 +66,13 @@ class AIToolFactory:
         1. Claude Code
         2. Aider
         3. Gemini
+        4. OpenCode
 
         Returns:
             AIToolType of first available tool, or None if none found
         """
         # Try in preference order
-        for tool_type in [AIToolType.CLAUDE_CODE, AIToolType.AIDER, AIToolType.GEMINI]:
+        for tool_type in [AIToolType.CLAUDE_CODE, AIToolType.AIDER, AIToolType.GEMINI, AIToolType.OPENCODE]:
             try:
                 tool = AIToolFactory.create(tool_type)
                 if tool.is_available():

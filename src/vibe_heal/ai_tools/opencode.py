@@ -1,0 +1,162 @@
+"""OpenCode AI tool implementation."""
+
+import asyncio
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vibe_heal.ai_tools.base import AITool, AIToolType
+from vibe_heal.ai_tools.models import FixResult
+from vibe_heal.ai_tools.utils import run_command
+
+if TYPE_CHECKING:
+    from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
+
+
+class OpenCodeTool(AITool):
+    """OpenCode AI tool implementation."""
+
+    tool_type = AIToolType.OPENCODE
+
+    def __init__(
+        self,
+        timeout: int = 900,
+        model: str | None = None,
+    ) -> None:
+        """Initialize OpenCode tool.
+
+        Args:
+            timeout: Timeout in seconds for AI operations (default: 15 minutes)
+            model: Model to use in provider/model format (e.g., 'anthropic/claude-sonnet-4-5')
+        """
+        self.timeout = timeout
+        self.model = model
+
+    def is_available(self) -> bool:
+        """Check if OpenCode CLI is installed.
+
+        Returns:
+            True if opencode command is available
+        """
+        return shutil.which("opencode") is not None
+
+    async def fix_issue(
+        self,
+        issue: "SonarQubeIssue",
+        file_path: str,
+        rule: "SonarQubeRule | None" = None,
+        code_context: "list[SourceLine] | None" = None,
+    ) -> FixResult:
+        """Fix an issue using OpenCode.
+
+        Args:
+            issue: The SonarQube issue to fix
+            file_path: Path to the file containing the issue
+            rule: Detailed rule information (optional)
+            code_context: Source code lines around the issue (optional)
+
+        Returns:
+            Result of the fix attempt
+        """
+        from vibe_heal.ai_tools.prompts import create_fix_prompt
+
+        if not self.is_available():
+            return FixResult(
+                success=False,
+                error_message="OpenCode CLI not found. Please install OpenCode first.",
+            )
+
+        if not Path(file_path).exists():
+            return FixResult(
+                success=False,
+                error_message=f"File not found: {file_path}",
+            )
+
+        prompt = create_fix_prompt(issue, file_path, rule=rule, code_context=code_context)
+
+        try:
+            result = await self._invoke_opencode(prompt, file_path)
+            return result
+        except asyncio.TimeoutError:
+            return FixResult(
+                success=False,
+                error_message=f"OpenCode timed out after {self.timeout} seconds",
+            )
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_message=f"Error invoking OpenCode: {e}",
+            )
+
+    async def fix_duplication(
+        self,
+        prompt: str,
+        file_path: str,
+    ) -> FixResult:
+        """Fix code duplication using OpenCode.
+
+        Args:
+            prompt: Detailed prompt describing the duplication
+            file_path: Path to the file containing the duplication
+
+        Returns:
+            Result of the fix attempt
+        """
+        if not self.is_available():
+            return FixResult(
+                success=False,
+                error_message="OpenCode CLI not found. Please install OpenCode first.",
+            )
+
+        if not Path(file_path).exists():
+            return FixResult(
+                success=False,
+                error_message=f"File not found: {file_path}",
+            )
+
+        try:
+            result = await self._invoke_opencode(prompt, file_path)
+            return result
+        except asyncio.TimeoutError:
+            return FixResult(
+                success=False,
+                error_message=f"OpenCode timed out after {self.timeout} seconds",
+            )
+        except Exception as e:
+            return FixResult(
+                success=False,
+                error_message=f"Error invoking OpenCode: {e}",
+            )
+
+    async def _invoke_opencode(
+        self,
+        prompt: str,
+        file_path: str,
+    ) -> FixResult:
+        """Invoke OpenCode CLI.
+
+        Args:
+            prompt: The prompt to send to OpenCode
+            file_path: File to fix
+
+        Returns:
+            FixResult with outcome
+        """
+        cmd = ["opencode", "run", prompt]
+
+        if self.model:
+            cmd.extend(["-m", self.model])
+
+        result = await run_command(cmd, timeout=self.timeout)
+
+        if result.success:
+            return FixResult(
+                success=True,
+                files_modified=[file_path],
+                ai_response=result.stdout,
+            )
+        return FixResult(
+            success=False,
+            error_message=f"OpenCode failed with exit code {result.exit_code}: {result.stderr}",
+            ai_response=result.stdout,
+        )
