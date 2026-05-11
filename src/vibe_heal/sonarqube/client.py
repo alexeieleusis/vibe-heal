@@ -385,3 +385,51 @@ class SonarQubeClient:
         # Response format: {"analyses": [...], "paging": {...}}
         analyses = data.get("analyses", [])
         return len(analyses)
+
+    async def get_project_settings(self, project_key: str) -> list[dict]:
+        """Get project settings from SonarQube.
+
+        Args:
+            project_key: Project key to get settings for
+
+        Returns:
+            List of setting dicts from the API response
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        params = {
+            "component": project_key,
+        }
+
+        data = await self._request("GET", "/api/settings/values", params=params)
+        settings: list[dict[Any, Any]] = data.get("settings", [])
+        return settings
+
+    async def set_project_setting(
+        self,
+        project_key: str,
+        setting_key: str,
+        values: list[str],
+    ) -> None:
+        """Set a project setting in SonarQube.
+
+        Uses multi-value form since exclusion settings are always path-pattern lists.
+
+        Args:
+            project_key: Project key to set the setting on
+            setting_key: Setting key (e.g., "sonar.cpd.exclusions")
+            values: List of values for the setting
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        params: dict[str, Any] = {
+            "component": project_key,
+            "key": setting_key,
+            "values": values,
+        }
+
+        await self._request("POST", "/api/settings/set", params=params)

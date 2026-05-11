@@ -1,11 +1,15 @@
 """SonarQube project lifecycle management for temporary projects."""
 
+import logging
 import re
 from datetime import datetime, timezone
+from typing import ClassVar
 
 from pydantic import BaseModel
 
 from vibe_heal.sonarqube.client import SonarQubeClient
+
+logger = logging.getLogger(__name__)
 
 
 class TempProjectMetadata(BaseModel):
@@ -25,6 +29,15 @@ class ProjectManager:
     Creates uniquely named temporary projects for branch analysis and
     ensures proper cleanup even on errors.
     """
+
+    EXCLUSION_SETTINGS: ClassVar[tuple[str, ...]] = (
+        "sonar.exclusions",
+        "sonar.test.exclusions",
+        "sonar.coverage.exclusions",
+        "sonar.cpd.exclusions",
+        "sonar.inclusions",
+        "sonar.test.inclusions",
+    )
 
     def __init__(self, client: SonarQubeClient) -> None:
         """Initialize the ProjectManager.
@@ -107,6 +120,73 @@ class ProjectManager:
             SonarQubeAPIError: If API request fails
         """
         return await self.client.project_exists(project_key)
+
+    async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int]:
+        """Copy exclusion settings from source project to target project.
+
+        Args:
+            source_key: Source project key to copy settings from
+            target_key: Target project key to copy settings to
+
+        Returns:
+            Tuple of (list of keys that were copied, count of inherited keys skipped)
+
+        Raises:
+            SonarQubeAPIError: If the fetch step fails
+        """
+        settings = await self.client.get_project_settings(source_key)
+        copied: list[str] = []
+        inherited_count = 0
+
+        for setting in settings:
+            key = setting.get("key")
+            inherited = setting.get("inherited", False)
+
+            if key not in self.EXCLUSION_SETTINGS:
+                continue
+
+            if inherited:
+                inherited_count += 1
+                continue
+
+            values = self._normalize_setting_values(setting)
+            if not values:
+                continue
+
+            try:
+                await self.client.set_project_setting(target_key, key, values)
+            except Exception as e:
+                logger.warning(f"Failed to set {key} on {target_key}: {e}")
+                continue
+
+            copied.append(key)
+
+        return copied, inherited_count
+
+    def _normalize_setting_values(self, setting: dict) -> list[str]:
+        """Normalize setting values to a list of strings.
+
+        Handles both scalar ('value') and multi-value ('values') shapes.
+
+        Args:
+            setting: Raw setting dict from the API
+
+        Returns:
+            List of string values
+        """
+        if "values" in setting:
+            vals = setting["values"]
+            if isinstance(vals, list):
+                return [str(v) for v in vals]
+            return [str(vals)]
+        if "value" in setting:
+            val = setting["value"]
+            if val is None:
+                return []
+            if isinstance(val, list):
+                return [str(v) for v in val]
+            return [str(val)]
+        return []
 
     def _sanitize_identifier(self, value: str) -> str:
         """Sanitize string for use in project key.

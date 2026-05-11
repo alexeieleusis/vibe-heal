@@ -442,3 +442,61 @@ class TestSonarQubeClient:
 
         assert route.called
         assert route.calls.last.request.url.params["projects"] == "my-test-project"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_project_settings(self, config: VibeHealConfig) -> None:
+        """Test getting project settings for both scalar and multi-value shapes."""
+        response_data = {
+            "settings": [
+                {"key": "sonar.cpd.exclusions", "value": "**/generated/**", "inherited": False},
+                {"key": "sonar.exclusions", "values": ["**/*.gen.ts", "tests/**"], "inherited": False},
+                {"key": "sonar.qualitygate", "value": "default", "inherited": True},
+            ]
+        }
+        route = respx.get("https://sonar.test.com/api/settings/values").mock(
+            return_value=httpx.Response(200, json=response_data)
+        )
+
+        async with SonarQubeClient(config) as client:
+            settings = await client.get_project_settings("my-project")
+
+        assert len(settings) == 3
+        assert settings[0]["key"] == "sonar.cpd.exclusions"
+        assert settings[0]["value"] == "**/generated/**"
+        assert settings[1]["key"] == "sonar.exclusions"
+        assert settings[1]["values"] == ["**/*.gen.ts", "tests/**"]
+        assert route.called
+        assert route.calls.last.request.url.params["component"] == "my-project"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_project_settings_empty(self, config: VibeHealConfig) -> None:
+        """Test getting project settings when none are set."""
+        response_data = {"settings": []}
+        route = respx.get("https://sonar.test.com/api/settings/values").mock(
+            return_value=httpx.Response(200, json=response_data)
+        )
+
+        async with SonarQubeClient(config) as client:
+            settings = await client.get_project_settings("my-project")
+
+        assert settings == []
+        assert route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_set_project_setting(self, config: VibeHealConfig) -> None:
+        """Test setting a project setting with multi-value form."""
+        route = respx.post("https://sonar.test.com/api/settings/set").mock(return_value=httpx.Response(200, json={}))
+
+        async with SonarQubeClient(config) as client:
+            await client.set_project_setting(
+                "target-project", "sonar.cpd.exclusions", ["**/generated/**", "**/*.gen.ts"]
+            )
+
+        assert route.called
+        req = route.calls.last.request
+        assert req.url.params["component"] == "target-project"
+        assert req.url.params["key"] == "sonar.cpd.exclusions"
+        assert req.url.params.get_list("values") == ["**/generated/**", "**/*.gen.ts"]

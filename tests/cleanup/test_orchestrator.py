@@ -301,3 +301,79 @@ class TestFilterFiles:
         result = orchestrator._filter_files(files, ["*.py"])
 
         assert len(result) == 3
+
+
+class TestCreateTempProject:
+    """Tests for _create_temp_project method."""
+
+    @pytest.mark.asyncio
+    async def test_create_temp_project_warns_on_settings_copy_failure(
+        self,
+        orchestrator: CleanupOrchestrator,
+        temp_project: TempProjectMetadata,
+    ) -> None:
+        """Test that the orchestrator warns but does not re-raise when copying settings fails."""
+        from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
+
+        with (
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_current_branch",
+                return_value="feature-branch",
+            ),
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_user_email",
+                return_value="user@example.com",
+            ),
+            patch.object(
+                orchestrator.project_manager,
+                "create_temp_project",
+                return_value=temp_project,
+            ),
+            patch.object(
+                orchestrator.project_manager,
+                "copy_exclusion_settings",
+                side_effect=SonarQubeAPIError("Permission denied", status_code=403),
+            ),
+        ):
+            result = await orchestrator._create_temp_project()
+
+        assert result == temp_project
+
+    @pytest.mark.asyncio
+    async def test_create_temp_project_copies_settings_successfully(
+        self,
+        orchestrator: CleanupOrchestrator,
+        temp_project: TempProjectMetadata,
+    ) -> None:
+        """Test that settings are copied successfully after project creation."""
+        with (
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_current_branch",
+                return_value="feature-branch",
+            ),
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_user_email",
+                return_value="user@example.com",
+            ),
+            patch.object(
+                orchestrator.project_manager,
+                "create_temp_project",
+                return_value=temp_project,
+            ),
+            patch.object(
+                orchestrator.project_manager,
+                "copy_exclusion_settings",
+                return_value=(["sonar.cpd.exclusions"], 0),
+            ) as mock_copy,
+        ):
+            result = await orchestrator._create_temp_project()
+
+        assert result == temp_project
+        mock_copy.assert_called_once_with(
+            source_key=orchestrator.config.sonarqube_project_key,
+            target_key=temp_project.project_key,
+        )

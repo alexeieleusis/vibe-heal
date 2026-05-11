@@ -238,6 +238,21 @@ class CleanupOrchestrator:
             user_email=user_email,
         )
         console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
+
+        try:
+            copied, inherited_count = await self.project_manager.copy_exclusion_settings(
+                source_key=self.config.sonarqube_project_key,
+                target_key=temp_project.project_key,
+            )
+            if copied:
+                console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
+            if inherited_count:
+                console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+            if not copied and not inherited_count:
+                console.print("[dim]No exclusion settings configured on source project[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
+
         return temp_project
 
     async def _check_files_for_issues(
