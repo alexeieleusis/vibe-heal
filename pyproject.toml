@@ -50,7 +50,7 @@ dev = [
     "pytest-asyncio>=1.2.0",
     "responses>=0.25.8",
     "respx>=0.22.0",
-    "types-aiofiles>=25.1.0.20251011",
+    "types-aiofiles>=25.1.0.20260409",
 ]
 
 [build-system]
