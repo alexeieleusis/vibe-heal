@@ -689,3 +689,275 @@ class TestDebugIssuesCommand:
         # Assertions
         assert result.exit_code == 0
         assert "Found 0 issues" in result.stdout
+
+
+class TestReviewCommand:
+    """Tests for review command."""
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_analysis_basic(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test basic review command in analysis mode."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.total_issues = 3
+        mock_result.files = []
+        mock_result.branch = "feature-test"
+        mock_result.base_branch = "origin/main"
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_analysis = AsyncMock(return_value=mock_result)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review"])
+
+        assert result.exit_code == 0
+        assert "Review Summary" in result.stdout
+        assert "Total issues: 3" in result.stdout
+        mock_orchestrator.run_analysis.assert_called_once()
+        call_kwargs = mock_orchestrator.run_analysis.call_args.kwargs
+        assert call_kwargs["base_branch"] == "origin/main"
+        assert call_kwargs["file_patterns"] is None
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_analysis_with_options(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review command with all analysis options."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.total_issues = 0
+        mock_result.files = []
+        mock_result.branch = "feature-test"
+        mock_result.base_branch = "develop"
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_analysis = AsyncMock(return_value=mock_result)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(
+            app,
+            [
+                "review",
+                "--base-branch",
+                "develop",
+                "--pattern",
+                "*.py",
+                "--pattern",
+                "*.ts",
+                "--verbose",
+            ],
+        )
+
+        assert result.exit_code == 0
+        call_kwargs = mock_orchestrator.run_analysis.call_args.kwargs
+        assert call_kwargs["base_branch"] == "develop"
+        assert call_kwargs["file_patterns"] == ["*.py", "*.ts"]
+        assert call_kwargs["verbose"] is True
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_analysis_with_file_results(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review command displays per-file breakdown."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_file_review = MagicMock()
+        mock_file_review.file_path = "src/test.py"
+        mock_file_review.issues = [MagicMock(severity="CRITICAL")]
+
+        mock_result = MagicMock()
+        mock_result.total_issues = 1
+        mock_result.files = [mock_file_review]
+        mock_result.branch = "feature-test"
+        mock_result.base_branch = "origin/main"
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_analysis = AsyncMock(return_value=mock_result)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review"])
+
+        assert result.exit_code == 0
+        assert "Per-File Breakdown" in result.stdout
+        assert "src/test.py" in result.stdout
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_post_basic(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review command in post mode."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_post = AsyncMock(return_value=None)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review", "--post"])
+
+        assert result.exit_code == 0
+        mock_orchestrator.run_post.assert_called_once()
+        mock_orchestrator.run_analysis.assert_not_called()
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_post_with_pr_number(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review command in post mode with explicit PR number."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_post = AsyncMock(return_value=None)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review", "--post", "--pr", "42"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_orchestrator.run_post.call_args.kwargs
+        assert call_kwargs["pr_number"] == 42
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.cli.BranchAnalyzer")
+    def test_review_report_not_found(
+        self,
+        mock_branch_analyzer_class: MagicMock,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review command handles missing report file."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_branch_analyzer = MagicMock()
+        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
+        mock_branch_analyzer_class.return_value = mock_branch_analyzer
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_post = AsyncMock(
+            side_effect=FileNotFoundError("Cannot read report file: /path/to/review.json")
+        )
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review", "--post"])
+
+        assert result.exit_code == 1
+        assert "Cannot read report file" in result.stdout
+
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_review_config_error(self, mock_config_class: MagicMock) -> None:
+        """Test review command handles configuration errors."""
+        from vibe_heal.config.exceptions import ConfigurationError
+
+        mock_config_class.side_effect = ConfigurationError("Missing SONARQUBE_URL")
+
+        result = runner.invoke(app, ["review"])
+
+        assert result.exit_code == 1
+        assert "Configuration error" in result.stdout
+        assert "Missing SONARQUBE_URL" in result.stdout
+
+    def test_review_help_included(self) -> None:
+        """Test that review command appears in help output."""
+        result = runner.invoke(app, ["--help"])
+
+        assert result.exit_code == 0
+        assert "review" in result.stdout

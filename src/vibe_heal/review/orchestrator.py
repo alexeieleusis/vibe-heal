@@ -160,9 +160,7 @@ class ReviewOrchestrator:
 
             try:
                 for file_path in modified_files:
-                    file_issues = await self._get_filtered_issues(
-                        file_path, changed_lines_map, verbose
-                    )
+                    file_issues = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
                     if file_issues:
                         result.files.append(
                             FileReview(
@@ -226,10 +224,7 @@ class ReviewOrchestrator:
 
         # Step 3: Post review
         await self.github_client.post_review(pr, report)
-        console.print(
-            f"[green]Posted {report.total_issues} issue(s) "
-            f"as review comments on PR #{pr}.[/green]"
-        )
+        console.print(f"[green]Posted {report.total_issues} issue(s) as review comments on PR #{pr}.[/green]")
 
     async def _create_temp_project(self) -> TempProjectMetadata:
         """Create temporary SonarQube project for analysis.
@@ -254,16 +249,11 @@ class ReviewOrchestrator:
                 target_key=temp_project.project_key,
             )
             if copied:
-                console.print(
-                    f"[dim]Copied {len(copied)} exclusion setting(s): "
-                    f"{', '.join(copied)}[/dim]"
-                )
+                console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
             if inherited_count:
                 console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
             if not copied and not inherited_count:
-                console.print(
-                    "[dim]No exclusion settings configured on source project[/dim]"
-                )
+                console.print("[dim]No exclusion settings configured on source project[/dim]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
 
@@ -289,31 +279,23 @@ class ReviewOrchestrator:
             issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
         except ComponentNotFoundError:
             if verbose:
-                console.print(
-                    f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]"
-                )
+                console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
             return []
 
         changed_lines = changed_lines_map.get(str(file_path), set())
 
         if not changed_lines:
             if verbose:
-                console.print(
-                    f"[dim]  {file_path}: no changed lines in diff[/dim]"
-                )
+                console.print(f"[dim]  {file_path}: no changed lines in diff[/dim]")
             return []
 
         filtered = IssueLineFilter.filter_issues(issues, changed_lines)
 
         if verbose and filtered:
-            console.print(
-                f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]"
-            )
+            console.print(f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]")
         return filtered
 
-    async def _cleanup_temp_project(
-        self, temp_project: TempProjectMetadata | None
-    ) -> None:
+    async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
         """Clean up temporary SonarQube project.
 
         Args:
@@ -321,15 +303,11 @@ class ReviewOrchestrator:
         """
         if temp_project:
             try:
-                console.print(
-                    f"[dim]Deleting temporary project: {temp_project.project_key}[/dim]"
-                )
+                console.print(f"[dim]Deleting temporary project: {temp_project.project_key}[/dim]")
                 await self.project_manager.delete_project(temp_project.project_key)
                 console.print("[green]Temporary project deleted.[/green]")
             except Exception as e:
-                console.print(
-                    f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]"
-                )
+                console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
 
     def _filter_files(
         self,
@@ -353,9 +331,7 @@ class ReviewOrchestrator:
                     break
         return filtered
 
-    def _write_report(
-        self, result: ReviewResultModel, report_file: Path | None
-    ) -> None:
+    def _write_report(self, result: ReviewResultModel, report_file: Path | None) -> None:
         """Write report files if a report path is specified.
 
         Args:

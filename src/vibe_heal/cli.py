@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AITool, AIToolType
@@ -18,7 +20,11 @@ from vibe_heal.deduplication.orchestrator import (
     DedupeBranchResult,
     DeduplicationOrchestrator,
 )
+from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.review import ReviewOrchestrator
+from vibe_heal.review.orchestrator import ReviewResultModel
+from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
 
 app = typer.Typer(
@@ -543,6 +549,186 @@ def dedupe_branch(
 
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+def _display_review_results(result: ReviewResultModel, report_file: Path) -> None:
+    """Display review analysis results.
+
+    Args:
+        result: ReviewResultModel from the orchestrator.
+        report_file: Path where the report was saved.
+    """
+    total_issues = result.total_issues
+    files_checked = len(result.files)
+
+    console.print("\n[bold]Review Summary:[/bold]")
+    console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
+    console.print(f"  Files checked: {files_checked}")
+    console.print(f"  [green]Total issues: {total_issues}[/green]")
+
+    if result.files:
+        console.print("\n[bold]Per-File Breakdown:[/bold]")
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("File", style="cyan")
+        table.add_column("Issues", justify="right")
+        table.add_column("Highest Severity", justify="right")
+
+        severity_order = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
+
+        for file_review in result.files:
+            issue_count = len(file_review.issues)
+            if issue_count > 0:
+                highest_severity = max(
+                    (issue.severity for issue in file_review.issues),
+                    key=lambda s: severity_order.index(s) if s in severity_order else len(severity_order),
+                )
+            else:
+                highest_severity = "N/A"
+            table.add_row(file_review.file_path, str(issue_count), highest_severity)
+
+        console.print(table)
+    elif total_issues == 0:
+        console.print("\n[green]No issues found on changed lines.[/green]")
+
+    console.print(f"\n[dim]Report saved to {report_file}[/dim]")
+
+
+async def _run_review(
+    config: VibeHealConfig,
+    base_branch: str,
+    file_patterns: list[str] | None,
+    report_file: Path,
+    verbose: bool,
+) -> None:
+    """Run review analysis workflow.
+
+    Args:
+        config: Configuration object.
+        base_branch: Base branch to compare against.
+        file_patterns: Optional file patterns to filter.
+        report_file: Path to save the report.
+        verbose: Enable verbose output.
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = ReviewOrchestrator(config, client)
+        result = await orchestrator.run_analysis(
+            base_branch=base_branch,
+            file_patterns=file_patterns,
+            report_file=report_file,
+            verbose=verbose,
+        )
+        _display_review_results(result, report_file)
+
+
+async def _run_review_post(
+    config: VibeHealConfig,
+    report_file: Path,
+    pr_number: int | None,
+    verbose: bool,
+) -> None:
+    """Run review post workflow.
+
+    Args:
+        config: Configuration object.
+        report_file: Path to the saved report file.
+        pr_number: Optional explicit PR number.
+        verbose: Enable verbose output.
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = ReviewOrchestrator(config, client)
+        await orchestrator.run_post(
+            report_file=report_file,
+            pr_number=pr_number,
+            verbose=verbose,
+        )
+
+
+@app.command()
+def review(
+    post: bool = typer.Option(
+        False,
+        "--post",
+        help="Post saved report to GitHub PR",
+    ),
+    pr_number: int | None = typer.Option(
+        None,
+        "--pr",
+        help="GitHub PR number (override auto-detection)",
+    ),
+    base_branch: str = typer.Option(
+        "origin/main",
+        "--base-branch",
+        "-b",
+        help="Base branch to compare against",
+    ),
+    file_patterns: list[str] | None = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+    ),
+    report_file: Path | None = typer.Option(
+        None,
+        "--report-file",
+        help="Override report output path",
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=VERBOSE_OUTPUT_HELP,
+    ),
+) -> None:
+    """Analyze SonarQube issues on changed lines.
+
+    Creates a temporary SonarQube project, analyzes modified files,
+    and reports issues found on changed lines only.
+    """
+    setup_logging(verbose)
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        if report_file is None:
+            branch_name = BranchAnalyzer(Path.cwd()).get_current_branch()
+            report_file = default_report_dir(config.sonarqube_project_key, branch_name) / "review.json"
+
+        if post:
+            asyncio.run(
+                _run_review_post(
+                    config=config,
+                    report_file=report_file,
+                    pr_number=pr_number,
+                    verbose=verbose,
+                )
+            )
+        else:
+            asyncio.run(
+                _run_review(
+                    config=config,
+                    base_branch=base_branch,
+                    file_patterns=file_patterns,
+                    report_file=report_file,
+                    verbose=verbose,
+                )
+            )
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
         sys.exit(1)
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
