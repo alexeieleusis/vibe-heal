@@ -28,8 +28,14 @@ def write_reports(result: ReviewResult, report_dir: Path) -> None:
 def load_report(report_dir: Path) -> ReviewResult:
     """Load a ReviewResult from review.json in the given directory."""
     json_path = report_dir / "review.json"
-    data = json_path.read_text(encoding="utf-8")
-    return ReviewResult.model_validate_json(data)
+    try:
+        data = json_path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise FileNotFoundError(f"Cannot read report file: {json_path}") from e
+    try:
+        return ReviewResult.model_validate_json(data)
+    except Exception as e:
+        raise ValueError(f"Malformed report file: {json_path}") from e
 
 
 def _write_json(result: ReviewResult, path: Path) -> None:
@@ -60,7 +66,7 @@ def _write_markdown(result: ReviewResult, path: Path) -> None:
             rule_display = issue.rule
             if issue.doc_url:
                 rule_display = f"[{issue.rule}]({issue.doc_url})"
-            msg = issue.message.replace("|", "\\|")
+            msg = issue.message.replace("|", "\\|").replace("\n", " ").replace("\r", "")
             lines.append(f"| {rule_display} | {msg} | {issue.line} | {issue.severity} |")
         lines.append("")
 
