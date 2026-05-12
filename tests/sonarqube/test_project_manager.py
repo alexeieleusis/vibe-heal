@@ -330,7 +330,9 @@ class TestCopyExclusionSettings:
         mock_client.get_project_settings = AsyncMock(return_value=settings)
         mock_client.set_project_setting = AsyncMock()
 
-        copied, inherited_count = await project_manager.copy_exclusion_settings("source-project", "target-project")
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
 
         assert sorted(copied) == sorted([
             "sonar.exclusions",
@@ -339,6 +341,7 @@ class TestCopyExclusionSettings:
             "sonar.test.inclusions",
         ])
         assert inherited_count == 2
+        assert failed_count == 0
         assert mock_client.set_project_setting.call_count == 4
         mock_client.set_project_setting.assert_any_call("target-project", "sonar.exclusions", ["**/vendor/**"])
         mock_client.set_project_setting.assert_any_call("target-project", "sonar.test.exclusions", ["tests/**"])
@@ -357,10 +360,13 @@ class TestCopyExclusionSettings:
         mock_client.get_project_settings = AsyncMock(return_value=settings)
         mock_client.set_project_setting = AsyncMock()
 
-        copied, inherited_count = await project_manager.copy_exclusion_settings("source-project", "target-project")
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
 
         assert copied == []
         assert inherited_count == 0
+        assert failed_count == 0
         mock_client.set_project_setting.assert_not_called()
 
     @pytest.mark.asyncio
@@ -387,10 +393,13 @@ class TestCopyExclusionSettings:
         mock_client.get_project_settings = AsyncMock(return_value=settings)
         mock_client.set_project_setting = AsyncMock(side_effect=[SonarQubeAPIError("Failed"), None])
 
-        copied, inherited_count = await project_manager.copy_exclusion_settings("source-project", "target-project")
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
 
         assert copied == ["sonar.exclusions"]
         assert inherited_count == 0
+        assert failed_count == 1
         assert mock_client.set_project_setting.call_count == 2
 
     def test_normalize_setting_values_scalar(self, project_manager: ProjectManager) -> None:

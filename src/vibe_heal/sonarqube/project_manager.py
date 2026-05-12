@@ -122,7 +122,7 @@ class ProjectManager:
         """
         return await self.client.project_exists(project_key)
 
-    async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int]:
+    async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int, int]:
         """Copy exclusion settings from source project to target project.
 
         Args:
@@ -130,16 +130,16 @@ class ProjectManager:
             target_key: Target project key to copy settings to
 
         Returns:
-            Tuple of (list of keys that were copied, count of inherited keys skipped)
+            Tuple of (list of keys that were copied, count of inherited keys skipped,
+            count of keys that failed to apply)
 
         Raises:
-            SonarQubeAPIError: If the API request fails
-            SonarQubeAuthError: If authentication fails
-            RuntimeError: If the client is not initialized
+            SonarQubeError: If fetching settings from the source project fails
         """
         settings = await self.client.get_project_settings(source_key)
         copied: list[str] = []
         inherited_count = 0
+        failed_count = 0
 
         for setting in settings:
             key = setting.get("key")
@@ -160,11 +160,12 @@ class ProjectManager:
                 await self.client.set_project_setting(target_key, key, values)
             except SonarQubeError as e:
                 logger.warning(f"Failed to set {key} on {target_key}: {e}")
+                failed_count += 1
                 continue
 
             copied.append(key)
 
-        return copied, inherited_count
+        return copied, inherited_count, failed_count
 
     def _normalize_setting_values(self, setting: dict) -> list[str]:
         """Normalize setting values to a list of strings.

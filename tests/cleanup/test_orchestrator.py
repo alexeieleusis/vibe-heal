@@ -367,7 +367,7 @@ class TestCreateTempProject:
             patch.object(
                 orchestrator.project_manager,
                 "copy_exclusion_settings",
-                return_value=(["sonar.cpd.exclusions"], 0),
+                return_value=(["sonar.cpd.exclusions"], 0, 0),
             ) as mock_copy,
         ):
             result = await orchestrator._create_temp_project()

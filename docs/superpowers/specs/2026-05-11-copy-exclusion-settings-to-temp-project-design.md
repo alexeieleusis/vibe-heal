@@ -81,30 +81,33 @@ to `list[str]` before `set_project_setting` is called.
 Class-level constant:
 
 ```python
-EXCLUSION_SETTINGS = [
+EXCLUSION_SETTINGS: ClassVar[tuple[str, ...]] = (
     "sonar.exclusions",
     "sonar.test.exclusions",
     "sonar.coverage.exclusions",
     "sonar.cpd.exclusions",
     "sonar.inclusions",
     "sonar.test.inclusions",
-]
+)
 ```
 
 New method:
 
 ```python
-async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int]:
+async def copy_exclusion_settings(
+    self, source_key: str, target_key: str
+) -> tuple[list[str], int, int]:
     """Copy exclusion settings from source project to target project.
 
     Steps:
     1. GET /api/settings/values?component=source_key
     2. Filter to EXCLUSION_SETTINGS keys that are not inherited
     3. POST each to the target project
-    4. Return tuple of (list of keys that were copied, count of inherited keys skipped)
+    4. Return tuple of (list of keys that were copied, count of inherited keys skipped,
+       count of keys that failed to apply)
 
-    Raises SonarQubeAPIError if the fetch step fails (caller handles warn-and-continue).
-    Individual set failures are logged and skipped.
+    Raises SonarQubeError if the fetch step fails (caller handles warn-and-continue).
+    Individual set failures are logged and counted, not re-raised.
     """
 ```
 
@@ -114,7 +117,7 @@ After the existing `create_temp_project()` call:
 
 ```python
 try:
-    copied, inherited_count = await self.project_manager.copy_exclusion_settings(
+    copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
         source_key=self.config.sonarqube_project_key,
         target_key=temp_project.project_key,
     )
@@ -122,15 +125,17 @@ try:
         console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
     if inherited_count:
         console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
-    if not copied and not inherited_count:
+    if failed_count:
+        console.print(f"[yellow]Warning: Failed to apply {failed_count} exclusion setting(s)[/yellow]")
+    if not copied and not inherited_count and not failed_count:
         console.print("[dim]No exclusion settings configured on source project[/dim]")
-except Exception as e:
+except SonarQubeError as e:
     console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
 ```
 
 ### 4. `DedupeBranchOrchestrator._create_temp_project()` (`src/vibe_heal/deduplication/orchestrator.py`)
 
-Identical addition as Section 3 above.
+Identical addition as Section 3 above, but using `self.console.print()` instead of the module-level `console.print()`.
 
 ## Data flow
 
@@ -173,4 +178,4 @@ cleanup / dedupe-branch
 ### `tests/deduplication/test_branch_orchestrator.py`
 
 - `test_create_temp_project_warns_on_settings_copy_failure` — same as above for the dedupe
-  orchestrator
+  branch orchestrator

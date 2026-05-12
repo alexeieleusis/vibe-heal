@@ -725,7 +725,7 @@ class DedupeBranchOrchestrator:
         self.console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
 
         try:
-            copied, inherited_count = await self.project_manager.copy_exclusion_settings(
+            copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
                 source_key=self.config.sonarqube_project_key,
                 target_key=temp_project.project_key,
             )
@@ -733,7 +733,9 @@ class DedupeBranchOrchestrator:
                 self.console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
             if inherited_count:
                 self.console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
-            if not copied and not inherited_count:
+            if failed_count:
+                self.console.print(f"[yellow]Warning: Failed to apply {failed_count} exclusion setting(s)[/yellow]")
+            if not copied and not inherited_count and not failed_count:
                 self.console.print("[dim]No exclusion settings configured on source project[/dim]")
         except SonarQubeError as e:
             self.console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
