@@ -20,10 +20,9 @@ from vibe_heal.deduplication.orchestrator import (
     DedupeBranchResult,
     DeduplicationOrchestrator,
 )
-from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.review import ReviewOrchestrator
-from vibe_heal.review.orchestrator import ReviewResultModel
+from vibe_heal.review.orchestrator import ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
 
@@ -557,12 +556,11 @@ def dedupe_branch(
         sys.exit(1)
 
 
-def _display_review_results(result: ReviewResultModel, report_file: Path) -> None:
+def _display_review_results(result: ReviewAnalysisResult) -> None:
     """Display review analysis results.
 
     Args:
-        result: ReviewResultModel from the orchestrator.
-        report_file: Path where the report was saved.
+        result: ReviewAnalysisResult from the orchestrator.
     """
     total_issues = result.total_issues
     files_checked = len(result.files)
@@ -596,14 +594,15 @@ def _display_review_results(result: ReviewResultModel, report_file: Path) -> Non
     elif total_issues == 0:
         console.print("\n[green]No issues found on changed lines.[/green]")
 
-    console.print(f"\n[dim]Report saved to {report_file}[/dim]")
+    if result.report_file:
+        console.print(f"\n[dim]Report saved to {result.report_file}[/dim]")
 
 
 async def _run_review(
     config: VibeHealConfig,
     base_branch: str,
     file_patterns: list[str] | None,
-    report_file: Path,
+    report_file: Path | None,
     verbose: bool,
 ) -> None:
     """Run review analysis workflow.
@@ -612,7 +611,7 @@ async def _run_review(
         config: Configuration object.
         base_branch: Base branch to compare against.
         file_patterns: Optional file patterns to filter.
-        report_file: Path to save the report.
+        report_file: Optional path override for the report; None uses the default.
         verbose: Enable verbose output.
     """
     async with SonarQubeClient(config) as client:
@@ -623,12 +622,12 @@ async def _run_review(
             report_file=report_file,
             verbose=verbose,
         )
-        _display_review_results(result, report_file)
+        _display_review_results(result)
 
 
 async def _run_review_post(
     config: VibeHealConfig,
-    report_file: Path,
+    report_file: Path | None,
     pr_number: int | None,
     verbose: bool,
 ) -> None:
@@ -636,12 +635,15 @@ async def _run_review_post(
 
     Args:
         config: Configuration object.
-        report_file: Path to the saved report file.
+        report_file: Optional path override for the report; None uses the default.
         pr_number: Optional explicit PR number.
         verbose: Enable verbose output.
     """
     async with SonarQubeClient(config) as client:
         orchestrator = ReviewOrchestrator(config, client)
+        if report_file is None:
+            branch = orchestrator.branch_analyzer.get_current_branch()
+            report_file = default_report_dir(config.sonarqube_project_key, branch) / "review.json"
         await orchestrator.run_post(
             report_file=report_file,
             pr_number=pr_number,
@@ -699,10 +701,6 @@ def review(
 
     try:
         config = VibeHealConfig(env_file=env_file)
-
-        if report_file is None:
-            branch_name = BranchAnalyzer(Path.cwd()).get_current_branch()
-            report_file = default_report_dir(config.sonarqube_project_key, branch_name) / "review.json"
 
         if post:
             asyncio.run(

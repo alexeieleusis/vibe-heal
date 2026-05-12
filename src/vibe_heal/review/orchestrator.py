@@ -11,7 +11,7 @@ from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
-from vibe_heal.review.reporter import load_report, write_reports
+from vibe_heal.review.reporter import default_report_dir, load_report, write_reports
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
@@ -20,7 +20,7 @@ from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetad
 console = Console()
 
 
-class ReviewResultModel(BaseModel):
+class ReviewAnalysisResult(BaseModel):
     """Result of a review analysis operation."""
 
     success: bool = True
@@ -29,6 +29,7 @@ class ReviewResultModel(BaseModel):
     base_branch: str = ""
     files: list[FileReview] = []
     error_message: str | None = None
+    report_file: Path | None = None
 
     @property
     def total_issues(self) -> int:
@@ -74,7 +75,7 @@ class ReviewOrchestrator:
         file_patterns: list[str] | None = None,
         report_file: Path | None = None,
         verbose: bool = False,
-    ) -> ReviewResultModel:
+    ) -> ReviewAnalysisResult:
         """Analyze SonarQube issues on changed lines.
 
         Workflow:
@@ -95,13 +96,17 @@ class ReviewOrchestrator:
             verbose: Enable verbose output.
 
         Returns:
-            ReviewResultModel with success status and review data.
+            ReviewAnalysisResult with success status and review data.
         """
         temp_project: TempProjectMetadata | None = None
-        result = ReviewResultModel(
+        branch = self.branch_analyzer.get_current_branch()
+        if report_file is None:
+            report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"
+        result = ReviewAnalysisResult(
             project_key=self.config.sonarqube_project_key,
-            branch=self.branch_analyzer.get_current_branch(),
+            branch=branch,
             base_branch=base_branch,
+            report_file=report_file,
         )
 
         try:
@@ -143,7 +148,7 @@ class ReviewOrchestrator:
             if not analysis_result.success:
                 error_msg = analysis_result.error_message or "Analysis failed"
                 console.print(f"[red]Analysis failed: {error_msg}[/red]")
-                return ReviewResultModel(
+                return ReviewAnalysisResult(
                     project_key=self.config.sonarqube_project_key,
                     branch=result.branch,
                     base_branch=base_branch,
@@ -184,7 +189,7 @@ class ReviewOrchestrator:
             return result
 
         except Exception as e:
-            return ReviewResultModel(
+            return ReviewAnalysisResult(
                 project_key=self.config.sonarqube_project_key,
                 branch=result.branch,
                 base_branch=base_branch,
@@ -331,7 +336,7 @@ class ReviewOrchestrator:
                     break
         return filtered
 
-    def _write_report(self, result: ReviewResultModel, report_file: Path | None) -> None:
+    def _write_report(self, result: ReviewAnalysisResult, report_file: Path | None) -> None:
         """Write report files if a report path is specified.
 
         Args:

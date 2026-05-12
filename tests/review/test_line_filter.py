@@ -177,6 +177,9 @@ class TestIssueLineFilter:
         assert result[0].message == "Remove this unused import"
         assert result[0].line == 42
         assert result[0].severity == "MAJOR"
+        assert result[0].doc_url == (
+            "https://next.sonarqube.com/sonarqube/coding_rules?open=python:S1481&rule_key=python:S1481"
+        )
 
     def test_skips_issues_without_line_number(self) -> None:
         """Issues without a line number are skipped (cannot match to changed lines)."""

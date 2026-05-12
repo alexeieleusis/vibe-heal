@@ -1,7 +1,7 @@
 """Tests for GitHubReviewClient."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -195,34 +195,36 @@ class TestPostReview:
     @pytest.mark.asyncio
     async def test_builds_correct_api_endpoint(self, sample_report, mocker) -> None:
         """post_review calls gh api with the correct repository endpoint."""
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"{}", b"")
-        mock_process.returncode = 0
+        mock_git = AsyncMock()
+        mock_git.communicate.return_value = (b"git@github.com:myorg/myrepo.git\n", b"")
+        mock_git.returncode = 0
+
+        mock_api = AsyncMock()
+        mock_api.communicate.return_value = (b"{}", b"")
+        mock_api.returncode = 0
 
         mock_create = mocker.patch(
             "vibe_heal.review.github.asyncio.create_subprocess_exec",
-            return_value=mock_process,
+            side_effect=[mock_git, mock_api],
         )
 
         mocker.patch(
             "vibe_heal.review.github.run_command",
             new_callable=AsyncMock,
-            return_value=mocker.MagicMock(
-                success=False,
-            ),
+            return_value=mocker.MagicMock(success=False),
         )
-        with patch(
-            "vibe_heal.review.github.subprocess.check_output",
-            return_value=b"git@github.com:myorg/myrepo.git\n",
-        ):
-            client = GitHubReviewClient()
-            await client.post_review(42, sample_report)
 
-        args, _ = mock_create.call_args
-        assert args[0] == "gh"
-        assert "api" in args
-        assert "POST" in args
-        assert any("repos/myorg/myrepo/pulls/42/reviews" in str(a) for a in args)
+        client = GitHubReviewClient()
+        await client.post_review(42, sample_report)
+
+        api_call_args = mock_create.call_args_list[1][0]
+        assert api_call_args[0] == "gh"
+        assert "api" in api_call_args
+        assert "--method" in api_call_args
+        assert "POST" in api_call_args
+        assert "--input" in api_call_args
+        assert "-" in api_call_args
+        assert any("repos/myorg/myrepo/pulls/42/reviews" in str(a) for a in api_call_args)
 
     @pytest.mark.asyncio
     async def test_uses_gh_repo_for_owner_repo(self, sample_report, mocker) -> None:

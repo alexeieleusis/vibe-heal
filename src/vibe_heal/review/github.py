@@ -3,7 +3,6 @@
 import asyncio
 import json
 import re
-import subprocess
 from typing import Any, cast
 
 from vibe_heal.ai_tools.utils import run_command
@@ -79,8 +78,11 @@ class GitHubReviewClient:
                 [
                     "gh",
                     "api",
+                    "--method",
                     "POST",
                     f"/repos/{owner_repo}/pulls/{pr_number}/reviews",
+                    "--input",
+                    "-",
                 ],
                 payload,
             )
@@ -91,8 +93,11 @@ class GitHubReviewClient:
                     [
                         "gh",
                         "api",
+                        "--method",
                         "POST",
                         f"/repos/{owner_repo}/pulls/{pr_number}/reviews",
+                        "--input",
+                        "-",
                     ],
                     fallback,
                 )
@@ -161,18 +166,21 @@ class GitHubReviewClient:
             return result.stdout.strip()
 
         try:
-            remote_url = (
-                subprocess.check_output(
-                    ["git", "remote", "get-url", "origin"],  # noqa: S607
-                    stderr=subprocess.DEVNULL,
-                )
-                .decode()
-                .strip()
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "remote",
+                "get-url",
+                "origin",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
-            match = re.search(r"[:/]([^/]+)/([^/.]+)", remote_url)
-            if match:
-                return f"{match.group(1)}/{match.group(2)}"
-        except subprocess.CalledProcessError:
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                remote_url = stdout.decode().strip()
+                match = re.search(r"[:/]([^/]+)/([^/.]+)", remote_url)
+                if match:
+                    return f"{match.group(1)}/{match.group(2)}"
+        except OSError:
             pass
 
         msg = "Could not detect GitHub owner/repo"

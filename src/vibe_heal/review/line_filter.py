@@ -51,6 +51,7 @@ class IssueLineFilter:
                     message=issue.message,
                     line=issue.line,
                     severity=issue.severity or "INFO",
+                    doc_url=f"https://next.sonarqube.com/sonarqube/coding_rules?open={issue.rule}&rule_key={issue.rule}",
                     is_new_in_sonar=is_new,
                 )
             )

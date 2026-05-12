@@ -697,10 +697,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_analysis_basic(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -709,10 +707,6 @@ class TestReviewCommand:
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
-
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
 
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -741,10 +735,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_analysis_with_options(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -753,10 +745,6 @@ class TestReviewCommand:
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
-
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
 
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -795,10 +783,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_analysis_with_file_results(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -807,10 +793,6 @@ class TestReviewCommand:
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
-
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
 
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -839,10 +821,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_post_basic(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -852,16 +832,13 @@ class TestReviewCommand:
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
 
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
-
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
         mock_client_class.return_value = mock_client
 
         mock_orchestrator = MagicMock()
+        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
         mock_orchestrator.run_post = AsyncMock(return_value=None)
         mock_orchestrator_class.return_value = mock_orchestrator
 
@@ -874,10 +851,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_post_with_pr_number(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -887,16 +862,13 @@ class TestReviewCommand:
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
 
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
-
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
         mock_client_class.return_value = mock_client
 
         mock_orchestrator = MagicMock()
+        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
         mock_orchestrator.run_post = AsyncMock(return_value=None)
         mock_orchestrator_class.return_value = mock_orchestrator
 
@@ -909,10 +881,8 @@ class TestReviewCommand:
     @patch("vibe_heal.cli.SonarQubeClient")
     @patch("vibe_heal.cli.ReviewOrchestrator")
     @patch("vibe_heal.cli.VibeHealConfig")
-    @patch("vibe_heal.cli.BranchAnalyzer")
     def test_review_report_not_found(
         self,
-        mock_branch_analyzer_class: MagicMock,
         mock_config_class: MagicMock,
         mock_orchestrator_class: MagicMock,
         mock_client_class: MagicMock,
@@ -922,16 +892,13 @@ class TestReviewCommand:
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
 
-        mock_branch_analyzer = MagicMock()
-        mock_branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_branch_analyzer_class.return_value = mock_branch_analyzer
-
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
         mock_client_class.return_value = mock_client
 
         mock_orchestrator = MagicMock()
+        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
         mock_orchestrator.run_post = AsyncMock(
             side_effect=FileNotFoundError("Cannot read report file: /path/to/review.json")
         )
