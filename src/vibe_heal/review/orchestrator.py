@@ -54,17 +54,21 @@ class ReviewOrchestrator:
         self,
         config: VibeHealConfig,
         client: SonarQubeClient,
+        branch_analyzer: BranchAnalyzer | None = None,
+        diff_parser: DiffParser | None = None,
     ) -> None:
         """Initialize the review orchestrator.
 
         Args:
             config: Application configuration.
             client: SonarQube API client.
+            branch_analyzer: Optional BranchAnalyzer instance (for testing).
+            diff_parser: Optional DiffParser instance (for testing).
         """
         self.config = config
         self.client = client
-        self.branch_analyzer = BranchAnalyzer(Path.cwd())
-        self.diff_parser = DiffParser(Path.cwd())
+        self.branch_analyzer = branch_analyzer if branch_analyzer is not None else BranchAnalyzer(Path.cwd())
+        self.diff_parser = diff_parser if diff_parser is not None else DiffParser(Path.cwd())
         self.project_manager = ProjectManager(client)
         self.analysis_runner = AnalysisRunner(config, client)
         self.github_client = GitHubReviewClient()

@@ -69,12 +69,14 @@ class TestReviewOrchestratorInit:
         from vibe_heal.review.orchestrator import ReviewOrchestrator
 
         mock_client = AsyncMock()
-        orchestrator = ReviewOrchestrator(config, mock_client)
+        mock_analyzer = MagicMock()
+        mock_parser = MagicMock()
+        orchestrator = ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
 
         assert orchestrator.config == config
         assert orchestrator.client == mock_client
-        assert orchestrator.branch_analyzer is not None
-        assert orchestrator.diff_parser is not None
+        assert orchestrator.branch_analyzer is mock_analyzer
+        assert orchestrator.diff_parser is mock_parser
         assert orchestrator.project_manager is not None
         assert orchestrator.analysis_runner is not None
         assert orchestrator.github_client is not None
@@ -84,12 +86,25 @@ class TestRunAnalysis:
     """Tests for ReviewOrchestrator.run_analysis()."""
 
     @pytest.fixture
-    def orchestrator(self, config: VibeHealConfig):
-        """Create ReviewOrchestrator with mocked dependencies."""
+    def mock_branch_analyzer(self) -> MagicMock:
+        """Create a mocked BranchAnalyzer for tests."""
+        mock = MagicMock()
+        mock.get_current_branch.return_value = "feature/test"
+        mock.get_user_email.return_value = "user@example.com"
+        return mock
+
+    @pytest.fixture
+    def mock_diff_parser(self) -> MagicMock:
+        """Create a mocked DiffParser for tests."""
+        return MagicMock()
+
+    @pytest.fixture
+    def orchestrator(self, config: VibeHealConfig, mock_branch_analyzer, mock_diff_parser):
+        """Create ReviewOrchestrator with mocked git dependencies."""
         from vibe_heal.review.orchestrator import ReviewOrchestrator
 
         mock_client = AsyncMock()
-        return ReviewOrchestrator(config, mock_client)
+        return ReviewOrchestrator(config, mock_client, mock_branch_analyzer, mock_diff_parser)
 
     @pytest.mark.asyncio
     async def test_no_modified_files_returns_empty_result(
@@ -525,7 +540,9 @@ class TestRunPost:
         from vibe_heal.review.orchestrator import ReviewOrchestrator
 
         mock_client = AsyncMock()
-        return ReviewOrchestrator(config, mock_client)
+        mock_analyzer = MagicMock()
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
 
     @pytest.mark.asyncio
     async def test_reads_saved_report_and_posts_review(
