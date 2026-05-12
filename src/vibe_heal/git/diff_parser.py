@@ -6,8 +6,10 @@ from pathlib import Path
 from git import GitCommandError, Repo
 from git.exc import InvalidGitRepositoryError
 
+from vibe_heal.git.exceptions import GitError
 
-class DiffParserError(Exception):
+
+class DiffParserError(GitError):
     """Base exception for DiffParser errors."""
 
     pass
@@ -19,8 +21,6 @@ class DiffParser:
     Uses `git diff --unified=0 <base>...HEAD` to get a minimal diff and
     extracts the line numbers of added/modified lines in HEAD for each file.
     """
-
-    _HUNK_NEW_RANGE = re.compile(r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)")
 
     def __init__(self, repo_path: Path) -> None:
         """Initialize the DiffParser.
