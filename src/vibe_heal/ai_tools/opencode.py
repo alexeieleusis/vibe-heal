@@ -20,13 +20,13 @@ class OpenCodeTool(AITool):
 
     def __init__(
         self,
-        timeout: int = 900,
+        timeout: int = 1200,
         model: str | None = None,
     ) -> None:
         """Initialize OpenCode tool.
 
         Args:
-            timeout: Timeout in seconds for AI operations (default: 15 minutes)
+            timeout: Timeout in seconds for AI operations (default: 20 minutes)
             model: Model to use in provider/model format (e.g., 'anthropic/claude-sonnet-4-5')
         """
         self.timeout = timeout
