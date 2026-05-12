@@ -94,17 +94,17 @@ EXCLUSION_SETTINGS = [
 New method:
 
 ```python
-async def copy_exclusion_settings(self, source_key: str, target_key: str) -> list[str]:
+async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int]:
     """Copy exclusion settings from source project to target project.
 
     Steps:
     1. GET /api/settings/values?component=source_key
     2. Filter to EXCLUSION_SETTINGS keys that are not inherited
     3. POST each to the target project
-    4. Return list of setting keys that were copied
+    4. Return tuple of (list of keys that were copied, count of inherited keys skipped)
 
     Raises SonarQubeAPIError if the fetch step fails (caller handles warn-and-continue).
-    Individual set failures are silently skipped.
+    Individual set failures are logged and skipped.
     """
 ```
 
@@ -114,14 +114,16 @@ After the existing `create_temp_project()` call:
 
 ```python
 try:
-    copied = await self.project_manager.copy_exclusion_settings(
+    copied, inherited_count = await self.project_manager.copy_exclusion_settings(
         source_key=self.config.sonarqube_project_key,
         target_key=temp_project.project_key,
     )
     if copied:
         console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
-    else:
-        console.print("[dim]No exclusion settings to copy[/dim]")
+    if inherited_count:
+        console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+    if not copied and not inherited_count:
+        console.print("[dim]No exclusion settings configured on source project[/dim]")
 except Exception as e:
     console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
 ```
@@ -158,7 +160,7 @@ cleanup / dedupe-branch
 - `test_copy_exclusion_settings_copies_non_inherited` — source has 3 settings, one
   inherited; asserts only 2 non-inherited ones are applied to target
 - `test_copy_exclusion_settings_returns_empty_when_none_match` — source settings contain
-  none of the EXCLUSION_SETTINGS keys; asserts `[]` returned, no set calls made
+  none of the EXCLUSION_SETTINGS keys; asserts `([], 0)` returned, no set calls made
 - `test_copy_exclusion_settings_raises_if_fetch_fails` — `get_project_settings` raises
   `SonarQubeAPIError`; asserts the error propagates out of `copy_exclusion_settings`
   (callers own the warn-and-continue, not this method)
@@ -168,7 +170,7 @@ cleanup / dedupe-branch
 - `test_create_temp_project_warns_on_settings_copy_failure` — `copy_exclusion_settings`
   raises; asserts orchestrator prints yellow warning and does not re-raise
 
-### `tests/deduplication/test_orchestrator.py`
+### `tests/deduplication/test_branch_orchestrator.py`
 
 - `test_create_temp_project_warns_on_settings_copy_failure` — same as above for the dedupe
   orchestrator

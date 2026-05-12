@@ -8,6 +8,7 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from vibe_heal.sonarqube.client import SonarQubeClient
+from vibe_heal.sonarqube.exceptions import SonarQubeError
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,9 @@ class ProjectManager:
             Tuple of (list of keys that were copied, count of inherited keys skipped)
 
         Raises:
-            SonarQubeAPIError: If the fetch step fails
+            SonarQubeAPIError: If the API request fails
+            SonarQubeAuthError: If authentication fails
+            RuntimeError: If the client is not initialized
         """
         settings = await self.client.get_project_settings(source_key)
         copied: list[str] = []
@@ -155,7 +158,7 @@ class ProjectManager:
 
             try:
                 await self.client.set_project_setting(target_key, key, values)
-            except Exception as e:
+            except SonarQubeError as e:
                 logger.warning(f"Failed to set {key} on {target_key}: {e}")
                 continue
 

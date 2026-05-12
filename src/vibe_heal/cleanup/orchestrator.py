@@ -13,7 +13,7 @@ from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 console = Console()
@@ -250,7 +250,7 @@ class CleanupOrchestrator:
                 console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
             if not copied and not inherited_count:
                 console.print("[dim]No exclusion settings configured on source project[/dim]")
-        except Exception as e:
+        except SonarQubeError as e:
             console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
 
         return temp_project

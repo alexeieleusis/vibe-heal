@@ -20,7 +20,7 @@ from vibe_heal.git import GitManager
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.models import FixSummary
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeError
 from vibe_heal.sonarqube.project_manager import ProjectManager
 
 if TYPE_CHECKING:
@@ -735,7 +735,7 @@ class DedupeBranchOrchestrator:
                 self.console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
             if not copied and not inherited_count:
                 self.console.print("[dim]No exclusion settings configured on source project[/dim]")
-        except Exception as e:
+        except SonarQubeError as e:
             self.console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
 
         return temp_project
