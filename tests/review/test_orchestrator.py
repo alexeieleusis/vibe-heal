@@ -259,9 +259,9 @@ class TestRunAnalysis:
 
         # SonarQube returns issues; only line 10 is on a changed line
         sonar_issues = [
-            _make_sonar_issue(10),   # on changed line
-            _make_sonar_issue(50),   # NOT on changed line
-            _make_sonar_issue(20),   # on changed line
+            _make_sonar_issue(10),  # on changed line
+            _make_sonar_issue(50),  # NOT on changed line
+            _make_sonar_issue(20),  # on changed line
         ]
 
         with (

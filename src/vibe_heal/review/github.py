@@ -162,8 +162,7 @@ class GitHubReviewClient:
 
         try:
             remote_url = (
-                subprocess
-                .check_output(
+                subprocess.check_output(
                     ["git", "remote", "get-url", "origin"],  # noqa: S607
                     stderr=subprocess.DEVNULL,
                 )
