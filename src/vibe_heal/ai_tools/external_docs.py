@@ -3,6 +3,7 @@
 import ipaddress
 import logging
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -36,6 +37,31 @@ def _is_safe_url(url: str) -> bool:
         return True  # hostname (not a bare IP) — allow through
 
 
+_BLOB_PREFIX = "https://github.com/jpablo/vibe-types/blob/main/"
+_RAW_PREFIXES = (
+    "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/",
+    "https://raw.githubusercontent.com/jpablo/vibe-types/main/",
+)
+
+
+def _vibe_types_local_path(url: str) -> Path | None:
+    """Map a vibe-types GitHub URL to its local submodule path, or None if not a vibe-types URL."""
+    rel: str | None = None
+    if url.startswith(_BLOB_PREFIX):
+        rel = url[len(_BLOB_PREFIX) :]
+    else:
+        for prefix in _RAW_PREFIXES:
+            if url.startswith(prefix):
+                rel = url[len(prefix) :]
+                break
+    if rel is None:
+        return None
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".git").exists():
+            return parent / "vendor" / "vibe-types" / rel
+    return None
+
+
 def extract_urls(text: str) -> list[str]:
     """Extract all HTTP/HTTPS URLs from a string, stripping trailing punctuation."""
     return [url.rstrip("".join(_TRAILING_PUNCTUATION)) for url in _URL_PATTERN.findall(text)]
@@ -62,6 +88,15 @@ async def _stream_capped(url: str, client: httpx.AsyncClient) -> str | None:
 
 async def fetch_url_content(url: str) -> str | None:
     """Fetch the text content of a URL, returning None on any error or SSRF-blocked host."""
+    local = _vibe_types_local_path(url)
+    if local is not None:
+        if local.exists():
+            logger.debug("Reading vibe-types doc locally from %s", local)
+            return local.read_text()
+        logger.debug("Local vibe-types path not found: %s (submodule not initialized?)", local)
+        # blob URLs return HTML over HTTP — convert to raw for the fallback
+        if url.startswith(_BLOB_PREFIX):
+            url = _RAW_PREFIXES[0] + url[len(_BLOB_PREFIX) :]
     if not _is_safe_url(url):
         logger.debug("Blocked SSRF-risk URL: %s", url)
         return None
