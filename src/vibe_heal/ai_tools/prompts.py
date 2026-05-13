@@ -8,6 +8,7 @@ def create_fix_prompt(
     file_path: str,
     rule: SonarQubeRule | None = None,
     code_context: list[SourceLine] | None = None,
+    external_docs: list[str] | None = None,
 ) -> str:
     """Create a prompt for fixing a SonarQube issue.
 
@@ -47,6 +48,15 @@ def create_fix_prompt(
             rule.markdown_description,
             "",
         ])
+
+    # Add external rule documentation fetched from URLs in the issue message
+    if external_docs:
+        for doc in external_docs:
+            prompt_parts.extend([
+                "**Rule Documentation:**",
+                doc,
+                "",
+            ])
 
     # Add code context if available
     if code_context and issue.line:

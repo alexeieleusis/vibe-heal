@@ -8,12 +8,14 @@ from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
 from vibe_heal.ai_tools.base import AITool, AIToolType
+from vibe_heal.ai_tools.external_docs import fetch_external_rule_docs
 from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
 from vibe_heal.processor import IssueProcessor
 from vibe_heal.sonarqube import ComponentNotFoundError, SonarQubeClient
+from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
 from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 from vibe_heal.utils import display_fix_summary
 
@@ -185,7 +187,7 @@ class VibeHealOrchestrator:
         self,
         issue: SonarQubeIssue,
         source_lines: list | None,
-    ) -> tuple[SonarQubeRule | None, list | None]:
+    ) -> tuple[SonarQubeRule | None, list | None, list[str] | None]:
         """Fetch enriched context for an issue.
 
         Args:
@@ -193,15 +195,21 @@ class VibeHealOrchestrator:
             source_lines: Pre-fetched source lines
 
         Returns:
-            Tuple of (rule, code_context)
+            Tuple of (rule, code_context, external_docs)
         """
         rule = None
         code_context = None
+        external_docs: list[str] | None = None
 
         if self.config.include_rule_description:
             try:
                 async with SonarQubeClient(self.config) as sonar_client:
                     rule = await sonar_client.get_rule_details(issue.rule)
+            except SonarQubeRuleNotFoundError:
+                logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
+                docs = await fetch_external_rule_docs(issue.message)
+                if docs:
+                    external_docs = docs
             except Exception as e:
                 logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
 
@@ -219,7 +227,7 @@ class VibeHealOrchestrator:
                     marker = ">>>" if source_line.line == issue.line else "   "
                     logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
 
-        return rule, code_context
+        return rule, code_context, external_docs
 
     def _handle_fix_result(
         self,
@@ -321,13 +329,14 @@ class VibeHealOrchestrator:
                     total=None,
                 )
 
-                rule, code_context = await self._fetch_enriched_context(issue, source_lines)
+                rule, code_context, external_docs = await self._fetch_enriched_context(issue, source_lines)
 
                 fix_result = await self.ai_tool.fix_issue(
                     issue,
                     file_path,
                     rule=rule,
                     code_context=code_context,
+                    external_docs=external_docs,
                 )
 
                 self._handle_fix_result(fix_result, issue, dry_run, summary, progress, task, rule)
