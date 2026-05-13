@@ -577,7 +577,7 @@ class DedupeBranchOrchestrator:
         Returns:
             DedupeBranchResult with success status and details
         """
-        temp_project: TempProjectMetadata | None = None
+        temp_project: "TempProjectMetadata | None" = None
         files_processed: list[FileDedupResult] = []
 
         try:
@@ -716,7 +716,7 @@ class DedupeBranchOrchestrator:
         user_email = self.branch_analyzer.get_user_email()
 
         self.console.print("\n[dim]Creating temporary SonarQube project...[/dim]")
-        temp_project: TempProjectMetadata = await self.project_manager.create_temp_project(
+        temp_project: "TempProjectMetadata" = await self.project_manager.create_temp_project(
             base_key=self.config.sonarqube_project_key,
             branch_name=branch_name,
             user_email=user_email,
