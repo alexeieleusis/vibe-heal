@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from vibe_heal.ai_tools.utils import run_command
 from vibe_heal.review.models import ReviewResult
@@ -11,6 +12,10 @@ from vibe_heal.review.models import ReviewResult
 
 class GitHubReviewError(Exception):
     """Error during GitHub review operations."""
+
+
+class NoOpenPrError(GitHubReviewError):
+    """Raised when there is no open PR for the current branch."""
 
 
 class GitHubReviewClient:
@@ -40,7 +45,8 @@ class GitHubReviewClient:
             The PR number.
 
         Raises:
-            GitHubReviewError: If auto-detection fails (e.g., not authenticated).
+            NoOpenPrError: If no open PR exists for the current branch.
+            GitHubReviewError: If auto-detection fails for other reasons.
         """
         if pr_number is not None:
             return pr_number
@@ -50,7 +56,10 @@ class GitHubReviewClient:
             timeout=30,
         )
         if not result.success:
-            msg = f"Failed to detect PR: {result.stderr.strip() or 'not authenticated'}"
+            stderr = result.stderr.strip()
+            if "no pull requests found" in stderr.lower():
+                raise NoOpenPrError("No open pull request found for the current branch")
+            msg = f"Failed to detect PR: {stderr or 'not authenticated'}"
             raise GitHubReviewError(msg)
 
         data: dict[str, object] = json.loads(result.stdout)
@@ -159,7 +168,7 @@ class GitHubReviewClient:
             String in 'owner/repo' format.
         """
         result = await run_command(
-            ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner)/\\(.name)"'],
+            ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner.login)/\\(.name)"'],
             timeout=15,
         )
         if result.success and result.stdout.strip():
@@ -177,11 +186,42 @@ class GitHubReviewClient:
             stdout, _ = await proc.communicate()
             if proc.returncode == 0:
                 remote_url = stdout.decode().strip()
-                match = re.search(r"[:/]([^/]+)/([^/.]+)", remote_url)
-                if match:
-                    return f"{match.group(1)}/{match.group(2)}"
+                owner_repo = self._parse_remote_url(remote_url)
+                if owner_repo:
+                    return owner_repo
         except OSError:
             pass
 
         msg = "Could not detect GitHub owner/repo"
         raise GitHubReviewError(msg)
+
+    @staticmethod
+    def _parse_remote_url(remote_url: str) -> str | None:
+        """Parse owner/repo from a git remote URL.
+
+        Handles both HTTPS and SSH formats:
+        - https://github.com/owner/repo.git
+        - git@github.com:owner/repo.git
+
+        Args:
+            remote_url: Raw remote URL string.
+
+        Returns:
+            'owner/repo' string or None if unparseable.
+        """
+        # SSH format: git@host:owner/repo.git
+        if remote_url.startswith("git@"):
+            match = re.search(r":([^/]+)/([^/.]+?)(?:\.git)?$", remote_url)
+            if match:
+                return f"{match.group(1)}/{match.group(2)}"
+            return None
+
+        # HTTPS format: https://host/owner/repo.git
+        parsed = urlparse(remote_url)
+        path = parsed.path
+        # Remove leading slash and trailing .git
+        path = path.strip("/").removesuffix(".git")
+        parts = path.split("/")
+        if len(parts) == 2 and parts[0] and parts[1]:
+            return f"{parts[0]}/{parts[1]}"
+        return None

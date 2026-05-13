@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
@@ -11,7 +11,12 @@ from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
-from vibe_heal.review.reporter import default_report_dir, load_report, write_reports
+from vibe_heal.review.reporter import (
+    _write_json,
+    _write_markdown,
+    default_report_dir,
+    load_report_from_path,
+)
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
@@ -27,7 +32,7 @@ class ReviewAnalysisResult(BaseModel):
     project_key: str = ""
     branch: str = ""
     base_branch: str = ""
-    files: list[FileReview] = []
+    files: list[FileReview] = Field(default_factory=list)
     error_message: str | None = None
     report_file: Path | None = None
 
@@ -223,9 +228,8 @@ class ReviewOrchestrator:
             verbose: Enable verbose output.
         """
         # Step 1: Load report
-        report_dir = report_file.parent
-        console.print(f"[dim]Loading report from {report_dir}...[/dim]")
-        report = load_report(report_dir)
+        console.print(f"[dim]Loading report from {report_file}...[/dim]")
+        report = load_report_from_path(report_file)
 
         # Step 2: Detect PR number
         pr = pr_number if pr_number is not None else await self.github_client.detect_pr()
@@ -253,7 +257,7 @@ class ReviewOrchestrator:
         console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
 
         try:
-            copied, inherited_count = await self.project_manager.copy_exclusion_settings(
+            copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
                 source_key=self.config.sonarqube_project_key,
                 target_key=temp_project.project_key,
             )
@@ -261,6 +265,8 @@ class ReviewOrchestrator:
                 console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
             if inherited_count:
                 console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+            if failed_count:
+                console.print(f"[dim]Failed to apply {failed_count} setting(s)[/dim]")
             if not copied and not inherited_count:
                 console.print("[dim]No exclusion settings configured on source project[/dim]")
         except Exception as e:
@@ -291,7 +297,8 @@ class ReviewOrchestrator:
                 console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
             return []
 
-        changed_lines = changed_lines_map.get(str(file_path), set())
+        repo_relative = self._to_repo_relative(file_path)
+        changed_lines = changed_lines_map.get(repo_relative, set())
 
         if not changed_lines:
             if verbose:
@@ -318,6 +325,27 @@ class ReviewOrchestrator:
             except Exception as e:
                 console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
 
+    def _to_repo_relative(self, file_path: Path) -> str:
+        """Convert a file path to repo-root-relative POSIX string.
+
+        Handles paths from BranchAnalyzer which may be CWD-relative when
+        running from a subdirectory, or already repo-relative from repo root.
+
+        Args:
+            file_path: A Path that may be CWD-relative or repo-root-relative.
+
+        Returns:
+            Repo-root-relative path as a POSIX string (for DiffParser map lookup).
+        """
+        try:
+            repo_root = Path(self.branch_analyzer.repo.working_dir)
+            if file_path.is_absolute():
+                return str(file_path.relative_to(repo_root))
+            resolved = (repo_root / file_path).resolve()
+            return str(resolved.relative_to(repo_root.resolve()))
+        except (ValueError, TypeError):
+            return str(file_path)
+
     def _filter_files(
         self,
         files: list[Path],
@@ -343,6 +371,9 @@ class ReviewOrchestrator:
     def _write_report(self, result: ReviewAnalysisResult, report_file: Path | None) -> None:
         """Write report files if a report path is specified.
 
+        Writes JSON to the exact report_file path and derives the markdown
+        path from it (same stem, .md extension).
+
         Args:
             result: Review result to write.
             report_file: Optional path to the report JSON file.
@@ -351,11 +382,16 @@ class ReviewOrchestrator:
             return
 
         report_dir = report_file.parent
+        report_dir.mkdir(parents=True, exist_ok=True)
+
         review_result = ReviewResult(
             project_key=result.project_key,
             branch=result.branch,
             base_branch=result.base_branch,
             files=result.files,
         )
-        write_reports(review_result, report_dir)
-        console.print(f"[dim]Reports written to {report_dir}[/dim]")
+
+        _write_json(review_result, report_file)
+        md_path = report_file.parent / (report_file.stem + ".md")
+        _write_markdown(review_result, md_path)
+        console.print(f"[dim]Reports written to {report_file} and {md_path}[/dim]")

@@ -21,7 +21,7 @@ from vibe_heal.deduplication.orchestrator import (
     DeduplicationOrchestrator,
 )
 from vibe_heal.orchestrator import VibeHealOrchestrator
-from vibe_heal.review import ReviewOrchestrator
+from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
 from vibe_heal.review.orchestrator import ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
@@ -582,7 +582,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         for file_review in result.files:
             issue_count = len(file_review.issues)
             if issue_count > 0:
-                highest_severity = max(
+                highest_severity = min(
                     (issue.severity for issue in file_review.issues),
                     key=lambda s: severity_order.index(s) if s in severity_order else len(severity_order),
                 )
@@ -728,6 +728,9 @@ def review(
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         sys.exit(1)
+    except NoOpenPrError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         if verbose:

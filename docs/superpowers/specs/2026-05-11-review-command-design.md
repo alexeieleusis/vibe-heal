@@ -70,7 +70,7 @@ Reports are saved to `~/.vibe-heal/reviews/<project-key>/<branch-name>/` — out
 - `review.json` — full `ReviewResult` serialized
 - `review.md` — human-readable table per file
 
-An optional `--report-file` flag overrides the output path.
+An optional `--report-file` flag overrides the full output path. The JSON report is written to the exact path specified, and the markdown report is written alongside with the same stem and a `.md` extension.
 
 ## New Modules
 
@@ -153,7 +153,7 @@ Options:
   --pr INTEGER              GitHub PR number (overrides auto-detection)
   --base-branch TEXT        Base branch to compare against [default: origin/main]
   --pattern TEXT            File patterns to filter (repeatable, e.g. '*.py')
-  --report-file PATH        Override default report output path
+  --report-file PATH        Override full report output path (JSON written to this path, markdown alongside)
   --env-file TEXT           Path to custom environment file
   --verbose / -v            Verbose output
 ```
