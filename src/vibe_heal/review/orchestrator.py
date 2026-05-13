@@ -300,8 +300,8 @@ class ReviewOrchestrator:
             if inherited_count:
                 console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
             if failed_count:
-                console.print(f"[dim]Failed to apply {failed_count} setting(s)[/dim]")
-            if not copied and not inherited_count:
+                console.print(f"[yellow]{failed_count} exclusion setting(s) failed to apply[/yellow]")
+            if not copied and not inherited_count and not failed_count:
                 console.print("[dim]No exclusion settings configured on source project[/dim]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
