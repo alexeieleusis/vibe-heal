@@ -17,8 +17,11 @@ from vibe_heal.deduplication.processor import (
     DuplicationProcessor,
 )
 from vibe_heal.git import GitManager
+from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.models import FixSummary
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeError
+from vibe_heal.sonarqube.project_manager import ProjectManager
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.client import SonarQubeClient
@@ -540,10 +543,6 @@ class DedupeBranchOrchestrator:
             client: SonarQube API client
             ai_tool: AI tool for fixing duplications
         """
-        from vibe_heal.git.branch_analyzer import BranchAnalyzer
-        from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
-        from vibe_heal.sonarqube.project_manager import ProjectManager
-
         self.config = config
         self.client = client
         self.ai_tool = ai_tool
@@ -578,8 +577,6 @@ class DedupeBranchOrchestrator:
         Returns:
             DedupeBranchResult with success status and details
         """
-        from vibe_heal.sonarqube.project_manager import TempProjectMetadata
-
         temp_project: TempProjectMetadata | None = None
         files_processed: list[FileDedupResult] = []
 
@@ -715,8 +712,6 @@ class DedupeBranchOrchestrator:
         Returns:
             Temporary project metadata
         """
-        from vibe_heal.sonarqube.project_manager import TempProjectMetadata
-
         branch_name = self.branch_analyzer.get_current_branch()
         user_email = self.branch_analyzer.get_user_email()
 
@@ -728,6 +723,23 @@ class DedupeBranchOrchestrator:
         )
 
         self.console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
+
+        try:
+            copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
+                source_key=self.config.sonarqube_project_key,
+                target_key=temp_project.project_key,
+            )
+            if copied:
+                self.console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
+            if inherited_count:
+                self.console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+            if failed_count:
+                self.console.print(f"[yellow]Warning: Failed to apply {failed_count} exclusion setting(s)[/yellow]")
+            if not copied and not inherited_count and not failed_count:
+                self.console.print("[dim]No exclusion settings configured on source project[/dim]")
+        except SonarQubeError as e:
+            self.console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
+
         return temp_project
 
     async def _cleanup_temp_project(self, temp_project: "TempProjectMetadata") -> None:

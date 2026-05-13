@@ -296,3 +296,132 @@ class TestTempProjectMetadata:
                 base_project_key="base",
                 branch_name="main",
             )
+
+
+class TestCopyExclusionSettings:
+    """Tests for copy_exclusion_settings method."""
+
+    def test_exclusion_settings_constant(self) -> None:
+        """Test that EXCLUSION_SETTINGS constant has expected values."""
+        expected = (
+            "sonar.exclusions",
+            "sonar.test.exclusions",
+            "sonar.coverage.exclusions",
+            "sonar.cpd.exclusions",
+            "sonar.inclusions",
+            "sonar.test.inclusions",
+        )
+        assert expected == ProjectManager.EXCLUSION_SETTINGS
+
+    @pytest.mark.asyncio
+    async def test_copy_exclusion_settings_copies_non_inherited(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Test that only non-inherited exclusion settings are copied."""
+        settings = [
+            {"key": "sonar.exclusions", "value": "**/vendor/**", "inherited": False},
+            {"key": "sonar.test.exclusions", "values": ["tests/**"], "inherited": False},
+            {"key": "sonar.coverage.exclusions", "value": "src/gen/**", "inherited": True},
+            {"key": "sonar.cpd.exclusions", "value": "**/generated/**", "inherited": False},
+            {"key": "sonar.inclusions", "values": ["src/**/*.py"], "inherited": True},
+            {"key": "sonar.test.inclusions", "value": "tests/**/*.py", "inherited": False},
+            {"key": "sonar.qualitygate", "value": "default", "inherited": False},
+        ]
+        mock_client.get_project_settings = AsyncMock(return_value=settings)
+        mock_client.set_project_setting = AsyncMock()
+
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
+
+        assert sorted(copied) == sorted([
+            "sonar.exclusions",
+            "sonar.test.exclusions",
+            "sonar.cpd.exclusions",
+            "sonar.test.inclusions",
+        ])
+        assert inherited_count == 2
+        assert failed_count == 0
+        assert mock_client.set_project_setting.call_count == 4
+        mock_client.set_project_setting.assert_any_call("target-project", "sonar.exclusions", ["**/vendor/**"])
+        mock_client.set_project_setting.assert_any_call("target-project", "sonar.test.exclusions", ["tests/**"])
+        mock_client.set_project_setting.assert_any_call("target-project", "sonar.cpd.exclusions", ["**/generated/**"])
+        mock_client.set_project_setting.assert_any_call("target-project", "sonar.test.inclusions", ["tests/**/*.py"])
+
+    @pytest.mark.asyncio
+    async def test_copy_exclusion_settings_returns_empty_when_none_match(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Test that empty list is returned when no exclusion settings are found."""
+        settings = [
+            {"key": "sonar.qualitygate", "value": "default", "inherited": False},
+            {"key": "sonar.javascript.lcov.reportPaths", "value": "coverage/lcov.info", "inherited": False},
+        ]
+        mock_client.get_project_settings = AsyncMock(return_value=settings)
+        mock_client.set_project_setting = AsyncMock()
+
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
+
+        assert copied == []
+        assert inherited_count == 0
+        assert failed_count == 0
+        mock_client.set_project_setting.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_copy_exclusion_settings_raises_if_fetch_fails(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Test that the error propagates if fetching settings fails."""
+        mock_client.get_project_settings = AsyncMock(
+            side_effect=SonarQubeAPIError("Permission denied", status_code=403)
+        )
+
+        with pytest.raises(SonarQubeAPIError, match="Permission denied"):
+            await project_manager.copy_exclusion_settings("source-project", "target-project")
+
+    @pytest.mark.asyncio
+    async def test_copy_exclusion_settings_skips_failed_set(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Test that individual set failures are logged and skipped."""
+        settings = [
+            {"key": "sonar.cpd.exclusions", "value": "**/generated/**", "inherited": False},
+            {"key": "sonar.exclusions", "value": "**/*.gen.ts", "inherited": False},
+        ]
+        mock_client.get_project_settings = AsyncMock(return_value=settings)
+        mock_client.set_project_setting = AsyncMock(side_effect=[SonarQubeAPIError("Failed"), None])
+
+        copied, inherited_count, failed_count = await project_manager.copy_exclusion_settings(
+            "source-project", "target-project"
+        )
+
+        assert copied == ["sonar.exclusions"]
+        assert inherited_count == 0
+        assert failed_count == 1
+        assert mock_client.set_project_setting.call_count == 2
+
+    def test_normalize_setting_values_scalar(self, project_manager: ProjectManager) -> None:
+        """Test normalization of scalar setting values."""
+        setting = {"key": "sonar.cpd.exclusions", "value": "**/generated/**"}
+        result = project_manager._normalize_setting_values(setting)
+        assert result == ["**/generated/**"]
+
+    def test_normalize_setting_values_list(self, project_manager: ProjectManager) -> None:
+        """Test normalization of multi-value setting values."""
+        setting = {"key": "sonar.exclusions", "values": ["**/*.gen.ts", "tests/**"]}
+        result = project_manager._normalize_setting_values(setting)
+        assert result == ["**/*.gen.ts", "tests/**"]
+
+    def test_normalize_setting_values_none(self, project_manager: ProjectManager) -> None:
+        """Test normalization of setting with None value."""
+        setting = {"key": "sonar.exclusions", "value": None}
+        result = project_manager._normalize_setting_values(setting)
+        assert result == []
+
+    def test_normalize_setting_values_empty(self, project_manager: ProjectManager) -> None:
+        """Test normalization of setting with no value fields."""
+        setting = {"key": "sonar.exclusions"}
+        result = project_manager._normalize_setting_values(setting)
+        assert result == []
