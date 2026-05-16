@@ -30,6 +30,37 @@ class FileReview(BaseModel):
     issues: list[ReviewIssue] = Field(default_factory=list, description="Issues found in this file")
 
 
+class FileDiagnostics(BaseModel):
+    """Per-file diagnostic data written to review.json.
+
+    # TODO: remove this class and all references once the line-filter pipeline
+    # is considered stable — it is only here to aid debugging.
+
+
+    Captures the intermediate state at each pipeline stage so that a mismatch
+    (0 issues when some are expected) can be traced to the exact failure point:
+
+    - ``changed_lines`` empty → the changed-lines map lookup missed this file
+      (path mismatch between DiffParser and BranchAnalyzer keys).
+    - ``sonar_issue_lines`` empty → SonarQube returned no issues for the file
+      (component-path mismatch or file not scanned).
+    - Issue line present in ``sonar_issue_lines`` but absent from ``changed_lines``
+      → line filter too strict (trailing-context fix may not have been enough).
+    """
+
+    file_path: str = Field(description="Path passed to SonarQube component query")
+    lookup_key: str = Field(description="Key used to look up this file in the diff changed-lines map")
+    changed_lines: list[int] = Field(
+        default_factory=list,
+        description="Line numbers from git diff (sorted); empty = path lookup missed or no diff for file",
+    )
+    sonar_issue_count: int = Field(default=0, description="Issues from SonarQube before line filtering")
+    sonar_issue_lines: list[int] = Field(
+        default_factory=list,
+        description="Line numbers of those issues (sorted)",
+    )
+
+
 class ReviewResult(BaseModel):
     """Complete review result for a branch."""
 
@@ -43,6 +74,23 @@ class ReviewResult(BaseModel):
         description="Timestamp when the review was generated",
     )
     files: list[FileReview] = Field(default_factory=list, description="Per-file review results")
+    # TODO: remove diagnostics/diff_* fields once the line-filter pipeline is stable
+    diagnostics: list[FileDiagnostics] = Field(
+        default_factory=list,
+        description="Per-file diagnostic data for debugging line-filter behaviour",
+    )
+    diff_files_found: int = Field(
+        default=0,
+        description="Number of files the git diff parser found with changes",
+    )
+    diff_map_keys: list[str] = Field(
+        default_factory=list,
+        description="Keys from the git diff changed-lines map (compare against diagnostics.lookup_key to spot mismatches)",
+    )
+    diff_output_sample: str = Field(
+        default="",
+        description="First 500 chars of raw git diff output (empty = diff returned nothing; helps distinguish empty diff from parse failure)",
+    )
 
     @property
     def total_issues(self) -> int:

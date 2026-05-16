@@ -151,7 +151,8 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/example.py": {5, 6, 7}}
+        # Added lines 5-7 plus 3-line trailing context (8-10)
+        assert result == {"src/example.py": {5, 6, 7, 8, 9, 10}}
 
     def test_pure_deletion(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test parsing a pure deletion produces empty set."""
@@ -159,6 +160,7 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
+        # Deletions produce no new-file lines, so no trailing context either
         assert result == {"src/example.py": set()}
 
     def test_modification(self, parser: DiffParser, mock_repo: MagicMock) -> None:
@@ -167,7 +169,8 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/example.py": {3}}
+        # Modified line 3 plus 3-line trailing context (4-6)
+        assert result == {"src/example.py": {3, 4, 5, 6}}
 
     def test_multiple_hunks(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test parsing multiple hunks in the same file."""
@@ -175,7 +178,8 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/example.py": {3, 11}}
+        # Hunk 1 adds line 3 + trailing 4-6; hunk 2 adds line 11 + trailing 12-14
+        assert result == {"src/example.py": {3, 4, 5, 6, 11, 12, 13, 14}}
 
     def test_multiple_files(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test parsing changes across multiple files."""
@@ -184,8 +188,8 @@ class TestParseChangedLines:
         result = parser.get_changed_lines("origin/main")
 
         assert result == {
-            "src/file1.py": {5},
-            "src/file2.py": {10},
+            "src/file1.py": {5, 6, 7, 8},
+            "src/file2.py": {10, 11, 12, 13},
         }
 
     def test_empty_diff(self, parser: DiffParser, mock_repo: MagicMock) -> None:
@@ -210,7 +214,7 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/new_name.py": {5}}
+        assert result == {"src/new_name.py": {5, 6, 7, 8}}
 
     def test_mixed_hunks(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test file with addition, deletion-only, and another addition hunk."""
@@ -218,26 +222,32 @@ class TestParseChangedLines:
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/example.py": {3, 10}}
+        # Hunk 1 adds line 3 + trailing 4-6; hunk 3 adds line 10 + trailing 11-13
+        assert result == {"src/example.py": {3, 4, 5, 6, 10, 11, 12, 13}}
 
-    def test_uses_three_dot_diff(self, parser: DiffParser, mock_repo: MagicMock) -> None:
-        """Test that three-dot diff syntax is used."""
+    def test_uses_merge_base_diff(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """Test that merge-base SHA is resolved before diffing."""
+        mock_repo.git.merge_base.return_value = "abc123sha"
         mock_repo.git.diff.return_value = ""
 
         parser.get_changed_lines("origin/main")
 
-        mock_repo.git.diff.assert_called_once_with("--unified=0", "origin/main...HEAD")
+        mock_repo.git.merge_base.assert_called_once_with("origin/main", "HEAD")
+        mock_repo.git.diff.assert_called_once_with("--no-color", "--unified=0", "abc123sha..HEAD")
 
     def test_custom_base_branch(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test with custom base branch."""
+        mock_repo.git.merge_base.return_value = "deadbeef"
         mock_repo.git.diff.return_value = ""
 
         parser.get_changed_lines("develop")
 
-        mock_repo.git.diff.assert_called_once_with("--unified=0", "develop...HEAD")
+        mock_repo.git.merge_base.assert_called_once_with("develop", "HEAD")
+        mock_repo.git.diff.assert_called_once_with("--no-color", "--unified=0", "deadbeef..HEAD")
 
     def test_git_command_error(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test error handling when git diff fails."""
+        mock_repo.git.merge_base.return_value = "abc123sha"
         mock_repo.git.diff.side_effect = GitCommandError("git diff", 1)
 
         with pytest.raises(DiffParserError, match="Git diff command failed"):
@@ -258,7 +268,35 @@ index 1234567..abcdefg 100644
 
         result = parser.get_changed_lines("origin/main")
 
-        assert result == {"src/example.py": {6}}
+        # Added line 6 plus 3-line trailing context (7-9)
+        assert result == {"src/example.py": {6, 7, 8, 9}}
+
+    def test_trailing_context_catches_adjacent_unchanged_line(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """Trailing context window includes lines immediately after an insertion.
+
+        Regression: SonarQube reports nested-ternary violations on the first
+        unchanged line after an insertion (e.g. issue at line 287 when lines
+        285-286 were inserted). Without trailing context the line filter drops
+        the issue even though the PR introduced it.
+        """
+        diff_insertion = """\
+diff --git a/src/osc-edge.tsx b/src/osc-edge.tsx
+index 1234567..abcdefg 100644
+--- a/src/osc-edge.tsx
++++ b/src/osc-edge.tsx
+@@ -282,0 +285,2 @@
++                : isNotNil(existsInTrail) && !existsInTrail
++                  ? color.neutral['200']
+"""
+        mock_repo.git.diff.return_value = diff_insertion
+
+        result = parser.get_changed_lines("origin/main")
+
+        # Inserted lines 285-286; trailing context must include 287 (and 288, 289)
+        assert "src/osc-edge.tsx" in result
+        assert 285 in result["src/osc-edge.tsx"]
+        assert 286 in result["src/osc-edge.tsx"]
+        assert 287 in result["src/osc-edge.tsx"]
 
     def test_no_hunks_in_diff(self, parser: DiffParser, mock_repo: MagicMock) -> None:
         """Test diff with file header but no @@ hunk headers."""

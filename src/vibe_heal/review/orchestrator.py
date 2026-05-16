@@ -10,7 +10,7 @@ from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
-from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+from vibe_heal.review.models import FileDiagnostics, FileReview, ReviewIssue, ReviewResult
 from vibe_heal.review.reporter import (
     _write_json,
     _write_markdown,
@@ -33,6 +33,10 @@ class ReviewAnalysisResult(BaseModel):
     branch: str = ""
     base_branch: str = ""
     files: list[FileReview] = Field(default_factory=list)
+    diagnostics: list[FileDiagnostics] = Field(default_factory=list)
+    diff_files_found: int = 0
+    diff_map_keys: list[str] = Field(default_factory=list)
+    diff_output_sample: str = ""
     error_message: str | None = None
     report_file: Path | None = None
 
@@ -142,6 +146,10 @@ class ReviewOrchestrator:
 
             # Step 3: Get changed lines
             changed_lines_map = self.diff_parser.get_changed_lines(base_branch)
+            result.diff_files_found = len(changed_lines_map)
+            result.diff_map_keys = sorted(changed_lines_map.keys())
+            raw_diff = self.diff_parser.get_raw_diff(base_branch)
+            result.diff_output_sample = raw_diff[:500]
 
             # Step 4: Create temp project
             temp_project = await self._create_temp_project()
@@ -174,7 +182,8 @@ class ReviewOrchestrator:
 
             try:
                 for file_path in modified_files:
-                    file_issues = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
+                    file_issues, diag = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
+                    result.diagnostics.append(diag)
                     if file_issues:
                         result.files.append(
                             FileReview(
@@ -279,7 +288,7 @@ class ReviewOrchestrator:
         file_path: Path,
         changed_lines_map: dict[str, set[int]],
         verbose: bool,
-    ) -> list[ReviewIssue]:
+    ) -> tuple[list[ReviewIssue], FileDiagnostics]:
         """Fetch issues for a file and filter to changed lines.
 
         Args:
@@ -288,28 +297,38 @@ class ReviewOrchestrator:
             verbose: Enable verbose output.
 
         Returns:
-            List of ReviewIssue for issues on changed lines.
+            Tuple of (filtered ReviewIssues, FileDiagnostics for this file).
         """
+        file_path_str = str(file_path)
+        repo_relative = self._to_repo_relative(file_path)
+        changed_lines = changed_lines_map.get(repo_relative, set())
+
+        diag = FileDiagnostics(
+            file_path=file_path_str,
+            lookup_key=repo_relative,
+            changed_lines=sorted(changed_lines),
+        )
+
         try:
-            issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
+            issues = await self.client.get_issues_for_file(file_path_str, resolved=False)
         except ComponentNotFoundError:
             if verbose:
                 console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
-            return []
+            return [], diag
 
-        repo_relative = self._to_repo_relative(file_path)
-        changed_lines = changed_lines_map.get(repo_relative, set())
+        diag.sonar_issue_count = len(issues)
+        diag.sonar_issue_lines = sorted(i.line for i in issues if i.line is not None)
 
         if not changed_lines:
             if verbose:
                 console.print(f"[dim]  {file_path}: no changed lines in diff[/dim]")
-            return []
+            return [], diag
 
         filtered = IssueLineFilter.filter_issues(issues, changed_lines)
 
         if verbose and filtered:
             console.print(f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]")
-        return filtered
+        return filtered, diag
 
     async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
         """Clean up temporary SonarQube project.
@@ -389,6 +408,10 @@ class ReviewOrchestrator:
             branch=result.branch,
             base_branch=result.base_branch,
             files=result.files,
+            diagnostics=result.diagnostics,
+            diff_files_found=result.diff_files_found,
+            diff_map_keys=result.diff_map_keys,
+            diff_output_sample=result.diff_output_sample,
         )
 
         _write_json(review_result, report_file)

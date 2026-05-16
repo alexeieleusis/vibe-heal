@@ -42,6 +42,11 @@ class DiffParser:
         Parses the unified diff output and tracks which lines were added or
         modified in HEAD. Deletions-only hunks produce empty sets.
 
+        Resolves the merge base to a concrete SHA before diffing so that
+        remote-ref resolution (e.g. 'origin/main') happens through
+        merge-base rather than via three-dot syntax, which can silently
+        produce empty output in some GitPython subprocess environments.
+
         Args:
             base_branch: Base branch to compare against. Defaults to 'origin/main'.
 
@@ -54,7 +59,8 @@ class DiffParser:
             DiffParserError: If the git diff command fails.
         """
         try:
-            diff_output = self.repo.git.diff("--unified=0", f"{base_branch}...HEAD")
+            merge_base = self.repo.git.merge_base(base_branch, "HEAD").strip()
+            diff_output = self.repo.git.diff("--no-color", "--unified=0", f"{merge_base}..HEAD")
         except GitCommandError as e:
             raise DiffParserError(f"Git diff command failed: {e}") from e
 
@@ -62,6 +68,21 @@ class DiffParser:
             return {}
 
         return self._parse_diff(diff_output)
+
+    def get_raw_diff(self, base_branch: str = "origin/main") -> str:
+        """Return the raw unified diff output for diagnostic purposes.
+
+        Args:
+            base_branch: Base branch to compare against.
+
+        Returns:
+            Raw diff string, or empty string on error.
+        """
+        try:
+            merge_base = self.repo.git.merge_base(base_branch, "HEAD").strip()
+            return self.repo.git.diff("--no-color", "--unified=0", f"{merge_base}..HEAD")
+        except GitCommandError:
+            return ""
 
     @staticmethod
     def _parse_diff(diff_output: str) -> dict[str, set[int]]:
@@ -84,6 +105,20 @@ class DiffParser:
             if new_counter is not None:
                 new_line = new_counter
 
+        # Expand each file's changed-line set with a trailing window after
+        # every cluster end. SonarQube can flag issues on the first unchanged
+        # line after an insertion (e.g. a nested-ternary violation reported on
+        # the existing code that immediately follows newly-added branches).
+        for lines in result.values():
+            if not lines:
+                continue
+            extra: set[int] = set()
+            for ln in lines:
+                if ln + 1 not in lines:
+                    for offset in range(1, _HUNK_TRAILING_LINES + 1):
+                        extra.add(ln + offset)
+            lines.update(extra)
+
         return result
 
 
@@ -96,6 +131,12 @@ _DIFF_HEADER_PREFIXES = (
     "rename ",
     "copy ",
 )
+
+# Lines to include after the end of each changed-line cluster. SonarQube
+# can report an issue on the first *unchanged* line after an insertion — for
+# example, a nested-ternary violation where the flagged line is the existing
+# code that immediately follows newly-added ternary branches.
+_HUNK_TRAILING_LINES = 3
 
 
 def _parse_diff_line(

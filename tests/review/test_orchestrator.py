@@ -96,7 +96,10 @@ class TestRunAnalysis:
     @pytest.fixture
     def mock_diff_parser(self) -> MagicMock:
         """Create a mocked DiffParser for tests."""
-        return MagicMock()
+        mock = MagicMock()
+        mock.get_changed_lines.return_value = {}
+        mock.get_raw_diff.return_value = ""
+        return mock
 
     @pytest.fixture
     def orchestrator(self, config: VibeHealConfig, mock_branch_analyzer, mock_diff_parser):
@@ -340,6 +343,13 @@ class TestRunAnalysis:
         issue_lines = {i.line for i in result.files[0].issues}
         assert issue_lines == {10, 20}
         mock_delete.assert_called_once_with("temp-key")
+        # Diagnostics should capture the pipeline state for the file
+        assert len(result.diagnostics) == 1
+        diag = result.diagnostics[0]
+        assert diag.file_path == "src/file.py"
+        assert diag.changed_lines == sorted({10, 20})
+        assert diag.sonar_issue_count == 3
+        assert diag.sonar_issue_lines == [10, 20, 50]
 
     @pytest.mark.asyncio
     async def test_file_patterns_filter_files(
@@ -529,6 +539,12 @@ class TestRunAnalysis:
         assert loaded.total_issues == 1
         assert loaded.branch == "feature/test"
         assert loaded.base_branch == "origin/main"
+        # Diagnostics must be persisted in the JSON report
+        assert len(loaded.diagnostics) == 1
+        diag = loaded.diagnostics[0]
+        assert diag.sonar_issue_count == 1
+        assert diag.sonar_issue_lines == [10]
+        assert diag.changed_lines == [10]
 
 
 class TestRunPost:
