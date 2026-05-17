@@ -104,6 +104,34 @@ class FileDiagnostics(BaseModel):
         default_factory=list,
         description="Line numbers of those issues (sorted)",
     )
+    active_dup_api_status: str = Field(
+        default="",
+        description=(
+            "Outcome of /api/duplications/show against the temp project. "
+            "'' = not attempted; 'skipped_no_changed_lines'; 'ok'; "
+            "'component_not_found'; 'api_error:<msg>'; 'error:<type>:<msg>'"
+        ),
+    )
+    active_dup_groups_found: int = Field(
+        default=0,
+        description="Duplication groups returned by the temp-project API (0 when status != 'ok')",
+    )
+    active_dup_target_ref_found: bool = Field(
+        default=False,
+        description="Whether the target file's ref was located in the duplications response",
+    )
+    active_dup_blocks_intersecting: int = Field(
+        default=0,
+        description="Duplication blocks whose line range intersects the changed lines",
+    )
+    resolved_dup_api_status: str = Field(
+        default="",
+        description="Outcome of /api/duplications/show against the main project (same values as active_dup_api_status)",
+    )
+    resolved_dup_groups_found: int = Field(
+        default=0,
+        description="Duplication groups returned by the main-project API",
+    )
 
 
 class ReviewResult(BaseModel):

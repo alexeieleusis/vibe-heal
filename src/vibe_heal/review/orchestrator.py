@@ -200,10 +200,10 @@ class ReviewOrchestrator:
             try:
                 for file_path in modified_files:
                     file_issues, diag = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
-                    active_dups = await self._get_active_duplications(file_path, changed_lines_map)
+                    active_dups = await self._get_active_duplications(file_path, changed_lines_map, diag)
                     active_ranges = {(d.from_line, d.to_line) for d in active_dups}
                     resolved_dups = await self._get_resolved_duplications(
-                        file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key
+                        file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key, diag
                     )
                     result.diagnostics.append(diag)
                     if file_issues or active_dups or resolved_dups:
@@ -359,12 +359,14 @@ class ReviewOrchestrator:
         self,
         file_path: Path,
         changed_lines_map: dict[str, set[int]],
+        diag: FileDiagnostics,
     ) -> list[ReviewDuplication]:
         """Fetch duplication blocks from the temp project that intersect changed lines.
 
         Args:
             file_path: Path to the file (config already points at temp project).
             changed_lines_map: New-side changed lines per file.
+            diag: Per-file diagnostics object to populate with API outcome.
 
         Returns:
             ReviewDuplication entries for each overlapping block, if any.
@@ -372,13 +374,24 @@ class ReviewOrchestrator:
         repo_relative = self._to_repo_relative(file_path)
         new_changed_lines = changed_lines_map.get(repo_relative, set())
         if not new_changed_lines:
+            diag.active_dup_api_status = "skipped_no_changed_lines"
             return []
 
         try:
             async with DuplicationClient(self.config) as dup_client:
                 response: DuplicationsResponse = await dup_client.get_duplications_for_file(repo_relative)
-        except (ComponentNotFoundError, SonarQubeAPIError):
+        except ComponentNotFoundError:
+            diag.active_dup_api_status = "component_not_found"
             return []
+        except SonarQubeAPIError as e:
+            diag.active_dup_api_status = f"api_error:{e}"
+            return []
+        except Exception as e:
+            diag.active_dup_api_status = f"error:{type(e).__name__}:{e}"
+            return []
+
+        diag.active_dup_api_status = "ok"
+        diag.active_dup_groups_found = len(response.duplications)
 
         if not response.duplications:
             return []
@@ -388,35 +401,47 @@ class ReviewOrchestrator:
         if target_ref is None:
             return []
 
+        diag.active_dup_target_ref_found = True
+
         findings: list[ReviewDuplication] = []
         for group in response.duplications:
-            target_block = group.get_target_block(target_ref)
-            if target_block is None:
+            finding = self._build_active_finding(group, target_ref, new_changed_lines, response)
+            if finding is not None:
+                diag.active_dup_blocks_intersecting += 1
+                findings.append(finding)
+        return findings
+
+    def _build_active_finding(
+        self,
+        group: DuplicationGroup,
+        target_ref: str,
+        new_changed_lines: set[int],
+        response: DuplicationsResponse,
+    ) -> ReviewDuplication | None:
+        target_block = group.get_target_block(target_ref)
+        if target_block is None:
+            return None
+        block_lines = set(range(target_block.from_line, target_block.to_line + 1))
+        if not block_lines & new_changed_lines:
+            return None
+        other_locations = []
+        for block in group.get_other_blocks(target_ref):
+            file_info = response.get_file_info(block.ref)
+            if file_info is None:
                 continue
-            block_lines = set(range(target_block.from_line, target_block.to_line + 1))
-            if not block_lines & new_changed_lines:
-                continue
-            other_locations = []
-            for block in group.get_other_blocks(target_ref):
-                file_info = response.get_file_info(block.ref)
-                if file_info is None:
-                    continue
-                other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
-                other_locations.append(
-                    DuplicationLocation(
-                        file_path=other_file_path,
-                        from_line=block.from_line,
-                        to_line=block.to_line,
-                    )
-                )
-            findings.append(
-                ReviewDuplication(
-                    from_line=target_block.from_line,
-                    to_line=target_block.to_line,
-                    other_locations=other_locations,
+            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+            other_locations.append(
+                DuplicationLocation(
+                    file_path=other_file_path,
+                    from_line=block.from_line,
+                    to_line=block.to_line,
                 )
             )
-        return findings
+        return ReviewDuplication(
+            from_line=target_block.from_line,
+            to_line=target_block.to_line,
+            other_locations=other_locations,
+        )
 
     async def _get_resolved_duplications(
         self,
@@ -425,6 +450,7 @@ class ReviewOrchestrator:
         old_changed_lines_map: dict[str, set[int]],
         active_dup_ranges: set[tuple[int, int]],
         original_project_key: str,
+        diag: FileDiagnostics,
     ) -> list[ResolvedDuplication]:
         """Warn about duplication blocks from main that were modified but not active in temp.
 
@@ -439,6 +465,7 @@ class ReviewOrchestrator:
             old_changed_lines_map: Old-side changed lines per file.
             active_dup_ranges: Set of (from_line, to_line) from Feature 1 (skip if covered).
             original_project_key: The main project key (config currently points at temp).
+            diag: Per-file diagnostics object to populate with API outcome.
 
         Returns:
             ResolvedDuplication entries for each uncovered block, if any.
@@ -446,9 +473,11 @@ class ReviewOrchestrator:
         repo_relative = self._to_repo_relative(file_path)
         old_changed_lines = old_changed_lines_map.get(repo_relative, set())
         if not old_changed_lines:
+            diag.resolved_dup_api_status = "skipped_no_changed_lines"
             return []
         new_changed_lines = changed_lines_map.get(repo_relative, set())
         if not new_changed_lines:
+            diag.resolved_dup_api_status = "skipped_no_changed_lines"
             return []
 
         temp_project_key = self.config.sonarqube_project_key
@@ -457,11 +486,21 @@ class ReviewOrchestrator:
         try:
             async with DuplicationClient(self.config) as dup_client:
                 response = await dup_client.get_duplications_for_file(repo_relative)
-        except (ComponentNotFoundError, SonarQubeAPIError):
+        except ComponentNotFoundError:
+            diag.resolved_dup_api_status = "component_not_found"
+            return []
+        except SonarQubeAPIError as e:
+            diag.resolved_dup_api_status = f"api_error:{e}"
+            return []
+        except Exception as e:
+            diag.resolved_dup_api_status = f"error:{type(e).__name__}:{e}"
             return []
         finally:
             self.config.sonarqube_project_key = temp_project_key
             self.client.config.sonarqube_project_key = temp_project_key
+
+        diag.resolved_dup_api_status = "ok"
+        diag.resolved_dup_groups_found = len(response.duplications)
 
         if not response.duplications:
             return []
