@@ -6,11 +6,21 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
+from vibe_heal.deduplication.client import DuplicationClient
+from vibe_heal.deduplication.models import DuplicationGroup, DuplicationsResponse
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
-from vibe_heal.review.models import FileDiagnostics, FileReview, ReviewIssue, ReviewResult
+from vibe_heal.review.models import (
+    DuplicationLocation,
+    FileDiagnostics,
+    FileReview,
+    ResolvedDuplication,
+    ReviewDuplication,
+    ReviewIssue,
+    ReviewResult,
+)
 from vibe_heal.review.reporter import (
     _write_json,
     _write_markdown,
@@ -19,7 +29,7 @@ from vibe_heal.review.reporter import (
 )
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeAPIError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 console = Console()
@@ -44,6 +54,11 @@ class ReviewAnalysisResult(BaseModel):
     def total_issues(self) -> int:
         """Return the total number of issues across all files."""
         return sum(len(f.issues) for f in self.files)
+
+    @property
+    def total_duplications(self) -> int:
+        """Return the total number of active and resolved duplication findings."""
+        return sum(len(f.duplications) + len(f.resolved_duplications) for f in self.files)
 
 
 class ReviewOrchestrator:
@@ -144,8 +159,10 @@ class ReviewOrchestrator:
                 self._write_report(result, report_file)
                 return result
 
-            # Step 3: Get changed lines
-            changed_lines_map = self.diff_parser.get_changed_lines(base_branch)
+            # Step 3: Get changed lines (both new-side and old-side)
+            diff_lines = self.diff_parser.get_diff_lines(base_branch)
+            changed_lines_map = diff_lines.new_lines
+            old_changed_lines_map = diff_lines.old_lines
             result.diff_files_found = len(changed_lines_map)
             result.diff_map_keys = sorted(changed_lines_map.keys())
             raw_diff = self.diff_parser.get_raw_diff(base_branch)
@@ -175,7 +192,7 @@ class ReviewOrchestrator:
 
             console.print("[dim]Analysis completed successfully.[/dim]")
 
-            # Step 6: Fetch issues for each file, filter to changed lines
+            # Step 6: Fetch issues and duplications for each file, filter to changed lines
             original_project_key = self.config.sonarqube_project_key
             self.config.sonarqube_project_key = temp_project.project_key
             self.client.config.sonarqube_project_key = temp_project.project_key
@@ -183,12 +200,19 @@ class ReviewOrchestrator:
             try:
                 for file_path in modified_files:
                     file_issues, diag = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
+                    active_dups = await self._get_active_duplications(file_path, changed_lines_map)
+                    active_ranges = {(d.from_line, d.to_line) for d in active_dups}
+                    resolved_dups = await self._get_resolved_duplications(
+                        file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key
+                    )
                     result.diagnostics.append(diag)
-                    if file_issues:
+                    if file_issues or active_dups or resolved_dups:
                         result.files.append(
                             FileReview(
                                 file_path=str(file_path),
                                 issues=file_issues,
+                                duplications=active_dups,
+                                resolved_duplications=resolved_dups,
                             )
                         )
                     elif verbose:
@@ -201,8 +225,9 @@ class ReviewOrchestrator:
             self._write_report(result, report_file)
 
             console.print(
-                f"[green]Review complete: {result.total_issues} issue(s) "
-                f"found across {len(result.files)} file(s).[/green]"
+                f"[green]Review complete: {result.total_issues} issue(s), "
+                f"{result.total_duplications} duplication finding(s) "
+                f"across {len(result.files)} file(s).[/green]"
             )
             return result
 
@@ -329,6 +354,169 @@ class ReviewOrchestrator:
         if verbose and filtered:
             console.print(f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]")
         return filtered, diag
+
+    async def _get_active_duplications(
+        self,
+        file_path: Path,
+        changed_lines_map: dict[str, set[int]],
+    ) -> list[ReviewDuplication]:
+        """Fetch duplication blocks from the temp project that intersect changed lines.
+
+        Args:
+            file_path: Path to the file (config already points at temp project).
+            changed_lines_map: New-side changed lines per file.
+
+        Returns:
+            ReviewDuplication entries for each overlapping block, if any.
+        """
+        repo_relative = self._to_repo_relative(file_path)
+        new_changed_lines = changed_lines_map.get(repo_relative, set())
+        if not new_changed_lines:
+            return []
+
+        try:
+            async with DuplicationClient(self.config) as dup_client:
+                response: DuplicationsResponse = await dup_client.get_duplications_for_file(repo_relative)
+        except (ComponentNotFoundError, SonarQubeAPIError):
+            return []
+
+        if not response.duplications:
+            return []
+
+        component_key = f"{self.config.sonarqube_project_key}:{repo_relative}"
+        target_ref = response.get_target_file_ref(component_key)
+        if target_ref is None:
+            return []
+
+        findings: list[ReviewDuplication] = []
+        for group in response.duplications:
+            target_block = group.get_target_block(target_ref)
+            if target_block is None:
+                continue
+            block_lines = set(range(target_block.from_line, target_block.to_line + 1))
+            if not block_lines & new_changed_lines:
+                continue
+            other_locations = []
+            for block in group.get_other_blocks(target_ref):
+                file_info = response.get_file_info(block.ref)
+                if file_info is None:
+                    continue
+                other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+                other_locations.append(
+                    DuplicationLocation(
+                        file_path=other_file_path,
+                        from_line=block.from_line,
+                        to_line=block.to_line,
+                    )
+                )
+            findings.append(
+                ReviewDuplication(
+                    from_line=target_block.from_line,
+                    to_line=target_block.to_line,
+                    other_locations=other_locations,
+                )
+            )
+        return findings
+
+    async def _get_resolved_duplications(
+        self,
+        file_path: Path,
+        changed_lines_map: dict[str, set[int]],
+        old_changed_lines_map: dict[str, set[int]],
+        active_dup_ranges: set[tuple[int, int]],
+        original_project_key: str,
+    ) -> list[ResolvedDuplication]:
+        """Warn about duplication blocks from main that were modified but not active in temp.
+
+        Queries the main project (not the temp project) for duplications on the
+        old-side changed lines. If a block from main intersects those old lines
+        and Feature 1 found no corresponding active duplication in the temp project,
+        we warn the developer to check the other instances.
+
+        Args:
+            file_path: Path to the file.
+            changed_lines_map: New-side changed lines per file (for anchor line).
+            old_changed_lines_map: Old-side changed lines per file.
+            active_dup_ranges: Set of (from_line, to_line) from Feature 1 (skip if covered).
+            original_project_key: The main project key (config currently points at temp).
+
+        Returns:
+            ResolvedDuplication entries for each uncovered block, if any.
+        """
+        repo_relative = self._to_repo_relative(file_path)
+        old_changed_lines = old_changed_lines_map.get(repo_relative, set())
+        if not old_changed_lines:
+            return []
+        new_changed_lines = changed_lines_map.get(repo_relative, set())
+        if not new_changed_lines:
+            return []
+
+        temp_project_key = self.config.sonarqube_project_key
+        self.config.sonarqube_project_key = original_project_key
+        self.client.config.sonarqube_project_key = original_project_key
+        try:
+            async with DuplicationClient(self.config) as dup_client:
+                response = await dup_client.get_duplications_for_file(repo_relative)
+        except (ComponentNotFoundError, SonarQubeAPIError):
+            return []
+        finally:
+            self.config.sonarqube_project_key = temp_project_key
+            self.client.config.sonarqube_project_key = temp_project_key
+
+        if not response.duplications:
+            return []
+
+        component_key = f"{original_project_key}:{repo_relative}"
+        target_ref = response.get_target_file_ref(component_key)
+        if target_ref is None:
+            return []
+
+        anchor_new_line = min(new_changed_lines)
+        findings: list[ResolvedDuplication] = []
+        for group in response.duplications:
+            resolved = self._resolve_group(
+                group, target_ref, response, old_changed_lines, active_dup_ranges, anchor_new_line
+            )
+            if resolved is not None:
+                findings.append(resolved)
+        return findings
+
+    def _resolve_group(
+        self,
+        group: DuplicationGroup,
+        target_ref: str,
+        response: DuplicationsResponse,
+        old_changed_lines: set[int],
+        active_dup_ranges: set[tuple[int, int]],
+        anchor_new_line: int,
+    ) -> ResolvedDuplication | None:
+        target_block = group.get_target_block(target_ref)
+        if target_block is None:
+            return None
+        block_lines = set(range(target_block.from_line, target_block.to_line + 1))
+        if not block_lines & old_changed_lines:
+            return None
+        if (target_block.from_line, target_block.to_line) in active_dup_ranges:
+            return None
+        other_locations = []
+        for block in group.get_other_blocks(target_ref):
+            file_info = response.get_file_info(block.ref)
+            if file_info is None:
+                continue
+            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+            other_locations.append(
+                DuplicationLocation(
+                    file_path=other_file_path,
+                    from_line=block.from_line,
+                    to_line=block.to_line,
+                )
+            )
+        return ResolvedDuplication(
+            main_from_line=target_block.from_line,
+            main_to_line=target_block.to_line,
+            other_locations=other_locations,
+            anchor_new_line=anchor_new_line,
+        )
 
     async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
         """Clean up temporary SonarQube project.

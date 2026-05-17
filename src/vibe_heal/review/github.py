@@ -126,6 +126,33 @@ class GitHubReviewClient:
                     "line": issue.line,
                     "body": body,
                 })
+            for dup in file_review.duplications:
+                locations = ", ".join(
+                    f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
+                )
+                body = (
+                    f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n"
+                    f"This block is duplicated in: {locations}"
+                )
+                comments.append({
+                    "path": file_review.file_path,
+                    "line": dup.from_line,
+                    "body": body,
+                })
+            for res in file_review.resolved_duplications:
+                other = "\n".join(
+                    f"- `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations
+                )
+                body = (
+                    f"**Possible missed update** - lines {res.main_from_line}-{res.main_to_line} in `main` were duplicated.\n\n"
+                    "You modified this region. The duplication may be resolved here, but check the other instances:\n\n"
+                    f"{other}"
+                )
+                comments.append({
+                    "path": file_review.file_path,
+                    "line": res.anchor_new_line,
+                    "body": body,
+                })
         return {
             "event": "COMMENT",
             "comments": comments,
@@ -138,6 +165,17 @@ class GitHubReviewClient:
             for issue in file_review.issues:
                 lines.append(
                     f"- **{issue.rule}** ({file_review.file_path}:{issue.line}) {issue.message}",
+                )
+            for dup in file_review.duplications:
+                lines.append(
+                    f"- **Duplication** ({file_review.file_path} lines {dup.from_line}-{dup.to_line}) "
+                    f"duplicated in {len(dup.other_locations)} other location(s)",
+                )
+            for res in file_review.resolved_duplications:
+                lines.append(
+                    f"- **Possible missed update** ({file_review.file_path}) - "
+                    f"lines {res.main_from_line}-{res.main_to_line} in main were duplicated; "
+                    f"{len(res.other_locations)} other instance(s) may need updating",
                 )
         return {
             "event": "COMMENT",

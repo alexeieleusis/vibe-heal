@@ -11,8 +11,14 @@ import pytest
 
 if TYPE_CHECKING:
     from vibe_heal.config import VibeHealConfig
+    from vibe_heal.review.orchestrator import ReviewOrchestrator
 
-from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+from vibe_heal.git.diff_parser import DiffLines
+from vibe_heal.review.models import (
+    FileReview,
+    ReviewIssue,
+    ReviewResult,
+)
 from vibe_heal.review.reporter import load_report, write_reports
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult
 from vibe_heal.sonarqube.models import SonarQubeIssue
@@ -97,7 +103,7 @@ class TestRunAnalysis:
     def mock_diff_parser(self) -> MagicMock:
         """Create a mocked DiffParser for tests."""
         mock = MagicMock()
-        mock.get_changed_lines.return_value = {}
+        mock.get_diff_lines.return_value = DiffLines(new_lines={}, old_lines={})
         mock.get_raw_diff.return_value = ""
         return mock
 
@@ -300,8 +306,8 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.diff_parser,
-                "get_changed_lines",
-                return_value={"src/file.py": {10, 20}},
+                "get_diff_lines",
+                return_value=DiffLines(new_lines={"src/file.py": {10, 20}}, old_lines={}),
             ),
             patch.object(
                 orchestrator.project_manager,
@@ -328,6 +334,8 @@ class TestRunAnalysis:
                 "delete_project",
                 new_callable=AsyncMock,
             ) as mock_delete,
+            patch.object(orchestrator, "_get_active_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_get_resolved_duplications", new_callable=AsyncMock, return_value=[]),
         ):
             result = await orchestrator.run_analysis(
                 base_branch="origin/main",
@@ -496,8 +504,8 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.diff_parser,
-                "get_changed_lines",
-                return_value={"src/file.py": {10}},
+                "get_diff_lines",
+                return_value=DiffLines(new_lines={"src/file.py": {10}}, old_lines={}),
             ),
             patch.object(
                 orchestrator.project_manager,
@@ -524,6 +532,8 @@ class TestRunAnalysis:
                 "delete_project",
                 new_callable=AsyncMock,
             ),
+            patch.object(orchestrator, "_get_active_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_get_resolved_duplications", new_callable=AsyncMock, return_value=[]),
         ):
             report_path = tmp_path / "reports" / "review.json"
             result = await orchestrator.run_analysis(
@@ -639,3 +649,263 @@ class TestRunPost:
             await orchestrator.run_post(
                 report_file=Path("/nonexistent/path/review.json"),
             )
+
+
+class TestGetActiveDuplications:
+    """Tests for ReviewOrchestrator._get_active_duplications()."""
+
+    @pytest.fixture
+    def orchestrator(self) -> ReviewOrchestrator:
+        from vibe_heal.config import VibeHealConfig
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.test.com",
+            sonarqube_token="test-token",
+            sonarqube_project_key="temp-project",
+        )
+        mock_client = AsyncMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.repo.working_dir = "/repo"
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
+
+    def _make_response(self, from_line: int, size: int, other_file: str = "src/other.py") -> MagicMock:
+        """Build a mock DuplicationsResponse with one group."""
+        from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
+
+        target_block = DuplicationBlock(**{"from": from_line, "size": size, "_ref": "1"})
+        other_block = DuplicationBlock(**{"from": 50, "size": 10, "_ref": "2"})
+        group = DuplicationGroup(blocks=[target_block, other_block])
+
+        file_info_target = MagicMock()
+        file_info_target.key = "temp-project:src/file.py"
+
+        file_info_other = MagicMock()
+        file_info_other.key = f"temp-project:{other_file}"
+
+        response = MagicMock(spec=DuplicationsResponse)
+        response.duplications = [group]
+        response.get_target_file_ref.return_value = "1"
+        response.get_file_info.side_effect = lambda ref: (file_info_target if ref == "1" else file_info_other)
+        return response
+
+    @pytest.mark.asyncio
+    async def test_block_intersecting_changed_lines_is_reported(self, orchestrator) -> None:
+        """A duplication block overlapping changed lines produces a ReviewDuplication."""
+        response = self._make_response(from_line=10, size=15)  # block lines 10-24
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_active_duplications(
+                Path("src/file.py"),
+                {"src/file.py": {12, 15}},  # lines inside the block
+            )
+
+        assert len(result) == 1
+        assert result[0].from_line == 10
+        assert result[0].to_line == 24
+        assert len(result[0].other_locations) == 1
+        assert result[0].other_locations[0].file_path == "src/other.py"
+
+    @pytest.mark.asyncio
+    async def test_non_intersecting_block_is_skipped(self, orchestrator) -> None:
+        """A duplication block not overlapping changed lines produces nothing."""
+        response = self._make_response(from_line=100, size=10)  # block lines 100-109
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_active_duplications(
+                Path("src/file.py"),
+                {"src/file.py": {5, 6, 7}},  # lines outside the block
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_no_changed_lines_returns_empty(self, orchestrator) -> None:
+        """When file has no changed lines, returns empty without calling API."""
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            result = await orchestrator._get_active_duplications(
+                Path("src/file.py"),
+                {},  # no entry for this file
+            )
+
+        MockDupClient.assert_not_called()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_component_not_found_returns_empty(self, orchestrator) -> None:
+        """ComponentNotFoundError from the API is silently swallowed."""
+        from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.side_effect = ComponentNotFoundError("not found")
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_active_duplications(
+                Path("src/file.py"),
+                {"src/file.py": {10}},
+            )
+
+        assert result == []
+
+
+class TestGetResolvedDuplications:
+    """Tests for ReviewOrchestrator._get_resolved_duplications()."""
+
+    @pytest.fixture
+    def orchestrator(self) -> ReviewOrchestrator:
+        from vibe_heal.config import VibeHealConfig
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.test.com",
+            sonarqube_token="test-token",
+            sonarqube_project_key="temp-project",
+        )
+        mock_client = AsyncMock()
+        mock_client.config = config
+        mock_analyzer = MagicMock()
+        mock_analyzer.repo.working_dir = "/repo"
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
+
+    def _make_response(self, from_line: int, size: int) -> MagicMock:
+        from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
+
+        target_block = DuplicationBlock(**{"from": from_line, "size": size, "_ref": "1"})
+        other_block = DuplicationBlock(**{"from": 100, "size": 10, "_ref": "2"})
+        group = DuplicationGroup(blocks=[target_block, other_block])
+
+        file_info_other = MagicMock()
+        file_info_other.key = "main-project:src/old.py"
+
+        response = MagicMock(spec=DuplicationsResponse)
+        response.duplications = [group]
+        response.get_target_file_ref.return_value = "1"
+        response.get_file_info.return_value = file_info_other
+        return response
+
+    @pytest.mark.asyncio
+    async def test_resolved_duplication_detected(self, orchestrator) -> None:
+        """A main-project block overlapping old changed lines and not in active ranges produces a warning."""
+        response = self._make_response(from_line=45, size=16)  # main block lines 45-60
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={"src/file.py": {50}},  # new changed lines (anchor)
+                old_changed_lines_map={"src/file.py": {50}},  # old lines inside the block
+                active_dup_ranges=set(),  # no active dups
+                original_project_key="main-project",
+            )
+
+        assert len(result) == 1
+        assert result[0].main_from_line == 45
+        assert result[0].main_to_line == 60
+        assert result[0].anchor_new_line == 50
+        assert result[0].other_locations[0].file_path == "src/old.py"
+
+    @pytest.mark.asyncio
+    async def test_skipped_when_covered_by_active_dup(self, orchestrator) -> None:
+        """A resolved duplication block is skipped if Feature 1 already found it active."""
+        response = self._make_response(from_line=45, size=16)
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={"src/file.py": {50}},
+                old_changed_lines_map={"src/file.py": {50}},
+                active_dup_ranges={(45, 60)},  # covered by Feature 1
+                original_project_key="main-project",
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_no_old_changed_lines_returns_empty(self, orchestrator) -> None:
+        """When file has no old changed lines, returns empty without API call."""
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            result = await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={},
+                old_changed_lines_map={},
+                active_dup_ranges=set(),
+                original_project_key="main-project",
+            )
+
+        MockDupClient.assert_not_called()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_silent_skip_on_component_not_found(self, orchestrator) -> None:
+        """ComponentNotFoundError on main project query is silently swallowed."""
+        from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.side_effect = ComponentNotFoundError("not found")
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={"src/file.py": {50}},
+                old_changed_lines_map={"src/file.py": {50}},
+                active_dup_ranges=set(),
+                original_project_key="main-project",
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_project_key_restored_after_query(self, orchestrator) -> None:
+        """Config is restored to temp project key after querying main project."""
+        orchestrator.config.sonarqube_project_key = "temp-project"
+
+        response = MagicMock()
+        response.duplications = []
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={"src/file.py": {50}},
+                old_changed_lines_map={"src/file.py": {50}},
+                active_dup_ranges=set(),
+                original_project_key="main-project",
+            )
+
+        assert orchestrator.config.sonarqube_project_key == "temp-project"
