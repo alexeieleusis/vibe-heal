@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from git import GitCommandError, Repo
 
-from vibe_heal.git.diff_parser import DiffParser, DiffParserError
+from vibe_heal.git.diff_parser import DiffLines, DiffParser, DiffParserError
 
 DIFF_SIMPLE_ADD = """\
 diff --git a/src/example.py b/src/example.py
@@ -309,3 +309,80 @@ new file mode 100644
         result = parser.get_changed_lines("origin/main")
 
         assert result == {}
+
+
+class TestGetDiffLines:
+    """Tests for get_diff_lines method and old-line tracking."""
+
+    def test_returns_diff_lines_dataclass(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """get_diff_lines returns a DiffLines with new_lines and old_lines."""
+        mock_repo.git.diff.return_value = DIFF_MODIFICATION
+
+        result = parser.get_diff_lines("origin/main")
+
+        assert isinstance(result, DiffLines)
+        assert isinstance(result.new_lines, dict)
+        assert isinstance(result.old_lines, dict)
+
+    def test_pure_deletion_populates_old_lines(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """A pure deletion hunk adds the removed lines to old_lines."""
+        mock_repo.git.diff.return_value = DIFF_PURE_DELETION
+
+        result = parser.get_diff_lines("origin/main")
+
+        assert result.old_lines == {"src/example.py": {3, 4}}
+        assert result.new_lines == {"src/example.py": set()}
+
+    def test_modification_appears_in_both_sides(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """A modification puts the old line in old_lines and new line in new_lines."""
+        mock_repo.git.diff.return_value = DIFF_MODIFICATION
+
+        result = parser.get_diff_lines("origin/main")
+
+        assert 3 in result.old_lines["src/example.py"]
+        assert 3 in result.new_lines["src/example.py"]
+
+    def test_pure_addition_leaves_old_lines_empty(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """A pure insertion has no old-side lines."""
+        mock_repo.git.diff.return_value = DIFF_SIMPLE_ADD
+
+        result = parser.get_diff_lines("origin/main")
+
+        assert result.old_lines == {"src/example.py": set()}
+
+    def test_multiple_hunks_accumulate_old_lines(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """Old lines from multiple hunks are all collected."""
+        mock_repo.git.diff.return_value = DIFF_MULTIPLE_HUNKS
+
+        result = parser.get_diff_lines("origin/main")
+
+        # Hunk 1: -3 (modification), hunk 2: pure insertion at +11 (no old lines)
+        assert result.old_lines == {"src/example.py": {3}}
+
+    def test_old_lines_not_expanded_with_trailing_context(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """Trailing-context window is applied to new_lines but NOT to old_lines."""
+        mock_repo.git.diff.return_value = DIFF_MODIFICATION
+
+        result = parser.get_diff_lines("origin/main")
+
+        # new_lines gets trailing context (3→6); old_lines stays exact
+        assert result.new_lines["src/example.py"] == {3, 4, 5, 6}
+        assert result.old_lines["src/example.py"] == {3}
+
+    def test_empty_diff_returns_empty_diff_lines(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """Empty diff produces DiffLines with empty dicts."""
+        mock_repo.git.diff.return_value = DIFF_EMPTY
+
+        result = parser.get_diff_lines("origin/main")
+
+        assert result.new_lines == {}
+        assert result.old_lines == {}
+
+    def test_get_changed_lines_still_works(self, parser: DiffParser, mock_repo: MagicMock) -> None:
+        """get_changed_lines() is a backwards-compatible wrapper for new_lines."""
+        mock_repo.git.diff.return_value = DIFF_MODIFICATION
+
+        changed = parser.get_changed_lines("origin/main")
+        diff = parser.get_diff_lines("origin/main")
+
+        assert changed == diff.new_lines
