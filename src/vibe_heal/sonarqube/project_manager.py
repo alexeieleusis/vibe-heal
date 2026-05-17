@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 from pydantic import BaseModel
+from rich.console import Console
 
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeError
@@ -191,6 +192,53 @@ class ProjectManager:
                 return [str(v) for v in val]
             return [str(val)]
         return []
+
+    async def create_temp_project_with_settings(
+        self,
+        base_key: str,
+        branch_name: str,
+        user_email: str,
+        console: Console,
+    ) -> TempProjectMetadata:
+        """Create temporary project and copy exclusion settings from source.
+
+        Combines temp project creation with exclusion settings copy into a
+        single operation, used by both cleanup and deduplication workflows.
+
+        Args:
+            base_key: Base project key (source project to copy settings from)
+            branch_name: Current branch name
+            user_email: Git user email
+            console: Rich console for progress output
+
+        Returns:
+            Metadata for the created project
+        """
+        console.print("\n[dim]Creating temporary SonarQube project...[/dim]")
+        temp_project = await self.create_temp_project(
+            base_key=base_key,
+            branch_name=branch_name,
+            user_email=user_email,
+        )
+        console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
+
+        try:
+            copied, inherited_count, failed_count = await self.copy_exclusion_settings(
+                source_key=base_key,
+                target_key=temp_project.project_key,
+            )
+            if copied:
+                console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
+            if inherited_count:
+                console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+            if failed_count:
+                console.print(f"[yellow]Warning: Failed to apply {failed_count} exclusion setting(s)[/yellow]")
+            if not copied and not inherited_count and not failed_count:
+                console.print("[dim]No exclusion settings configured on source project[/dim]")
+        except SonarQubeError as e:
+            console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
+
+        return temp_project
 
     def _sanitize_identifier(self, value: str) -> str:
         """Sanitize string for use in project key.
