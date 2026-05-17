@@ -21,6 +21,43 @@ class ReviewIssue(BaseModel):
     )
 
 
+class DuplicationLocation(BaseModel):
+    """Location of a duplicate code instance in another file."""
+
+    model_config = {"extra": "ignore"}
+
+    file_path: str = Field(description="Repo-relative path of the file containing the other instance")
+    from_line: int = Field(description="First line of the duplicate block")
+    to_line: int = Field(description="Last line of the duplicate block")
+
+
+class ReviewDuplication(BaseModel):
+    """Active duplication in the temp project that intersects modified lines (Feature 1)."""
+
+    model_config = {"extra": "ignore"}
+
+    from_line: int = Field(description="First line of the duplicated block in this file")
+    to_line: int = Field(description="Last line of the duplicated block in this file")
+    other_locations: list[DuplicationLocation] = Field(
+        default_factory=list,
+        description="Other files/lines where this block is duplicated",
+    )
+
+
+class ResolvedDuplication(BaseModel):
+    """A block that was duplicated in main was modified; other instances may need updating (Feature 2)."""
+
+    model_config = {"extra": "ignore"}
+
+    main_from_line: int = Field(description="Start of the original duplicated block in main")
+    main_to_line: int = Field(description="End of the original duplicated block in main")
+    other_locations: list[DuplicationLocation] = Field(
+        default_factory=list,
+        description="Other instances in main that may still need updating",
+    )
+    anchor_new_line: int = Field(description="New-file line number used as the PR comment anchor")
+
+
 class FileReview(BaseModel):
     """Review results for a single file."""
 
@@ -28,6 +65,14 @@ class FileReview(BaseModel):
 
     file_path: str = Field(description="Path to the file relative to project root")
     issues: list[ReviewIssue] = Field(default_factory=list, description="Issues found in this file")
+    duplications: list[ReviewDuplication] = Field(
+        default_factory=list,
+        description="Active duplication blocks intersecting changed lines",
+    )
+    resolved_duplications: list[ResolvedDuplication] = Field(
+        default_factory=list,
+        description="Blocks duplicated in main that were modified; other instances may need updating",
+    )
 
 
 class FileDiagnostics(BaseModel):
@@ -96,3 +141,8 @@ class ReviewResult(BaseModel):
     def total_issues(self) -> int:
         """Return the total number of issues across all files."""
         return sum(len(f.issues) for f in self.files)
+
+    @property
+    def total_duplications(self) -> int:
+        """Return the total number of active and resolved duplication findings."""
+        return sum(len(f.duplications) + len(f.resolved_duplications) for f in self.files)

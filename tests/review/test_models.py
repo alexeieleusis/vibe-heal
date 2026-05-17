@@ -2,7 +2,14 @@
 
 from datetime import datetime, timezone
 
-from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+from vibe_heal.review.models import (
+    DuplicationLocation,
+    FileReview,
+    ResolvedDuplication,
+    ReviewDuplication,
+    ReviewIssue,
+    ReviewResult,
+)
 
 
 class TestReviewIssue:
@@ -289,3 +296,118 @@ class TestReviewResult:
         assert restored.branch == original.branch
         assert restored.generated_at == original.generated_at
         assert restored.total_issues == 1
+
+
+class TestDuplicationModels:
+    """Tests for duplication-related review models."""
+
+    def test_duplication_location_creation(self) -> None:
+        """Test creating a DuplicationLocation."""
+        loc = DuplicationLocation(file_path="src/utils.py", from_line=10, to_line=25)
+
+        assert loc.file_path == "src/utils.py"
+        assert loc.from_line == 10
+        assert loc.to_line == 25
+
+    def test_review_duplication_defaults(self) -> None:
+        """Test ReviewDuplication defaults to empty other_locations."""
+        dup = ReviewDuplication(from_line=5, to_line=20)
+
+        assert dup.from_line == 5
+        assert dup.to_line == 20
+        assert dup.other_locations == []
+
+    def test_review_duplication_with_locations(self) -> None:
+        """Test ReviewDuplication with other_locations populated."""
+        dup = ReviewDuplication(
+            from_line=10,
+            to_line=30,
+            other_locations=[
+                DuplicationLocation(file_path="src/a.py", from_line=50, to_line=70),
+                DuplicationLocation(file_path="src/b.py", from_line=1, to_line=21),
+            ],
+        )
+
+        assert len(dup.other_locations) == 2
+        assert dup.other_locations[0].file_path == "src/a.py"
+
+    def test_resolved_duplication_creation(self) -> None:
+        """Test creating a ResolvedDuplication."""
+        res = ResolvedDuplication(
+            main_from_line=45,
+            main_to_line=60,
+            other_locations=[DuplicationLocation(file_path="src/old.py", from_line=100, to_line=115)],
+            anchor_new_line=48,
+        )
+
+        assert res.main_from_line == 45
+        assert res.main_to_line == 60
+        assert res.anchor_new_line == 48
+        assert len(res.other_locations) == 1
+
+    def test_file_review_with_duplications_round_trip(self) -> None:
+        """FileReview serializes and deserializes with all duplication fields."""
+        original = FileReview(
+            file_path="src/main.py",
+            issues=[ReviewIssue(rule="python:S1", message="X", line=5)],
+            duplications=[
+                ReviewDuplication(
+                    from_line=10,
+                    to_line=20,
+                    other_locations=[DuplicationLocation(file_path="src/other.py", from_line=50, to_line=60)],
+                )
+            ],
+            resolved_duplications=[
+                ResolvedDuplication(
+                    main_from_line=30,
+                    main_to_line=40,
+                    other_locations=[DuplicationLocation(file_path="src/third.py", from_line=1, to_line=11)],
+                    anchor_new_line=31,
+                )
+            ],
+        )
+
+        json_str = original.model_dump_json()
+        restored = FileReview.model_validate_json(json_str)
+
+        assert restored.file_path == original.file_path
+        assert len(restored.duplications) == 1
+        assert restored.duplications[0].from_line == 10
+        assert restored.duplications[0].other_locations[0].file_path == "src/other.py"
+        assert len(restored.resolved_duplications) == 1
+        assert restored.resolved_duplications[0].main_from_line == 30
+        assert restored.resolved_duplications[0].anchor_new_line == 31
+
+    def test_file_review_without_duplication_fields_loads_cleanly(self) -> None:
+        """Old FileReview JSON (without duplication fields) loads with empty defaults."""
+        old_json = '{"file_path": "src/file.py", "issues": []}'
+
+        restored = FileReview.model_validate_json(old_json)
+
+        assert restored.file_path == "src/file.py"
+        assert restored.duplications == []
+        assert restored.resolved_duplications == []
+
+    def test_review_result_total_duplications(self) -> None:
+        """ReviewResult.total_duplications counts across all files."""
+        result = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/a.py",
+                    duplications=[ReviewDuplication(from_line=1, to_line=10)],
+                    resolved_duplications=[ResolvedDuplication(main_from_line=20, main_to_line=30, anchor_new_line=22)],
+                ),
+                FileReview(
+                    file_path="src/b.py",
+                    duplications=[
+                        ReviewDuplication(from_line=5, to_line=15),
+                        ReviewDuplication(from_line=40, to_line=50),
+                    ],
+                ),
+            ],
+        )
+
+        assert result.total_duplications == 4  # 1+1 + 2+0
