@@ -142,16 +142,19 @@ class DiffParser:
         # immediately follows newly-added branches). Old lines are never
         # expanded — they need exact line ranges for duplication block matching.
         for lines in new_result.values():
-            if not lines:
-                continue
-            extra: set[int] = set()
-            for ln in lines:
-                if ln + 1 not in lines:
-                    for offset in range(1, _HUNK_TRAILING_LINES + 1):
-                        extra.add(ln + offset)
-            lines.update(extra)
+            lines.update(_expand_trailing_window(lines))
 
         return DiffLines(new_lines=new_result, old_lines=old_result)
+
+
+def _expand_trailing_window(lines: set[int]) -> set[int]:
+    """Return trailing-context line numbers after every cluster end in *lines*."""
+    extra: set[int] = set()
+    for ln in lines:
+        if ln + 1 not in lines:
+            for offset in range(1, _HUNK_TRAILING_LINES + 1):
+                extra.add(ln + offset)
+    return extra
 
 
 _DIFF_HEADER_PREFIXES = (
