@@ -98,15 +98,15 @@ def _render_duplications(duplications: list[ReviewDuplication]) -> list[str]:
     return lines
 
 
-def _render_resolved_duplications(resolved: list[ResolvedDuplication]) -> list[str]:
+def _render_resolved_duplications(resolved: list[ResolvedDuplication], base_branch: str = "main") -> list[str]:
     """Render the resolved duplications section."""
     lines = [
         "### Resolved Duplications - check other instances",
         "",
-        "> You modified lines that were part of a duplicated block in main. "
+        f"> You modified lines that were part of a duplicated block in `{base_branch}`. "
         "The duplication is no longer detected in this branch, but other instances may need updating.",
         "",
-        "| Block in main | Other instances |",
+        f"| Block in `{base_branch}` | Other instances |",
         "|---|---|",
     ]
     for res in resolved:
@@ -116,7 +116,7 @@ def _render_resolved_duplications(resolved: list[ResolvedDuplication]) -> list[s
     return lines
 
 
-def _render_file_section(fr: FileReview) -> list[str]:
+def _render_file_section(fr: FileReview, base_branch: str = "main") -> list[str]:
     """Render a single file's review section."""
     lines = [f"## `{fr.file_path}`", ""]
 
@@ -127,7 +127,7 @@ def _render_file_section(fr: FileReview) -> list[str]:
         lines.extend(_render_duplications(fr.duplications))
 
     if fr.resolved_duplications:
-        lines.extend(_render_resolved_duplications(fr.resolved_duplications))
+        lines.extend(_render_resolved_duplications(fr.resolved_duplications, base_branch))
 
     if not fr.issues and not fr.duplications and not fr.resolved_duplications:
         lines.extend(["No issues.", ""])
@@ -150,6 +150,6 @@ def _write_markdown(result: ReviewResult, path: Path) -> None:
     ]
 
     for fr in result.files:
-        lines.extend(_render_file_section(fr))
+        lines.extend(_render_file_section(fr, result.base_branch))
 
     path.write_text("\n".join(lines), encoding="utf-8")

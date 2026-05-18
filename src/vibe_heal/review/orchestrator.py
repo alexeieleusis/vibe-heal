@@ -198,6 +198,10 @@ class ReviewOrchestrator:
             original_project_key = self.config.sonarqube_project_key
             temp_key = temp_project.project_key
             for file_path in modified_files:
+                # repo_relative is the POSIX repo-root-relative path used for:
+                # - DiffParser map lookups (keys are always repo-root-relative POSIX)
+                # - FileReview.file_path (GitHub requires repo-root-relative paths)
+                repo_relative = self._to_repo_relative(file_path)
                 file_issues, diag = await self._get_filtered_issues(
                     file_path, changed_lines_map, verbose, project_key=temp_key
                 )
@@ -212,7 +216,7 @@ class ReviewOrchestrator:
                 if file_issues or active_dups or resolved_dups:
                     result.files.append(
                         FileReview(
-                            file_path=str(file_path),
+                            file_path=repo_relative,
                             issues=file_issues,
                             duplications=active_dups,
                             resolved_duplications=resolved_dups,
@@ -340,7 +344,7 @@ class ReviewOrchestrator:
         Returns:
             Tuple of (filtered ReviewIssues, FileDiagnostics for this file).
         """
-        file_path_str = str(file_path)
+        file_path_str = file_path.as_posix()
         repo_relative = self._to_repo_relative(file_path)
         changed_lines = changed_lines_map.get(repo_relative, set())
 
@@ -395,11 +399,15 @@ class ReviewOrchestrator:
             diag.active_dup_api_status = "skipped_no_changed_lines"
             return []
 
+        # The temp project is analyzed with project_dir=Path.cwd(), so component
+        # paths are CWD-relative. Using repo_relative (repo-root-relative) would
+        # miss files when running from a monorepo subdirectory.
+        cwd_relative = file_path.as_posix()
         try:
             async with DuplicationClient(
                 self.config.model_copy(update={"sonarqube_project_key": project_key})
             ) as dup_client:
-                response: DuplicationsResponse = await dup_client.get_duplications_for_file(repo_relative)
+                response: DuplicationsResponse = await dup_client.get_duplications_for_file(cwd_relative)
         except ComponentNotFoundError:
             diag.active_dup_api_status = "component_not_found"
             return []
@@ -416,7 +424,7 @@ class ReviewOrchestrator:
         if not response.duplications:
             return []
 
-        component_key = f"{project_key}:{repo_relative}"
+        component_key = f"{project_key}:{cwd_relative}"
         target_ref = response.get_target_file_ref(component_key)
         if target_ref is None:
             return []
@@ -530,11 +538,10 @@ class ReviewOrchestrator:
         if target_ref is None:
             return []
 
-        anchor_new_line = min(new_changed_lines)
         findings: list[ResolvedDuplication] = []
         for group in response.duplications:
             resolved = self._resolve_group(
-                group, target_ref, response, old_changed_lines, active_dup_ranges, anchor_new_line
+                group, target_ref, response, old_changed_lines, active_dup_ranges, new_changed_lines
             )
             if resolved is not None:
                 findings.append(resolved)
@@ -547,7 +554,7 @@ class ReviewOrchestrator:
         response: DuplicationsResponse,
         old_changed_lines: set[int],
         active_dup_ranges: set[tuple[int, int]],
-        anchor_new_line: int,
+        new_changed_lines: set[int],
     ) -> ResolvedDuplication | None:
         target_block = group.get_target_block(target_ref)
         if target_block is None:
@@ -572,6 +579,9 @@ class ReviewOrchestrator:
                     to_line=block.to_line,
                 )
             )
+        # Choose the new-side anchor closest to the block so the GitHub PR comment
+        # is attached near the relevant change rather than an unrelated hunk.
+        anchor_new_line = min(new_changed_lines, key=lambda ln: abs(ln - target_block.from_line))
         return ResolvedDuplication(
             main_from_line=target_block.from_line,
             main_to_line=target_block.to_line,

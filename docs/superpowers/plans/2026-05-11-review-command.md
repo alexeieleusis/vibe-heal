@@ -147,7 +147,7 @@ GitHubReviewClient details:
 - `post_review(pr_number, report)` — builds payload, single `gh api POST /repos/{owner}/{repo}/pulls/{pr}/reviews` call
 - Inline comment body format: `[bold rule] message\n\nRule documentation link`
 - Collects rejected lines (GitHub API 404/422 for line outside diff), posts as fallback top-level comment
-- Parses owner/repo from `gh repo justify owner,name` or git remote URL
+- Parses owner/repo from `gh repo view owner,name` or git remote URL
 
 ---
 
@@ -240,11 +240,11 @@ Without `--post`: run analysis, save report, print summary
 - [x] Fallback top-level comment for rejected lines — Task 5
 - [x] Error handling table scenarios — Tasks 5, 6
 
-**2. Placeholder scan:** `FileDiagnostics` in `models.py` has a `# TODO` comment noting the class is a temporary debug aid. This is intentional scaffolding, not an incomplete implementation.
+**2. Placeholder scan:** `FileDiagnostics` in `models.py` is retained as intentional scaffolding for debugging the diff/SonarQube path mapping pipeline.
 
 **3. Type consistency:**
 - DiffParser returns `dict[str, set[int]]` — used by IssueLineFilter
 - IssueLineFilter returns `list[ReviewIssue]` — used by orchestrator to build FileReview
 - ReviewResult model used by Reporter for serialization and deserialization
-- ReviewOrchestrator.run_analysis returns ReviewResult
+- ReviewOrchestrator.run_analysis returns ReviewAnalysisResult
 - ReviewOrchestrator.run_post takes ReviewResult, delegates to GitHubReviewClient

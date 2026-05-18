@@ -258,9 +258,11 @@ def _parse_diff_line(
         old_result.pop(current_file, None)
         return (None, None, None)
 
-    # Skip file-header lines (+++ b/... / --- a/...) that appear before the first @@.
-    # Plain diff content starting with +++ (e.g. "+++counter") is handled by _parse_content_line.
-    if re.match(r"^(\+\+\+|---) ", line):
+    # Skip git diff file-header lines (+++ b/... / --- a/... / +++ /dev/null)
+    # that appear before the first @@. Use anchored patterns so content lines
+    # whose text starts with '++ ' (shown as '+++ ...' in the diff) fall through
+    # to _parse_content_line and advance the line counters correctly.
+    if re.match(r"^(\+\+\+|---) ([ab]/|/dev/null)", line):
         return (None, None, None)
 
     if line.startswith("@@"):

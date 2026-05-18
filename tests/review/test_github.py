@@ -207,10 +207,17 @@ class TestPostReview:
             side_effect=[mock_git, mock_api],
         )
 
+        # validate_installed uses run_command; return success=True for --version
+        # and success=False for gh repo view to trigger the git-remote fallback.
+        def _run_cmd(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=False)
+
         mocker.patch(
             "vibe_heal.review.github.run_command",
             new_callable=AsyncMock,
-            return_value=mocker.MagicMock(success=False),
+            side_effect=_run_cmd,
         )
 
         client = GitHubReviewClient()

@@ -55,7 +55,7 @@ The two steps are fully decoupled. `--post` reads the saved JSON report and does
 
 ### Changed-Line Detection
 
-Changed lines are determined by **git diff** (primary source of truth), cross-checked against SonarQube's `isNew` flag. The filter uses the git diff result; discrepancies with `isNew` are logged at DEBUG level for observability but do not affect filtering.
+Changed lines are determined by **git diff** (source of truth). The `IssueLineFilter` checks whether each SonarQube issue falls on a changed line; `ReviewIssue.is_new_in_sonar` is present as a field but is always `false` in the current implementation (building the per-line `isNew` map would require an additional SonarQube API call per file and was deferred).
 
 `DiffParser` lives in `src/vibe_heal/git/diff_parser.py` (git module, not review-specific) and returns `dict[str, set[int]]` mapping repo-relative file paths to changed line numbers.
 
@@ -90,9 +90,9 @@ An optional `--report-file` flag overrides the full output path. The JSON report
 
 `DiffParser` class: runs `git diff <base>...HEAD` via GitPython and parses unified diff into `dict[str, set[int]]`.
 
-### No changes to existing modules
+### Changes to existing modules
 
-`cleanup/`, `deduplication/`, `orchestrator.py`, `sonarqube/`, and `git/manager.py` are untouched.
+The PR also modifies: `cli.py` (new `review` command), `git/__init__.py` (DiffParser export), `sonarqube/project_manager.py` (exclusion-settings copy), and `ai_tools/opencode.py` (timeout update). The `cleanup/` and `deduplication/` orchestrators are untouched.
 
 ## Models
 

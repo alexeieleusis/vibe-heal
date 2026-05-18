@@ -568,12 +568,14 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         result: ReviewAnalysisResult from the orchestrator.
     """
     total_issues = result.total_issues
+    total_duplications = result.total_duplications
     files_checked = result.files_analyzed
 
     console.print("\n[bold]Review Summary:[/bold]")
     console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
     console.print(f"  Files checked: {files_checked}")
     console.print(f"  [green]Total issues: {total_issues}[/green]")
+    console.print(f"  [green]Duplication findings: {total_duplications}[/green]")
 
     if result.files:
         console.print("\n[bold]Per-File Breakdown:[/bold]")
@@ -581,11 +583,13 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         table.add_column("File", style="cyan")
         table.add_column("Issues", justify="right")
         table.add_column("Highest Severity", justify="right")
+        table.add_column("Duplications", justify="right")
 
         severity_order = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
 
         for file_review in result.files:
             issue_count = len(file_review.issues)
+            dup_count = len(file_review.duplications) + len(file_review.resolved_duplications)
             if issue_count > 0:
                 highest_severity = min(
                     (issue.severity for issue in file_review.issues),
@@ -593,10 +597,10 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
                 )
             else:
                 highest_severity = "N/A"
-            table.add_row(file_review.file_path, str(issue_count), highest_severity)
+            table.add_row(file_review.file_path, str(issue_count), highest_severity, str(dup_count))
 
         console.print(table)
-    elif total_issues == 0:
+    elif total_issues == 0 and total_duplications == 0:
         console.print("\n[green]No issues found on changed lines.[/green]")
 
     if result.report_file:
@@ -715,6 +719,9 @@ def _review_post_mode(
                 verbose=verbose,
             )
         )
+    except NoOpenPrError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         sys.exit(1)

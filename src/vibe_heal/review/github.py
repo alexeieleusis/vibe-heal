@@ -83,8 +83,10 @@ class GitHubReviewClient:
             report: The SonarQube review result containing issues.
 
         Raises:
+            OSError: If gh CLI is not installed.
             GitHubReviewError: If both the inline review and fallback fail.
         """
+        await self.validate_installed()
         owner_repo = await self._get_owner_repo()
         payload = self._build_payload(report)
 
@@ -154,8 +156,9 @@ class GitHubReviewClient:
                 other = "\n".join(
                     f"- `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations
                 )
+                base_branch = report.base_branch
                 body = (
-                    f"**Possible missed update** - lines {res.main_from_line}-{res.main_to_line} in `main` were duplicated.\n\n"
+                    f"**Possible missed update** - lines {res.main_from_line}-{res.main_to_line} in `{base_branch}` were duplicated.\n\n"
                     "You modified this region. The duplication may be resolved here, but check the other instances:\n\n"
                     f"{other}"
                 )
@@ -294,7 +297,12 @@ class GitHubReviewClient:
             return None
 
         # HTTPS format: https://host/owner/repo.git
+        # Only parse GitHub-hosted remotes — for other forges the subsequent
+        # gh api call would fail regardless, and we don't want to accidentally
+        # resolve an owner/repo pair against the wrong host.
         parsed = urlparse(remote_url)
+        if "github" not in parsed.netloc:
+            return None
         path = parsed.path
         # Remove leading slash and trailing .git
         path = path.strip("/").removesuffix(".git")

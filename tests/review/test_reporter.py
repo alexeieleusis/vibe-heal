@@ -54,10 +54,11 @@ class TestDefaultReportDir:
 
     def test_returns_path_with_project_and_branch(self) -> None:
         result = default_report_dir("my-project", "feature/x")
-        assert "vibe-heal" in str(result)
-        assert "reviews" in str(result)
-        assert "my-project" in str(result)
-        assert "feature/x" in str(result)
+        posix = result.as_posix()
+        assert "vibe-heal" in posix
+        assert "reviews" in posix
+        assert "my-project" in posix
+        assert "feature/x" in posix
 
     def test_expands_tilde_home(self) -> None:
         result = default_report_dir("proj", "main")
