@@ -568,7 +568,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         result: ReviewAnalysisResult from the orchestrator.
     """
     total_issues = result.total_issues
-    files_checked = len(result.files)
+    files_checked = result.files_analyzed
 
     console.print("\n[bold]Review Summary:[/bold]")
     console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
@@ -628,6 +628,10 @@ async def _run_review(
             verbose=verbose,
         )
         _display_review_results(result)
+        if not result.success:
+            if result.error_message:
+                console.print(f"[red]{result.error_message}[/red]")
+            sys.exit(1)
 
 
 async def _run_review_post(

@@ -85,14 +85,13 @@ class TestDetectPr:
     @pytest.mark.asyncio
     async def test_raises_when_not_authenticated(self, mocker) -> None:
         """detect_pr raises GitHubReviewError when gh is not authenticated."""
-        mocker.patch(
-            "vibe_heal.review.github.run_command",
-            new_callable=AsyncMock,
-            return_value=mocker.MagicMock(
-                success=False,
-                stderr="error: you are not authenticated",
-            ),
-        )
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=False, stderr="error: you are not authenticated")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
 
         client = GitHubReviewClient()
         with pytest.raises(GitHubReviewError, match="authenticated"):

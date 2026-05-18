@@ -22,10 +22,9 @@ from vibe_heal.review.models import (
     ReviewResult,
 )
 from vibe_heal.review.reporter import (
-    _write_json,
-    _write_markdown,
     default_report_dir,
     load_report_from_path,
+    write_report_to_file,
 )
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
@@ -43,6 +42,7 @@ class ReviewAnalysisResult(BaseModel):
     branch: str = ""
     base_branch: str = ""
     files: list[FileReview] = Field(default_factory=list)
+    files_analyzed: int = 0
     diagnostics: list[FileDiagnostics] = Field(default_factory=list)
     diff_files_found: int = 0
     diff_map_keys: list[str] = Field(default_factory=list)
@@ -193,6 +193,7 @@ class ReviewOrchestrator:
             console.print("[dim]Analysis completed successfully.[/dim]")
 
             # Step 6: Fetch issues and duplications for each file, filter to changed lines
+            result.files_analyzed = len(modified_files)
             original_project_key = self.config.sonarqube_project_key
             temp_key = temp_project.project_key
             for file_path in modified_files:
@@ -262,10 +263,21 @@ class ReviewOrchestrator:
         # Step 1: Load report
         console.print(f"[dim]Loading report from {report_file}...[/dim]")
         report = load_report_from_path(report_file)
+        if verbose:
+            console.print(
+                f"[dim]  Report: branch={report.branch}, "
+                f"{report.total_issues} issue(s), {len(report.files)} file(s)[/dim]"
+            )
 
         # Step 2: Detect PR number
-        pr = pr_number if pr_number is not None else await self.github_client.detect_pr()
-        console.print(f"[dim]Posting review to PR #{pr}...[/dim]")
+        if pr_number is not None:
+            pr = pr_number
+            if verbose:
+                console.print(f"[dim]  Using explicit PR #{pr}[/dim]")
+        else:
+            pr = await self.github_client.detect_pr()
+            if verbose:
+                console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
 
         # Step 3: Post review
         await self.github_client.post_review(pr, report)
@@ -625,9 +637,6 @@ class ReviewOrchestrator:
         if report_file is None:
             return
 
-        report_dir = report_file.parent
-        report_dir.mkdir(parents=True, exist_ok=True)
-
         review_result = ReviewResult(
             project_key=result.project_key,
             branch=result.branch,
@@ -639,7 +648,6 @@ class ReviewOrchestrator:
             diff_output_sample=result.diff_output_sample,
         )
 
-        _write_json(review_result, report_file)
+        write_report_to_file(review_result, report_file)
         md_path = report_file.parent / (report_file.stem + ".md")
-        _write_markdown(review_result, md_path)
         console.print(f"[dim]Reports written to {report_file} and {md_path}[/dim]")

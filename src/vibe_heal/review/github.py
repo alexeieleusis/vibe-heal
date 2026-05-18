@@ -45,11 +45,13 @@ class GitHubReviewClient:
             The PR number.
 
         Raises:
+            OSError: If gh CLI is not installed.
             NoOpenPrError: If no open PR exists for the current branch.
             GitHubReviewError: If auto-detection fails for other reasons.
         """
         if pr_number is not None:
             return pr_number
+        await self.validate_installed()
 
         result = await run_command(
             ["gh", "pr", "view", "--json", "number"],
@@ -156,10 +158,10 @@ class GitHubReviewClient:
                     "side": "RIGHT",
                     "body": body,
                 })
-        return {
-            "event": "COMMENT",
-            "comments": comments,
-        }
+        payload: dict[str, Any] = {"event": "COMMENT", "comments": comments}
+        if not comments:
+            payload["body"] = "No issues found on changed lines."
+        return payload
 
     def _build_fallback_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build a fallback payload with a top-level summary comment."""

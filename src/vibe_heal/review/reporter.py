@@ -25,6 +25,16 @@ def write_reports(result: ReviewResult, report_dir: Path) -> None:
     _write_markdown(result, report_dir / "review.md")
 
 
+def write_report_to_file(result: ReviewResult, json_path: Path) -> None:
+    """Write review JSON to an exact path and markdown alongside it (same stem, .md).
+
+    Creates the parent directory if it doesn't exist.
+    """
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(result, json_path)
+    _write_markdown(result, json_path.parent / (json_path.stem + ".md"))
+
+
 def load_report(report_dir: Path) -> ReviewResult:
     """Load a ReviewResult from review.json in the given directory."""
     json_path = report_dir / "review.json"

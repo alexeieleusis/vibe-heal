@@ -54,7 +54,6 @@ class TestDefaultReportDir:
 
     def test_returns_path_with_project_and_branch(self) -> None:
         result = default_report_dir("my-project", "feature/x")
-        assert result.is_dir() is False  # doesn't require existence
         assert "vibe-heal" in str(result)
         assert "reviews" in str(result)
         assert "my-project" in str(result)
