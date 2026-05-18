@@ -635,29 +635,94 @@ async def _run_review(
 
 
 async def _run_review_post(
-    config: VibeHealConfig,
-    report_file: Path | None,
+    report_file: Path,
     pr_number: int | None,
     verbose: bool,
 ) -> None:
-    """Run review post workflow.
+    """Run review post workflow (no SonarQube config needed).
+
+    Loads a previously saved report and posts it to GitHub PR.
 
     Args:
-        config: Configuration object.
-        report_file: Optional path override for the report; None uses the default.
+        report_file: Path to the saved review.json file.
         pr_number: Optional explicit PR number.
         verbose: Enable verbose output.
     """
-    async with SonarQubeClient(config) as client:
-        orchestrator = ReviewOrchestrator(config, client)
-        if report_file is None:
-            branch = orchestrator.branch_analyzer.get_current_branch()
-            report_file = default_report_dir(config.sonarqube_project_key, branch) / "review.json"
-        await orchestrator.run_post(
-            report_file=report_file,
-            pr_number=pr_number,
-            verbose=verbose,
+    from vibe_heal.review.github import GitHubReviewClient
+    from vibe_heal.review.reporter import load_report_from_path
+
+    github_client = GitHubReviewClient()
+    report = load_report_from_path(report_file)
+    if verbose:
+        console.print(
+            f"[dim]  Report: branch={report.branch}, {report.total_issues} issue(s), {len(report.files)} file(s)[/dim]"
         )
+
+    if pr_number is not None:
+        pr = pr_number
+        if verbose:
+            console.print(f"[dim]  Using explicit PR #{pr}[/dim]")
+    else:
+        pr = await github_client.detect_pr()
+        if verbose:
+            console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
+
+    await github_client.post_review(pr, report)
+    console.print(
+        f"[green]Posted {report.total_issues} issue(s) and "
+        f"{report.total_duplications} duplication finding(s) "
+        f"as review comments on PR #{pr}.[/green]"
+    )
+
+
+def _review_post_mode(
+    report_file: Path | None,
+    pr_number: int | None,
+    env_file: str | None,
+    verbose: bool,
+) -> None:
+    """Handle the --post branch of the review command.
+
+    Loads a previously saved report and posts it to a GitHub PR.
+    SonarQube config is only required to determine the default report path;
+    pass ``--report-file`` to skip the config lookup entirely.
+
+    Args:
+        report_file: Path to the saved report. If None, derive from config.
+        pr_number: Explicit PR number (None = auto-detect).
+        env_file: Optional path to a custom env file (for config loading).
+        verbose: Enable verbose output.
+    """
+    try:
+        if report_file is None:
+            from vibe_heal.git.branch_analyzer import BranchAnalyzer
+
+            branch = BranchAnalyzer(Path.cwd()).get_current_branch()
+            try:
+                _cfg = VibeHealConfig(env_file=env_file)
+                report_file = default_report_dir(_cfg.sonarqube_project_key, branch) / "review.json"
+            except Exception:
+                console.print(
+                    "[red]Cannot determine default report path: no SonarQube config found. "
+                    "Pass --report-file to specify the report location.[/red]"
+                )
+                sys.exit(1)
+
+        asyncio.run(
+            _run_review_post(
+                report_file=report_file,
+                pr_number=pr_number,
+                verbose=verbose,
+            )
+        )
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
 
 
 @app.command()
@@ -708,28 +773,22 @@ def review(
     """
     setup_logging(verbose)
 
+    if post:
+        _review_post_mode(report_file=report_file, pr_number=pr_number, env_file=env_file, verbose=verbose)
+        return
+
     try:
         config = VibeHealConfig(env_file=env_file)
 
-        if post:
-            asyncio.run(
-                _run_review_post(
-                    config=config,
-                    report_file=report_file,
-                    pr_number=pr_number,
-                    verbose=verbose,
-                )
+        asyncio.run(
+            _run_review(
+                config=config,
+                base_branch=base_branch,
+                file_patterns=file_patterns,
+                report_file=report_file,
+                verbose=verbose,
             )
-        else:
-            asyncio.run(
-                _run_review(
-                    config=config,
-                    base_branch=base_branch,
-                    file_patterns=file_patterns,
-                    report_file=report_file,
-                    verbose=verbose,
-                )
-            )
+        )
 
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")

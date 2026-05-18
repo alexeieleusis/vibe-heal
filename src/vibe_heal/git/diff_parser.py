@@ -26,6 +26,13 @@ class DiffLines:
     """Added/modified lines in HEAD (with trailing-context expansion)."""
     old_lines: dict[str, set[int]]
     """Removed/modified lines in the base (no trailing-context expansion)."""
+    strict_new_lines: dict[str, set[int]] = dataclasses.field(default_factory=dict)
+    """Added/modified lines in HEAD (strict, no trailing-context expansion).
+
+    Use this for intersection checks that must not fire on context-only lines
+    (e.g. duplication block matching), where the expanded set would produce
+    false positives.
+    """
 
 
 class DiffParser:
@@ -119,7 +126,8 @@ class DiffParser:
             diff_output: Raw unified diff string.
 
         Returns:
-            DiffLines with new_lines (with trailing context) and old_lines (exact).
+            DiffLines with new_lines (with trailing context), strict_new_lines
+            (exact, no expansion), and old_lines (exact).
         """
         new_result: dict[str, set[int]] = {}
         old_result: dict[str, set[int]] = {}
@@ -138,6 +146,11 @@ class DiffParser:
             if old_counter is not None:
                 old_line = old_counter
 
+        # Take a copy of the strict new lines before expansion — these are used
+        # for duplication intersection checks where trailing-context lines should
+        # not trigger a false positive.
+        strict_new_result: dict[str, set[int]] = {k: set(v) for k, v in new_result.items()}
+
         # Expand new_lines with a trailing window after every cluster end.
         # SonarQube can flag issues on the first unchanged line after an
         # insertion (e.g. a nested-ternary violation on the code that
@@ -146,7 +159,7 @@ class DiffParser:
         for lines in new_result.values():
             lines.update(_expand_trailing_window(lines))
 
-        return DiffLines(new_lines=new_result, old_lines=old_result)
+        return DiffLines(new_lines=new_result, old_lines=old_result, strict_new_lines=strict_new_result)
 
 
 def _expand_trailing_window(lines: set[int]) -> set[int]:
@@ -193,6 +206,30 @@ def _parse_hunk_header(
     return (None, new_line, old_line)
 
 
+def _parse_content_line(
+    line: str,
+    current_file: str,
+    new_line: int,
+    old_line: int,
+    result: dict[str, set[int]],
+    old_result: dict[str, set[int]],
+) -> tuple[str | None, int | None, int | None]:
+    """Process a +/-/context line within a known hunk.
+
+    Returns:
+        Tuple of (None, updated_new_line, updated_old_line). None means no change.
+    """
+    if line.startswith("+"):
+        result[current_file].add(new_line)
+        return (None, new_line + 1, None)
+    if line.startswith("-"):
+        old_result[current_file].add(old_line)
+        return (None, None, old_line + 1)
+    if line.startswith(" "):
+        return (None, new_line + 1, old_line + 1)
+    return (None, None, None)
+
+
 def _parse_diff_line(
     line: str,
     current_file: str | None,
@@ -208,9 +245,10 @@ def _parse_diff_line(
         None in any position means no change to that field.
     """
     if line.startswith("diff --git "):
-        parts = line.split(" ")
-        new_path = parts[3]
-        return (new_path[2:] if new_path.startswith("b/") else new_path, None, None)
+        # Format is: diff --git a/<path> b/<path>
+        # Using a regex with the anchored b/ prefix avoids breaking on filenames with spaces.
+        match = re.search(r" b/(.+)$", line)
+        return (match.group(1) if match else None, None, None)
 
     if current_file is None or line.startswith(_DIFF_HEADER_PREFIXES):
         return (None, None, None)
@@ -220,7 +258,9 @@ def _parse_diff_line(
         old_result.pop(current_file, None)
         return (None, None, None)
 
-    if line.startswith(("+++", "---")):
+    # Skip file-header lines (+++ b/... / --- a/...) that appear before the first @@.
+    # Plain diff content starting with +++ (e.g. "+++counter") is handled by _parse_content_line.
+    if re.match(r"^(\+\+\+|---) ", line):
         return (None, None, None)
 
     if line.startswith("@@"):
@@ -229,13 +269,4 @@ def _parse_diff_line(
     if current_file not in result:
         return (None, None, None)
 
-    if line.startswith("+"):
-        result[current_file].add(new_line)
-        return (None, new_line + 1, None)
-    if line.startswith("-"):
-        old_result[current_file].add(old_line)
-        return (None, None, old_line + 1)
-    if line.startswith(" "):
-        return (None, new_line + 1, old_line + 1)
-
-    return (None, None, None)
+    return _parse_content_line(line, current_file, new_line, old_line, result, old_result)

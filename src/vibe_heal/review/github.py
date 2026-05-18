@@ -30,7 +30,11 @@ class GitHubReviewClient:
         Raises:
             OSError: If gh is not installed or not in PATH.
         """
-        result = await run_command(["gh", "--version"], timeout=10)
+        try:
+            result = await run_command(["gh", "--version"], timeout=10)
+        except (FileNotFoundError, OSError) as exc:
+            msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
+            raise OSError(msg) from exc
         if not result.success:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg)
@@ -137,9 +141,12 @@ class GitHubReviewClient:
                     f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n"
                     f"This block is duplicated in: {locations}"
                 )
+                # Use anchor_line (a changed line in the diff) so the GitHub API
+                # accepts the comment; fall back to from_line for older reports.
+                anchor = dup.anchor_line if dup.anchor_line is not None else dup.from_line
                 comments.append({
                     "path": file_review.file_path,
-                    "line": dup.from_line,
+                    "line": anchor,
                     "side": "RIGHT",
                     "body": body,
                 })
@@ -188,8 +195,22 @@ class GitHubReviewClient:
             "comments": [],
         }
 
-    async def _post_json(self, cmd: list[str], payload: dict[str, Any]) -> None:
-        """Post JSON data to a gh API endpoint via stdin."""
+    async def _post_json(
+        self,
+        cmd: list[str],
+        payload: dict[str, Any],
+        timeout: int = 60,
+    ) -> None:
+        """Post JSON data to a gh API endpoint via stdin.
+
+        Args:
+            cmd: Command to run (must accept JSON on stdin).
+            payload: JSON-serialisable payload to send.
+            timeout: Timeout in seconds (default 60).
+
+        Raises:
+            GitHubReviewError: If the command fails or times out.
+        """
         stdin_data = json.dumps(payload).encode()
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -197,9 +218,20 @@ class GitHubReviewClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await process.communicate(stdin_data)
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(stdin_data),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise GitHubReviewError(f"gh API call timed out after {timeout}s") from None
         if process.returncode != 0:
-            error_msg = stderr.decode().strip() or "Unknown error"
+            stderr_msg = stderr_bytes.decode().strip()
+            stdout_msg = stdout_bytes.decode().strip()
+            # GitHub sometimes returns the error body via stdout instead of stderr
+            error_msg = stderr_msg or stdout_msg or "Unknown error"
             raise GitHubReviewError(error_msg)
 
     async def _get_owner_repo(self) -> str:
@@ -253,8 +285,10 @@ class GitHubReviewClient:
             'owner/repo' string or None if unparseable.
         """
         # SSH format: git@host:owner/repo.git
+        # The repo name may contain dots (e.g. org/my.repo), so we only strip
+        # a trailing .git suffix rather than excluding dots from the capture.
         if remote_url.startswith("git@"):
-            match = re.search(r":([^/]+)/([^/.]+?)(?:\.git)?$", remote_url)
+            match = re.search(r":([^/]+)/(.+?)(?:\.git)?$", remote_url)
             if match:
                 return f"{match.group(1)}/{match.group(2)}"
             return None

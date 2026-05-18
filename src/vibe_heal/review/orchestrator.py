@@ -163,6 +163,7 @@ class ReviewOrchestrator:
             diff_lines = self.diff_parser.get_diff_lines(base_branch)
             changed_lines_map = diff_lines.new_lines
             old_changed_lines_map = diff_lines.old_lines
+            strict_new_lines_map = diff_lines.strict_new_lines
             result.diff_files_found = len(changed_lines_map)
             result.diff_map_keys = sorted(changed_lines_map.keys())
             raw_diff = self.diff_parser.get_raw_diff(base_branch)
@@ -201,7 +202,7 @@ class ReviewOrchestrator:
                     file_path, changed_lines_map, verbose, project_key=temp_key
                 )
                 active_dups = await self._get_active_duplications(
-                    file_path, changed_lines_map, diag, project_key=temp_key
+                    file_path, strict_new_lines_map, diag, project_key=temp_key
                 )
                 active_ranges = {(d.from_line, d.to_line) for d in active_dups}
                 resolved_dups = await self._get_resolved_duplications(
@@ -281,7 +282,11 @@ class ReviewOrchestrator:
 
         # Step 3: Post review
         await self.github_client.post_review(pr, report)
-        console.print(f"[green]Posted {report.total_issues} issue(s) as review comments on PR #{pr}.[/green]")
+        console.print(
+            f"[green]Posted {report.total_issues} issue(s) and "
+            f"{report.total_duplications} duplication finding(s) "
+            f"as review comments on PR #{pr}.[/green]"
+        )
 
     async def _create_temp_project(self) -> TempProjectMetadata:
         """Create temporary SonarQube project for analysis.
@@ -437,8 +442,12 @@ class ReviewOrchestrator:
         if target_block is None:
             return None
         block_lines = set(range(target_block.from_line, target_block.to_line + 1))
-        if not block_lines & new_changed_lines:
+        changed_in_block = block_lines & new_changed_lines
+        if not changed_in_block:
             return None
+        # Use the lowest changed line in the block as the anchor so the GitHub
+        # PR comment is attached to a line that is actually in the diff.
+        anchor_line = min(changed_in_block)
         other_locations = []
         for block in group.get_other_blocks(target_ref):
             file_info = response.get_file_info(block.ref)
@@ -455,6 +464,7 @@ class ReviewOrchestrator:
         return ReviewDuplication(
             from_line=target_block.from_line,
             to_line=target_block.to_line,
+            anchor_line=anchor_line,
             other_locations=other_locations,
         )
 
@@ -545,7 +555,9 @@ class ReviewOrchestrator:
         block_lines = set(range(target_block.from_line, target_block.to_line + 1))
         if not block_lines & old_changed_lines:
             return None
-        if (target_block.from_line, target_block.to_line) in active_dup_ranges:
+        # Suppress if any active dup range overlaps this block (line shifts mean
+        # the ranges are unlikely to match exactly after edits).
+        if any(a_from <= target_block.to_line and a_to >= target_block.from_line for a_from, a_to in active_dup_ranges):
             return None
         other_locations = []
         for block in group.get_other_blocks(target_ref):
@@ -596,11 +608,11 @@ class ReviewOrchestrator:
         try:
             repo_root = Path(self.branch_analyzer.repo.working_dir)
             if file_path.is_absolute():
-                return str(file_path.relative_to(repo_root))
+                return file_path.relative_to(repo_root).as_posix()
             resolved = (Path.cwd() / file_path).resolve()
-            return str(resolved.relative_to(repo_root.resolve()))
+            return resolved.relative_to(repo_root.resolve()).as_posix()
         except (ValueError, TypeError):
-            return str(file_path)
+            return file_path.as_posix()
 
     def _filter_files(
         self,
@@ -642,6 +654,7 @@ class ReviewOrchestrator:
             branch=result.branch,
             base_branch=result.base_branch,
             files=result.files,
+            files_analyzed=result.files_analyzed,
             diagnostics=result.diagnostics,
             diff_files_found=result.diff_files_found,
             diff_map_keys=result.diff_map_keys,

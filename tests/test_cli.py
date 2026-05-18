@@ -818,93 +818,70 @@ class TestReviewCommand:
         assert "Per-File Breakdown" in result.stdout
         assert "src/test.py" in result.stdout
 
-    @patch("vibe_heal.cli.SonarQubeClient")
-    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.review.github.GitHubReviewClient.post_review", new_callable=AsyncMock)
+    @patch("vibe_heal.review.github.GitHubReviewClient.detect_pr", new_callable=AsyncMock)
+    @patch("vibe_heal.review.reporter.load_report_from_path")
     @patch("vibe_heal.cli.VibeHealConfig")
     def test_review_post_basic(
         self,
         mock_config_class: MagicMock,
-        mock_orchestrator_class: MagicMock,
-        mock_client_class: MagicMock,
+        mock_load_report: MagicMock,
+        mock_detect_pr: AsyncMock,
+        mock_post_review: AsyncMock,
     ) -> None:
         """Test review command in post mode."""
         mock_config = MagicMock(spec=VibeHealConfig)
         mock_config.sonarqube_project_key = "test-project"
         mock_config_class.return_value = mock_config
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_report = MagicMock()
+        mock_report.total_issues = 2
+        mock_report.total_duplications = 0
+        mock_report.branch = "feature-test"
+        mock_report.files = []
+        mock_load_report.return_value = mock_report
+        mock_detect_pr.return_value = 10
 
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_orchestrator.run_post = AsyncMock(return_value=None)
-        mock_orchestrator_class.return_value = mock_orchestrator
-
-        result = runner.invoke(app, ["review", "--post"])
+        # Pass --report-file so config lookup is skipped
+        result = runner.invoke(app, ["review", "--post", "--report-file", "/nonexistent/review.json"])
 
         assert result.exit_code == 0
-        mock_orchestrator.run_post.assert_called_once()
-        mock_orchestrator.run_analysis.assert_not_called()
+        mock_detect_pr.assert_called_once()
+        mock_post_review.assert_called_once()
 
-    @patch("vibe_heal.cli.SonarQubeClient")
-    @patch("vibe_heal.cli.ReviewOrchestrator")
-    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.review.github.GitHubReviewClient.post_review", new_callable=AsyncMock)
+    @patch("vibe_heal.review.github.GitHubReviewClient.detect_pr", new_callable=AsyncMock)
+    @patch("vibe_heal.review.reporter.load_report_from_path")
     def test_review_post_with_pr_number(
         self,
-        mock_config_class: MagicMock,
-        mock_orchestrator_class: MagicMock,
-        mock_client_class: MagicMock,
+        mock_load_report: MagicMock,
+        mock_detect_pr: AsyncMock,
+        mock_post_review: AsyncMock,
     ) -> None:
         """Test review command in post mode with explicit PR number."""
-        mock_config = MagicMock(spec=VibeHealConfig)
-        mock_config.sonarqube_project_key = "test-project"
-        mock_config_class.return_value = mock_config
+        mock_report = MagicMock()
+        mock_report.total_issues = 1
+        mock_report.total_duplications = 0
+        mock_report.branch = "feature-test"
+        mock_report.files = []
+        mock_load_report.return_value = mock_report
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
-
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_orchestrator.run_post = AsyncMock(return_value=None)
-        mock_orchestrator_class.return_value = mock_orchestrator
-
-        result = runner.invoke(app, ["review", "--post", "--pr", "42"])
+        result = runner.invoke(app, ["review", "--post", "--pr", "42", "--report-file", "/nonexistent/review.json"])
 
         assert result.exit_code == 0
-        call_kwargs = mock_orchestrator.run_post.call_args.kwargs
-        assert call_kwargs["pr_number"] == 42
+        # detect_pr should not be called when explicit PR number is given
+        mock_detect_pr.assert_not_called()
+        mock_post_review.assert_called_once()
 
-    @patch("vibe_heal.cli.SonarQubeClient")
-    @patch("vibe_heal.cli.ReviewOrchestrator")
-    @patch("vibe_heal.cli.VibeHealConfig")
+    @patch("vibe_heal.review.reporter.load_report_from_path")
     def test_review_report_not_found(
         self,
-        mock_config_class: MagicMock,
-        mock_orchestrator_class: MagicMock,
-        mock_client_class: MagicMock,
+        mock_load_report: MagicMock,
     ) -> None:
         """Test review command handles missing report file."""
-        mock_config = MagicMock(spec=VibeHealConfig)
-        mock_config.sonarqube_project_key = "test-project"
-        mock_config_class.return_value = mock_config
+        mock_load_report.side_effect = FileNotFoundError("Cannot read report file: /path/to/review.json")
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
-
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.branch_analyzer.get_current_branch.return_value = "feature-test"
-        mock_orchestrator.run_post = AsyncMock(
-            side_effect=FileNotFoundError("Cannot read report file: /path/to/review.json")
-        )
-        mock_orchestrator_class.return_value = mock_orchestrator
-
-        result = runner.invoke(app, ["review", "--post"])
+        result = runner.invoke(app, ["review", "--post", "--report-file", "/path/to/review.json"])
 
         assert result.exit_code == 1
         assert "Cannot read report file" in result.stdout

@@ -17,7 +17,11 @@ class ReviewIssue(BaseModel):
     doc_url: str | None = Field(default=None, description="Link to rule documentation")
     is_new_in_sonar: bool = Field(
         default=False,
-        description="Whether this issue is new code per SonarQube",
+        description=(
+            "Whether this issue is new code per SonarQube. "
+            "Currently always False — the source-line 'isNew' map is not fetched "
+            "during filtering and no source_is_new_map is passed to filter_issues()."
+        ),
     )
 
 
@@ -38,6 +42,13 @@ class ReviewDuplication(BaseModel):
 
     from_line: int = Field(description="First line of the duplicated block in this file")
     to_line: int = Field(description="Last line of the duplicated block in this file")
+    anchor_line: int | None = Field(
+        default=None,
+        description=(
+            "First changed line within the duplicated block, used as the GitHub PR comment anchor. "
+            "Falls back to from_line when not set (for backwards-compatible deserialized reports)."
+        ),
+    )
     other_locations: list[DuplicationLocation] = Field(
         default_factory=list,
         description="Other files/lines where this block is duplicated",
@@ -147,6 +158,10 @@ class ReviewResult(BaseModel):
         description="Timestamp when the review was generated",
     )
     files: list[FileReview] = Field(default_factory=list, description="Per-file review results")
+    files_analyzed: int = Field(
+        default=0,
+        description="Total number of modified files that were analyzed (including files with no findings)",
+    )
     diagnostics: list[FileDiagnostics] = Field(
         default_factory=list,
         description="Per-file diagnostic data for debugging line-filter behaviour",

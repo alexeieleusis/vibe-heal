@@ -144,7 +144,7 @@ def _write_markdown(result: ReviewResult, path: Path) -> None:
         (
             f"**Total issues: {result.total_issues}** | "
             f"**Duplication findings: {result.total_duplications}** | "
-            f"**Files checked: {len(result.files)}**"
+            f"**Files checked: {result.files_analyzed or len(result.files)}**"
         ),
         "",
     ]

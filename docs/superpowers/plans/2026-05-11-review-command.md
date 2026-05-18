@@ -240,7 +240,7 @@ Without `--post`: run analysis, save report, print summary
 - [x] Fallback top-level comment for rejected lines — Task 5
 - [x] Error handling table scenarios — Tasks 5, 6
 
-**2. Placeholder scan:** No "TBD", "TODO", "implement later" patterns found.
+**2. Placeholder scan:** `FileDiagnostics` in `models.py` has a `# TODO` comment noting the class is a temporary debug aid. This is intentional scaffolding, not an incomplete implementation.
 
 **3. Type consistency:**
 - DiffParser returns `dict[str, set[int]]` — used by IssueLineFilter
