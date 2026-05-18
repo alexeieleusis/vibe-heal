@@ -41,6 +41,7 @@ VERBOSE_OUTPUT_HELP = "Verbose output"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
 AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
 FILE_PATTERN_HELP = "File patterns to filter (e.g., '*.py', 'src/**/*.ts')"
+BASE_BRANCH_HELP = "Base branch to compare against"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -335,7 +336,7 @@ def cleanup(
         "origin/main",
         "--base-branch",
         "-b",
-        help="Base branch to compare against",
+        help=BASE_BRANCH_HELP,
     ),
     max_iterations: int = typer.Option(
         10,
@@ -478,7 +479,7 @@ def dedupe_branch(
         "origin/main",
         "--base-branch",
         "-b",
-        help="Base branch to compare against",
+        help=BASE_BRANCH_HELP,
     ),
     max_iterations: int = typer.Option(
         10,
@@ -668,7 +669,7 @@ def review(
         "origin/main",
         "--base-branch",
         "-b",
-        help="Base branch to compare against",
+        help=BASE_BRANCH_HELP,
     ),
     file_patterns: list[str] | None = typer.Option(
         None,
