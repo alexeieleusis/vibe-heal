@@ -36,6 +36,9 @@ console = Console()
 # Error messages
 NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[/red]"
 
+# Default values
+DEFAULT_BASE_BRANCH = "origin/main"
+
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
@@ -333,7 +336,7 @@ async def _run_cleanup(
 @app.command()
 def cleanup(
     base_branch: str = typer.Option(
-        "origin/main",
+        DEFAULT_BASE_BRANCH,
         "--base-branch",
         "-b",
         help=BASE_BRANCH_HELP,
@@ -476,7 +479,7 @@ async def _run_dedupe_branch(
 @app.command()
 def dedupe_branch(
     base_branch: str = typer.Option(
-        "origin/main",
+        DEFAULT_BASE_BRANCH,
         "--base-branch",
         "-b",
         help=BASE_BRANCH_HELP,
@@ -666,7 +669,7 @@ def review(
         help="GitHub PR number (override auto-detection)",
     ),
     base_branch: str = typer.Option(
-        "origin/main",
+        DEFAULT_BASE_BRANCH,
         "--base-branch",
         "-b",
         help=BASE_BRANCH_HELP,
