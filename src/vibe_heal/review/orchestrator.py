@@ -194,32 +194,30 @@ class ReviewOrchestrator:
 
             # Step 6: Fetch issues and duplications for each file, filter to changed lines
             original_project_key = self.config.sonarqube_project_key
-            self.config.sonarqube_project_key = temp_project.project_key
-            self.client.config.sonarqube_project_key = temp_project.project_key
-
-            try:
-                for file_path in modified_files:
-                    file_issues, diag = await self._get_filtered_issues(file_path, changed_lines_map, verbose)
-                    active_dups = await self._get_active_duplications(file_path, changed_lines_map, diag)
-                    active_ranges = {(d.from_line, d.to_line) for d in active_dups}
-                    resolved_dups = await self._get_resolved_duplications(
-                        file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key, diag
-                    )
-                    result.diagnostics.append(diag)
-                    if file_issues or active_dups or resolved_dups:
-                        result.files.append(
-                            FileReview(
-                                file_path=str(file_path),
-                                issues=file_issues,
-                                duplications=active_dups,
-                                resolved_duplications=resolved_dups,
-                            )
+            temp_key = temp_project.project_key
+            for file_path in modified_files:
+                file_issues, diag = await self._get_filtered_issues(
+                    file_path, changed_lines_map, verbose, project_key=temp_key
+                )
+                active_dups = await self._get_active_duplications(
+                    file_path, changed_lines_map, diag, project_key=temp_key
+                )
+                active_ranges = {(d.from_line, d.to_line) for d in active_dups}
+                resolved_dups = await self._get_resolved_duplications(
+                    file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key, diag
+                )
+                result.diagnostics.append(diag)
+                if file_issues or active_dups or resolved_dups:
+                    result.files.append(
+                        FileReview(
+                            file_path=str(file_path),
+                            issues=file_issues,
+                            duplications=active_dups,
+                            resolved_duplications=resolved_dups,
                         )
-                    elif verbose:
-                        console.print(f"[dim]  {file_path}: no issues on changed lines[/dim]")
-            finally:
-                self.config.sonarqube_project_key = original_project_key
-                self.client.config.sonarqube_project_key = original_project_key
+                    )
+                elif verbose:
+                    console.print(f"[dim]  {file_path}: no issues on changed lines[/dim]")
 
             # Step 7: Write reports
             self._write_report(result, report_file)
@@ -313,6 +311,7 @@ class ReviewOrchestrator:
         file_path: Path,
         changed_lines_map: dict[str, set[int]],
         verbose: bool,
+        project_key: str,
     ) -> tuple[list[ReviewIssue], FileDiagnostics]:
         """Fetch issues for a file and filter to changed lines.
 
@@ -335,7 +334,7 @@ class ReviewOrchestrator:
         )
 
         try:
-            issues = await self.client.get_issues_for_file(file_path_str, resolved=False)
+            issues = await self.client.get_issues(component=f"{project_key}:{file_path_str}", resolved=False)
         except ComponentNotFoundError:
             if verbose:
                 console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
@@ -360,12 +359,14 @@ class ReviewOrchestrator:
         file_path: Path,
         changed_lines_map: dict[str, set[int]],
         diag: FileDiagnostics,
+        project_key: str,
     ) -> list[ReviewDuplication]:
         """Fetch duplication blocks from the temp project that intersect changed lines.
 
         Args:
-            file_path: Path to the file (config already points at temp project).
+            file_path: Path to the file.
             changed_lines_map: New-side changed lines per file.
+            project_key: SonarQube project key to query (the temp project key).
             diag: Per-file diagnostics object to populate with API outcome.
 
         Returns:
@@ -378,7 +379,9 @@ class ReviewOrchestrator:
             return []
 
         try:
-            async with DuplicationClient(self.config) as dup_client:
+            async with DuplicationClient(
+                self.config.model_copy(update={"sonarqube_project_key": project_key})
+            ) as dup_client:
                 response: DuplicationsResponse = await dup_client.get_duplications_for_file(repo_relative)
         except ComponentNotFoundError:
             diag.active_dup_api_status = "component_not_found"
@@ -396,7 +399,7 @@ class ReviewOrchestrator:
         if not response.duplications:
             return []
 
-        component_key = f"{self.config.sonarqube_project_key}:{repo_relative}"
+        component_key = f"{project_key}:{repo_relative}"
         target_ref = response.get_target_file_ref(component_key)
         if target_ref is None:
             return []
@@ -480,11 +483,9 @@ class ReviewOrchestrator:
             diag.resolved_dup_api_status = "skipped_no_changed_lines"
             return []
 
-        temp_project_key = self.config.sonarqube_project_key
-        self.config.sonarqube_project_key = original_project_key
-        self.client.config.sonarqube_project_key = original_project_key
         try:
-            async with DuplicationClient(self.config) as dup_client:
+            original_config = self.config.model_copy(update={"sonarqube_project_key": original_project_key})
+            async with DuplicationClient(original_config) as dup_client:
                 response = await dup_client.get_duplications_for_file(repo_relative)
         except ComponentNotFoundError:
             diag.resolved_dup_api_status = "component_not_found"
@@ -495,9 +496,6 @@ class ReviewOrchestrator:
         except Exception as e:
             diag.resolved_dup_api_status = f"error:{type(e).__name__}:{e}"
             return []
-        finally:
-            self.config.sonarqube_project_key = temp_project_key
-            self.client.config.sonarqube_project_key = temp_project_key
 
         diag.resolved_dup_api_status = "ok"
         diag.resolved_dup_groups_found = len(response.duplications)
@@ -587,7 +585,7 @@ class ReviewOrchestrator:
             repo_root = Path(self.branch_analyzer.repo.working_dir)
             if file_path.is_absolute():
                 return str(file_path.relative_to(repo_root))
-            resolved = (repo_root / file_path).resolve()
+            resolved = (Path.cwd() / file_path).resolve()
             return str(resolved.relative_to(repo_root.resolve()))
         except (ValueError, TypeError):
             return str(file_path)

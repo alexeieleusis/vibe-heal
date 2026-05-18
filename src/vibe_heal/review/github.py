@@ -124,6 +124,7 @@ class GitHubReviewClient:
                 comments.append({
                     "path": file_review.file_path,
                     "line": issue.line,
+                    "side": "RIGHT",
                     "body": body,
                 })
             for dup in file_review.duplications:
@@ -137,6 +138,7 @@ class GitHubReviewClient:
                 comments.append({
                     "path": file_review.file_path,
                     "line": dup.from_line,
+                    "side": "RIGHT",
                     "body": body,
                 })
             for res in file_review.resolved_duplications:
@@ -151,6 +153,7 @@ class GitHubReviewClient:
                 comments.append({
                     "path": file_review.file_path,
                     "line": res.anchor_new_line,
+                    "side": "RIGHT",
                     "body": body,
                 })
         return {

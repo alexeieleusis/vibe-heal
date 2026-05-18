@@ -253,7 +253,7 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.client,
-                "get_issues_for_file",
+                "get_issues",
                 return_value=[],
             ),
             patch.object(
@@ -303,7 +303,7 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.client,
-                "get_issues_for_file",
+                "get_issues",
                 return_value=sonar_issues,
             ),
             patch.object(
@@ -358,7 +358,7 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.client,
-                "get_issues_for_file",
+                "get_issues",
                 return_value=[],
             ) as mock_get_issues,
             patch.object(
@@ -374,8 +374,8 @@ class TestRunAnalysis:
             )
 
         mock_get_issues.assert_called_once()
-        call_args = mock_get_issues.call_args
-        assert str(Path("src/file.py")) in call_args[0][0] or call_args[0][0] == "src/file.py"
+        component = mock_get_issues.call_args.kwargs.get("component", "")
+        assert "src/file.py" in component
 
     @pytest.mark.asyncio
     async def test_temp_project_cleanup_on_exception(
@@ -455,7 +455,7 @@ class TestRunAnalysis:
             ),
             patch.object(
                 orchestrator.client,
-                "get_issues_for_file",
+                "get_issues",
                 return_value=[_make_sonar_issue(10)],
             ),
             patch.object(
@@ -582,6 +582,36 @@ class TestRunPost:
             )
 
 
+class TestToRepoRelative:
+    """Tests for ReviewOrchestrator._to_repo_relative()."""
+
+    @pytest.fixture
+    def orchestrator(self, config: VibeHealConfig) -> ReviewOrchestrator:
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        mock_client = AsyncMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.repo.working_dir = "/repo"
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
+
+    def test_absolute_path_made_repo_relative(self, orchestrator) -> None:
+        result = orchestrator._to_repo_relative(Path("/repo/src/file.py"))
+        assert result == "src/file.py"
+
+    def test_repo_root_relative_path_when_running_from_root(self, orchestrator) -> None:
+        with patch("pathlib.Path.cwd", return_value=Path("/repo")):
+            result = orchestrator._to_repo_relative(Path("src/file.py"))
+        assert result == "src/file.py"
+
+    def test_cwd_relative_path_from_subdirectory(self, orchestrator) -> None:
+        """CWD-relative path from BranchAnalyzer when running from a subdirectory is
+        resolved to repo-root-relative so DiffParser map lookups succeed."""
+        with patch("pathlib.Path.cwd", return_value=Path("/repo/packages/app")):
+            result = orchestrator._to_repo_relative(Path("src/file.py"))
+        assert result == "packages/app/src/file.py"
+
+
 class TestGetActiveDuplications:
     """Tests for ReviewOrchestrator._get_active_duplications()."""
 
@@ -641,6 +671,7 @@ class TestGetActiveDuplications:
                 Path("src/file.py"),
                 {"src/file.py": {12, 15}},  # lines inside the block
                 diag,
+                project_key="temp-project",
             )
 
         assert len(result) == 1
@@ -670,6 +701,7 @@ class TestGetActiveDuplications:
                 Path("src/file.py"),
                 {"src/file.py": {5, 6, 7}},  # lines outside the block
                 diag,
+                project_key="temp-project",
             )
 
         assert result == []
@@ -686,6 +718,7 @@ class TestGetActiveDuplications:
                 Path("src/file.py"),
                 {},  # no entry for this file
                 diag,
+                project_key="temp-project",
             )
 
         MockDupClient.assert_not_called()
@@ -709,6 +742,7 @@ class TestGetActiveDuplications:
                 Path("src/file.py"),
                 {"src/file.py": {10}},
                 diag,
+                project_key="temp-project",
             )
 
         assert result == []
@@ -729,6 +763,7 @@ class TestGetActiveDuplications:
                 Path("src/file.py"),
                 {"src/file.py": {10}},
                 diag,
+                project_key="temp-project",
             )
 
         assert result == []
@@ -872,8 +907,8 @@ class TestGetResolvedDuplications:
         assert diag.resolved_dup_api_status == "component_not_found"
 
     @pytest.mark.asyncio
-    async def test_project_key_restored_after_query(self, orchestrator) -> None:
-        """Config is restored to temp project key after querying main project."""
+    async def test_config_not_mutated_during_query(self, orchestrator) -> None:
+        """DuplicationClient is constructed with original_project_key; orchestrator config is never mutated."""
         orchestrator.config.sonarqube_project_key = "temp-project"
 
         response = MagicMock()
@@ -895,4 +930,8 @@ class TestGetResolvedDuplications:
                 diag=self._make_diag(),
             )
 
+        # Config copy passed to DuplicationClient must use the main project key
+        passed_config = MockDupClient.call_args[0][0]
+        assert passed_config.sonarqube_project_key == "main-project"
+        # Orchestrator's own config must be untouched
         assert orchestrator.config.sonarqube_project_key == "temp-project"
