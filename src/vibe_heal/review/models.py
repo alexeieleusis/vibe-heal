@@ -147,7 +147,6 @@ class ReviewResult(BaseModel):
         description="Timestamp when the review was generated",
     )
     files: list[FileReview] = Field(default_factory=list, description="Per-file review results")
-    # TODO: remove diagnostics/diff_* fields once the line-filter pipeline is stable
     diagnostics: list[FileDiagnostics] = Field(
         default_factory=list,
         description="Per-file diagnostic data for debugging line-filter behaviour",
