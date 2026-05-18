@@ -22,6 +22,7 @@ from vibe_heal.models import FixSummary
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager
+from vibe_heal.utils import display_fix_summary
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.client import SonarQubeClient
@@ -480,22 +481,7 @@ class DeduplicationOrchestrator:
             summary: Fix summary
             dry_run: Whether in dry-run mode
         """
-        self.console.print("\n[bold]Summary:[/bold]")
-        self.console.print(f"  Total duplication groups: {summary.total_issues}")
-        self.console.print(f"  [green]Fixed: {summary.fixed}[/green]")
-        self.console.print(f"  [red]Failed: {summary.failed}[/red]")
-        self.console.print(f"  [yellow]Skipped: {summary.skipped}[/yellow]")
-
-        if summary.fixed > 0:
-            self.console.print(f"  Success rate: {summary.success_rate:.1f}%")
-
-        if not dry_run and summary.commits:
-            self.console.print(f"\n[bold]Created {len(summary.commits)} commit(s)[/bold]")
-
-        if dry_run:
-            self.console.print("\n[yellow]Dry-run mode: no changes committed[/yellow]")
-
-        self.console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+        display_fix_summary(self.console, summary, dry_run, total_label="Total duplication groups")
 
 
 class FileDedupResult(BaseModel):
