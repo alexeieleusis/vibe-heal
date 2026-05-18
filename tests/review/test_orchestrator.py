@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -66,6 +67,53 @@ def _make_review_result(total_issues: int = 2) -> ReviewResult:
             )
         ],
     )
+
+
+@contextmanager
+def _basic_analysis_patches(orchestrator, modified_files=None):
+    """Context manager providing common patches for run_analysis tests.
+
+    Provides the standard branch_analyzer and project_manager mocks that
+    every run_analysis test needs. Tests can override individual patches
+    by nesting additional patch.object() calls within the same with block.
+    """
+    if modified_files is None:
+        modified_files = [Path("src/file.py")]
+
+    temp_project = MagicMock()
+    temp_project.project_key = "temp-key"
+    temp_project.project_name = "temp-name"
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_modified_files",
+                return_value=modified_files,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_current_branch",
+                return_value="feature/test",
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_user_email",
+                return_value="user@example.com",
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                orchestrator.project_manager,
+                "create_temp_project",
+                return_value=temp_project,
+            )
+        )
+        yield
 
 
 class TestReviewOrchestratorInit:
@@ -159,31 +207,8 @@ class TestRunAnalysis:
         tmp_path: Path,
     ) -> None:
         """When analysis fails, return error result and cleanup temp project."""
-        temp_project = MagicMock()
-        temp_project.project_key = "temp-key"
-        temp_project.project_name = "temp-name"
-
         with (
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_modified_files",
-                return_value=[Path("src/file.py")],
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_current_branch",
-                return_value="feature/test",
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_user_email",
-                return_value="user@example.com",
-            ),
-            patch.object(
-                orchestrator.project_manager,
-                "create_temp_project",
-                return_value=temp_project,
-            ),
+            _basic_analysis_patches(orchestrator),
             patch.object(
                 orchestrator.analysis_runner,
                 "run_analysis",
@@ -205,7 +230,6 @@ class TestRunAnalysis:
 
         assert result.success is False
         assert "Scanner not found" in (result.error_message or "")
-        # Temp project should be cleaned up
         mock_delete.assert_called_once_with("temp-key")
 
     @pytest.mark.asyncio
@@ -215,31 +239,8 @@ class TestRunAnalysis:
         tmp_path: Path,
     ) -> None:
         """When there are no issues on changed lines, return empty result."""
-        temp_project = MagicMock()
-        temp_project.project_key = "temp-key"
-        temp_project.project_name = "temp-name"
-
         with (
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_modified_files",
-                return_value=[Path("src/file.py")],
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_current_branch",
-                return_value="feature/test",
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_user_email",
-                return_value="user@example.com",
-            ),
-            patch.object(
-                orchestrator.project_manager,
-                "create_temp_project",
-                return_value=temp_project,
-            ),
+            _basic_analysis_patches(orchestrator),
             patch.object(
                 orchestrator.project_manager,
                 "copy_exclusion_settings",
@@ -268,7 +269,6 @@ class TestRunAnalysis:
 
         assert result.success is True
         assert result.total_issues == 0
-        # Report should still be written
         mock_delete.assert_called_once_with("temp-key")
 
     @pytest.mark.asyncio
@@ -278,42 +278,18 @@ class TestRunAnalysis:
         tmp_path: Path,
     ) -> None:
         """Full happy path: modified files, analysis succeeds, issues found on changed lines."""
-        temp_project = MagicMock()
-        temp_project.project_key = "temp-key"
-        temp_project.project_name = "temp-name"
-
-        # SonarQube returns issues; only line 10 is on a changed line
         sonar_issues = [
-            _make_sonar_issue(10),  # on changed line
-            _make_sonar_issue(50),  # NOT on changed line
-            _make_sonar_issue(20),  # on changed line
+            _make_sonar_issue(10),
+            _make_sonar_issue(50),
+            _make_sonar_issue(20),
         ]
 
         with (
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_modified_files",
-                return_value=[Path("src/file.py")],
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_current_branch",
-                return_value="feature/test",
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_user_email",
-                return_value="user@example.com",
-            ),
+            _basic_analysis_patches(orchestrator),
             patch.object(
                 orchestrator.diff_parser,
                 "get_diff_lines",
                 return_value=DiffLines(new_lines={"src/file.py": {10, 20}}, old_lines={}),
-            ),
-            patch.object(
-                orchestrator.project_manager,
-                "create_temp_project",
-                return_value=temp_project,
             ),
             patch.object(
                 orchestrator.project_manager,
@@ -344,7 +320,6 @@ class TestRunAnalysis:
             )
 
         assert result.success is True
-        # Only issues on changed lines (10, 20) should be included
         assert result.total_issues == 2
         assert len(result.files) == 1
         assert result.files[0].file_path == "src/file.py"
@@ -352,7 +327,6 @@ class TestRunAnalysis:
         issue_lines = {i.line for i in result.files[0].issues}
         assert issue_lines == {10, 20}
         mock_delete.assert_called_once_with("temp-key")
-        # Diagnostics should capture the pipeline state for the file
         assert len(result.diagnostics) == 1
         diag = result.diagnostics[0]
         assert diag.file_path == "src/file.py"
@@ -367,30 +341,10 @@ class TestRunAnalysis:
         tmp_path: Path,
     ) -> None:
         """File patterns should filter which files are analyzed."""
-        temp_project = MagicMock()
-        temp_project.project_key = "temp-key"
-        temp_project.project_name = "temp-name"
-
         with (
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_modified_files",
-                return_value=[Path("src/file.py"), Path("docs/readme.md")],
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_current_branch",
-                return_value="feature/test",
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_user_email",
-                return_value="user@example.com",
-            ),
-            patch.object(
-                orchestrator.project_manager,
-                "create_temp_project",
-                return_value=temp_project,
+            _basic_analysis_patches(
+                orchestrator,
+                modified_files=[Path("src/file.py"), Path("docs/readme.md")],
             ),
             patch.object(
                 orchestrator.project_manager,
@@ -419,7 +373,6 @@ class TestRunAnalysis:
                 report_file=tmp_path / "review.json",
             )
 
-        # Should only fetch issues for .py file
         mock_get_issues.assert_called_once()
         call_args = mock_get_issues.call_args
         assert str(Path("src/file.py")) in call_args[0][0] or call_args[0][0] == "src/file.py"
@@ -431,31 +384,8 @@ class TestRunAnalysis:
         tmp_path: Path,
     ) -> None:
         """Temp project is cleaned up even when an unexpected exception occurs."""
-        temp_project = MagicMock()
-        temp_project.project_key = "temp-key"
-        temp_project.project_name = "temp-name"
-
         with (
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_modified_files",
-                return_value=[Path("src/file.py")],
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_current_branch",
-                return_value="feature/test",
-            ),
-            patch.object(
-                orchestrator.branch_analyzer,
-                "get_user_email",
-                return_value="user@example.com",
-            ),
-            patch.object(
-                orchestrator.project_manager,
-                "create_temp_project",
-                return_value=temp_project,
-            ),
+            _basic_analysis_patches(orchestrator),
             patch.object(
                 orchestrator.analysis_runner,
                 "run_analysis",
@@ -688,7 +618,7 @@ class TestGetActiveDuplications:
         response = MagicMock(spec=DuplicationsResponse)
         response.duplications = [group]
         response.get_target_file_ref.return_value = "1"
-        response.get_file_info.side_effect = lambda ref: (file_info_target if ref == "1" else file_info_other)
+        response.get_file_info.side_effect = lambda ref: file_info_target if ref == "1" else file_info_other
         return response
 
     def _make_diag(self, file_path: str = "src/file.py") -> FileDiagnostics:
