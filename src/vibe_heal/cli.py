@@ -40,6 +40,7 @@ NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[
 VERBOSE_OUTPUT_HELP = "Verbose output"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
 AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
+FILE_PATTERN_HELP = "File patterns to filter (e.g., '*.py', 'src/**/*.ts')"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -346,7 +347,7 @@ def cleanup(
         None,
         "--pattern",
         "-p",
-        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+        help=FILE_PATTERN_HELP,
     ),
     ai_tool: AIToolType | None = typer.Option(
         None,
@@ -489,7 +490,7 @@ def dedupe_branch(
         None,
         "--pattern",
         "-p",
-        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+        help=FILE_PATTERN_HELP,
     ),
     ai_tool: AIToolType | None = typer.Option(
         None,
@@ -673,7 +674,7 @@ def review(
         None,
         "--pattern",
         "-p",
-        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+        help=FILE_PATTERN_HELP,
     ),
     report_file: Path | None = typer.Option(
         None,
