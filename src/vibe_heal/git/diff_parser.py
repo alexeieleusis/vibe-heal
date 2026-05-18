@@ -9,6 +9,8 @@ from git.exc import InvalidGitRepositoryError
 
 from vibe_heal.git.exceptions import GitError
 
+_DEFAULT_BASE_BRANCH = "origin/main"
+
 
 class DiffParserError(GitError):
     """Base exception for DiffParser errors."""
@@ -47,7 +49,7 @@ class DiffParser:
         except InvalidGitRepositoryError as e:
             raise DiffParserError(f"Not a valid git repository: {repo_path}") from e
 
-    def get_diff_lines(self, base_branch: str = "origin/main") -> DiffLines:
+    def get_diff_lines(self, base_branch: str = _DEFAULT_BASE_BRANCH) -> DiffLines:
         """Get changed line numbers per file between base branch and HEAD.
 
         Returns both the new-side lines (added/modified in HEAD, with trailing
@@ -78,7 +80,7 @@ class DiffParser:
 
         return self._parse_diff(diff_output)
 
-    def get_changed_lines(self, base_branch: str = "origin/main") -> dict[str, set[int]]:
+    def get_changed_lines(self, base_branch: str = _DEFAULT_BASE_BRANCH) -> dict[str, set[int]]:
         """Get new-side changed line numbers per file between base branch and HEAD.
 
         Thin wrapper around get_diff_lines() for backwards compatibility.
@@ -94,7 +96,7 @@ class DiffParser:
         """
         return self.get_diff_lines(base_branch).new_lines
 
-    def get_raw_diff(self, base_branch: str = "origin/main") -> str:
+    def get_raw_diff(self, base_branch: str = _DEFAULT_BASE_BRANCH) -> str:
         """Return the raw unified diff output for diagnostic purposes.
 
         Args:
