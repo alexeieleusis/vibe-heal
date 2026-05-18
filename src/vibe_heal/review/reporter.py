@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vibe_heal.review.models import ReviewResult
+from vibe_heal.review.models import FileReview, ResolvedDuplication, ReviewDuplication, ReviewIssue, ReviewResult
 
 
 def default_report_dir(project_key: str, branch: str) -> Path:
@@ -55,65 +55,91 @@ def _write_json(result: ReviewResult, path: Path) -> None:
     path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
 
+def _format_rule_display(issue: ReviewIssue) -> str:
+    """Format a rule identifier, optionally as a link."""
+    if issue.doc_url:
+        return f"[{issue.rule}]({issue.doc_url})"
+    return issue.rule
+
+
+def _format_message(msg: str) -> str:
+    """Escape characters that would break a markdown table cell."""
+    return msg.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+
+def _render_issues_table(issues: list[ReviewIssue]) -> list[str]:
+    """Render the issues section as markdown table rows."""
+    lines = ["| Rule | Message | Line | Severity |", "|------|---------|------|----------|"]
+    for issue in issues:
+        lines.append(
+            f"| {_format_rule_display(issue)} | {_format_message(issue.message)} | {issue.line} | {issue.severity} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _render_duplications(duplications: list[ReviewDuplication]) -> list[str]:
+    """Render the active duplications section."""
+    lines = ["### Active Duplications", "", "| Block (this file) | Duplicated in |", "|---|---|"]
+    for dup in duplications:
+        locations = ", ".join(f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations)
+        lines.append(f"| lines {dup.from_line}-{dup.to_line} | {locations} |")
+    lines.append("")
+    return lines
+
+
+def _render_resolved_duplications(resolved: list[ResolvedDuplication]) -> list[str]:
+    """Render the resolved duplications section."""
+    lines = [
+        "### Resolved Duplications - check other instances",
+        "",
+        "> You modified lines that were part of a duplicated block in main. "
+        "The duplication is no longer detected in this branch, but other instances may need updating.",
+        "",
+        "| Block in main | Other instances |",
+        "|---|---|",
+    ]
+    for res in resolved:
+        locations = ", ".join(f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations)
+        lines.append(f"| lines {res.main_from_line}-{res.main_to_line} | {locations} |")
+    lines.append("")
+    return lines
+
+
+def _render_file_section(fr: FileReview) -> list[str]:
+    """Render a single file's review section."""
+    lines = [f"## `{fr.file_path}`", ""]
+
+    if fr.issues:
+        lines.extend(_render_issues_table(fr.issues))
+
+    if fr.duplications:
+        lines.extend(_render_duplications(fr.duplications))
+
+    if fr.resolved_duplications:
+        lines.extend(_render_resolved_duplications(fr.resolved_duplications))
+
+    if not fr.issues and not fr.duplications and not fr.resolved_duplications:
+        lines.extend(["No issues.", ""])
+
+    return lines
+
+
 def _write_markdown(result: ReviewResult, path: Path) -> None:
     """Write a human-readable markdown report."""
-    lines: list[str] = []
-    lines.append(f"# Review: {result.project_key} ({result.branch})")
-    lines.append(f"Base: `{result.base_branch}`")
-    lines.append("")
-    lines.append(
-        f"**Total issues: {result.total_issues}** | "
-        f"**Duplication findings: {result.total_duplications}** | "
-        f"**Files checked: {len(result.files)}**"
-    )
-    lines.append("")
+    lines: list[str] = [
+        f"# Review: {result.project_key} ({result.branch})",
+        f"Base: `{result.base_branch}`",
+        "",
+        (
+            f"**Total issues: {result.total_issues}** | "
+            f"**Duplication findings: {result.total_duplications}** | "
+            f"**Files checked: {len(result.files)}**"
+        ),
+        "",
+    ]
 
     for fr in result.files:
-        lines.append(f"## `{fr.file_path}`")
-        lines.append("")
-
-        if fr.issues:
-            lines.append("| Rule | Message | Line | Severity |")
-            lines.append("|------|---------|------|----------|")
-            for issue in fr.issues:
-                rule_display = issue.rule
-                if issue.doc_url:
-                    rule_display = f"[{issue.rule}]({issue.doc_url})"
-                msg = issue.message.replace("|", "\\|").replace("\n", " ").replace("\r", "")
-                lines.append(f"| {rule_display} | {msg} | {issue.line} | {issue.severity} |")
-            lines.append("")
-
-        if fr.duplications:
-            lines.append("### Active Duplications")
-            lines.append("")
-            lines.append("| Block (this file) | Duplicated in |")
-            lines.append("|---|---|")
-            for dup in fr.duplications:
-                locations = ", ".join(
-                    f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
-                )
-                lines.append(f"| lines {dup.from_line}-{dup.to_line} | {locations} |")
-            lines.append("")
-
-        if fr.resolved_duplications:
-            lines.append("### Resolved Duplications - check other instances")
-            lines.append("")
-            lines.append(
-                "> You modified lines that were part of a duplicated block in main. "
-                "The duplication is no longer detected in this branch, but other instances may need updating."
-            )
-            lines.append("")
-            lines.append("| Block in main | Other instances |")
-            lines.append("|---|---|")
-            for res in fr.resolved_duplications:
-                locations = ", ".join(
-                    f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations
-                )
-                lines.append(f"| lines {res.main_from_line}-{res.main_to_line} | {locations} |")
-            lines.append("")
-
-        if not fr.issues and not fr.duplications and not fr.resolved_duplications:
-            lines.append("No issues.")
-            lines.append("")
+        lines.extend(_render_file_section(fr))
 
     path.write_text("\n".join(lines), encoding="utf-8")
