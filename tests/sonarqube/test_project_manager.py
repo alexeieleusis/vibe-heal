@@ -425,3 +425,59 @@ class TestCopyExclusionSettings:
         setting = {"key": "sonar.exclusions"}
         result = project_manager._normalize_setting_values(setting)
         assert result == []
+
+
+class TestCreateTempProjectWithSettings:
+    """Tests for create_temp_project_with_settings method."""
+
+    @pytest.mark.asyncio
+    async def test_create_with_settings_success(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
+        """Test successful creation with exclusion settings copy."""
+        from unittest.mock import MagicMock
+
+        mock_console = MagicMock()
+        mock_client.create_project = AsyncMock()
+        mock_client.get_project_settings = AsyncMock(
+            return_value=[
+                {"key": "sonar.exclusions", "value": "**/vendor/**", "inherited": False},
+            ]
+        )
+        mock_client.set_project_setting = AsyncMock()
+
+        metadata = await project_manager.create_temp_project_with_settings(
+            base_key="my_project",
+            branch_name="feature/test",
+            user_email="user@example.com",
+            console=mock_console,
+        )
+
+        assert metadata.project_key.startswith("my_project_user_example_com_feature_test_")
+        mock_client.create_project.assert_called_once()
+        mock_client.set_project_setting.assert_called_once_with(
+            metadata.project_key, "sonar.exclusions", ["**/vendor/**"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_with_settings_handles_copy_error(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Test that settings copy errors don't prevent project creation."""
+        from unittest.mock import MagicMock
+
+        mock_console = MagicMock()
+        mock_client.create_project = AsyncMock()
+        mock_client.get_project_settings = AsyncMock(
+            side_effect=SonarQubeAPIError("Permission denied", status_code=403)
+        )
+
+        metadata = await project_manager.create_temp_project_with_settings(
+            base_key="my_project",
+            branch_name="main",
+            user_email="user@example.com",
+            console=mock_console,
+        )
+
+        assert metadata is not None
+        mock_console.print.assert_any_call(
+            "[yellow]Warning: Could not copy exclusion settings: Permission denied[/yellow]"
+        )

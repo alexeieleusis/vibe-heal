@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AITool, AIToolType
@@ -19,6 +21,9 @@ from vibe_heal.deduplication.orchestrator import (
     DeduplicationOrchestrator,
 )
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
+from vibe_heal.review.orchestrator import ReviewAnalysisResult
+from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
 
 app = typer.Typer(
@@ -31,10 +36,15 @@ console = Console()
 # Error messages
 NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[/red]"
 
+# Default values
+DEFAULT_BASE_BRANCH = "origin/main"
+
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
 AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
+FILE_PATTERN_HELP = "File patterns to filter (e.g., '*.py', 'src/**/*.ts')"
+BASE_BRANCH_HELP = "Base branch to compare against"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -326,10 +336,10 @@ async def _run_cleanup(
 @app.command()
 def cleanup(
     base_branch: str = typer.Option(
-        "origin/main",
+        DEFAULT_BASE_BRANCH,
         "--base-branch",
         "-b",
-        help="Base branch to compare against",
+        help=BASE_BRANCH_HELP,
     ),
     max_iterations: int = typer.Option(
         10,
@@ -341,7 +351,7 @@ def cleanup(
         None,
         "--pattern",
         "-p",
-        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+        help=FILE_PATTERN_HELP,
     ),
     ai_tool: AIToolType | None = typer.Option(
         None,
@@ -469,10 +479,10 @@ async def _run_dedupe_branch(
 @app.command()
 def dedupe_branch(
     base_branch: str = typer.Option(
-        "origin/main",
+        DEFAULT_BASE_BRANCH,
         "--base-branch",
         "-b",
-        help="Base branch to compare against",
+        help=BASE_BRANCH_HELP,
     ),
     max_iterations: int = typer.Option(
         10,
@@ -484,7 +494,7 @@ def dedupe_branch(
         None,
         "--pattern",
         "-p",
-        help="File patterns to filter (e.g., '*.py', 'src/**/*.ts')",
+        help=FILE_PATTERN_HELP,
     ),
     ai_tool: AIToolType | None = typer.Option(
         None,
@@ -544,6 +554,258 @@ def dedupe_branch(
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
         sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+def _display_review_results(result: ReviewAnalysisResult) -> None:
+    """Display review analysis results.
+
+    Args:
+        result: ReviewAnalysisResult from the orchestrator.
+    """
+    total_issues = result.total_issues
+    total_duplications = result.total_duplications
+    files_checked = result.files_analyzed
+
+    console.print("\n[bold]Review Summary:[/bold]")
+    console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
+    console.print(f"  Files checked: {files_checked}")
+    console.print(f"  [green]Total issues: {total_issues}[/green]")
+    console.print(f"  [green]Duplication findings: {total_duplications}[/green]")
+
+    if result.files:
+        console.print("\n[bold]Per-File Breakdown:[/bold]")
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("File", style="cyan")
+        table.add_column("Issues", justify="right")
+        table.add_column("Highest Severity", justify="right")
+        table.add_column("Duplications", justify="right")
+
+        severity_order = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
+
+        for file_review in result.files:
+            issue_count = len(file_review.issues)
+            dup_count = len(file_review.duplications) + len(file_review.resolved_duplications)
+            if issue_count > 0:
+                highest_severity = min(
+                    (issue.severity for issue in file_review.issues),
+                    key=lambda s: severity_order.index(s) if s in severity_order else len(severity_order),
+                )
+            else:
+                highest_severity = "N/A"
+            table.add_row(file_review.file_path, str(issue_count), highest_severity, str(dup_count))
+
+        console.print(table)
+    elif total_issues == 0 and total_duplications == 0:
+        console.print("\n[green]No issues found on changed lines.[/green]")
+
+    if result.report_file:
+        console.print(f"\n[dim]Report saved to {result.report_file}[/dim]")
+
+
+async def _run_review(
+    config: VibeHealConfig,
+    base_branch: str,
+    file_patterns: list[str] | None,
+    report_file: Path | None,
+    verbose: bool,
+) -> None:
+    """Run review analysis workflow.
+
+    Args:
+        config: Configuration object.
+        base_branch: Base branch to compare against.
+        file_patterns: Optional file patterns to filter.
+        report_file: Optional path override for the report; None uses the default.
+        verbose: Enable verbose output.
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = ReviewOrchestrator(config, client)
+        result = await orchestrator.run_analysis(
+            base_branch=base_branch,
+            file_patterns=file_patterns,
+            report_file=report_file,
+            verbose=verbose,
+        )
+        _display_review_results(result)
+        if not result.success:
+            if result.error_message:
+                console.print(f"[red]{result.error_message}[/red]")
+            sys.exit(1)
+
+
+async def _run_review_post(
+    report_file: Path,
+    pr_number: int | None,
+    verbose: bool,
+) -> None:
+    """Run review post workflow (no SonarQube config needed).
+
+    Loads a previously saved report and posts it to GitHub PR.
+
+    Args:
+        report_file: Path to the saved review.json file.
+        pr_number: Optional explicit PR number.
+        verbose: Enable verbose output.
+    """
+    from vibe_heal.review.github import GitHubReviewClient
+    from vibe_heal.review.reporter import load_report_from_path
+
+    github_client = GitHubReviewClient()
+    report = load_report_from_path(report_file)
+    if verbose:
+        console.print(
+            f"[dim]  Report: branch={report.branch}, {report.total_issues} issue(s), {len(report.files)} file(s)[/dim]"
+        )
+
+    if pr_number is not None:
+        pr = pr_number
+        if verbose:
+            console.print(f"[dim]  Using explicit PR #{pr}[/dim]")
+    else:
+        pr = await github_client.detect_pr()
+        if verbose:
+            console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
+
+    await github_client.post_review(pr, report)
+    console.print(
+        f"[green]Posted {report.total_issues} issue(s) and "
+        f"{report.total_duplications} duplication finding(s) "
+        f"as review comments on PR #{pr}.[/green]"
+    )
+
+
+def _review_post_mode(
+    report_file: Path | None,
+    pr_number: int | None,
+    env_file: str | None,
+    verbose: bool,
+) -> None:
+    """Handle the --post branch of the review command.
+
+    Loads a previously saved report and posts it to a GitHub PR.
+    SonarQube config is only required to determine the default report path;
+    pass ``--report-file`` to skip the config lookup entirely.
+
+    Args:
+        report_file: Path to the saved report. If None, derive from config.
+        pr_number: Explicit PR number (None = auto-detect).
+        env_file: Optional path to a custom env file (for config loading).
+        verbose: Enable verbose output.
+    """
+    try:
+        if report_file is None:
+            from vibe_heal.git.branch_analyzer import BranchAnalyzer
+
+            branch = BranchAnalyzer(Path.cwd()).get_current_branch()
+            try:
+                _cfg = VibeHealConfig(env_file=env_file)
+                report_file = default_report_dir(_cfg.sonarqube_project_key, branch) / "review.json"
+            except Exception:
+                console.print(
+                    "[red]Cannot determine default report path: no SonarQube config found. "
+                    "Pass --report-file to specify the report location.[/red]"
+                )
+                sys.exit(1)
+
+        asyncio.run(
+            _run_review_post(
+                report_file=report_file,
+                pr_number=pr_number,
+                verbose=verbose,
+            )
+        )
+    except NoOpenPrError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+@app.command()
+def review(
+    post: bool = typer.Option(
+        False,
+        "--post",
+        help="Post saved report to GitHub PR",
+    ),
+    pr_number: int | None = typer.Option(
+        None,
+        "--pr",
+        help="GitHub PR number (override auto-detection)",
+    ),
+    base_branch: str = typer.Option(
+        DEFAULT_BASE_BRANCH,
+        "--base-branch",
+        "-b",
+        help=BASE_BRANCH_HELP,
+    ),
+    file_patterns: list[str] | None = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help=FILE_PATTERN_HELP,
+    ),
+    report_file: Path | None = typer.Option(
+        None,
+        "--report-file",
+        help="Override report output path",
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=VERBOSE_OUTPUT_HELP,
+    ),
+) -> None:
+    """Analyze SonarQube issues on changed lines.
+
+    Creates a temporary SonarQube project, analyzes modified files,
+    and reports issues found on changed lines only.
+    """
+    setup_logging(verbose)
+
+    if post:
+        _review_post_mode(report_file=report_file, pr_number=pr_number, env_file=env_file, verbose=verbose)
+        return
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        asyncio.run(
+            _run_review(
+                config=config,
+                base_branch=base_branch,
+                file_patterns=file_patterns,
+                report_file=report_file,
+                verbose=verbose,
+            )
+        )
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration error: {e}[/red]")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+    except NoOpenPrError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         if verbose:

@@ -13,7 +13,7 @@ from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeError
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 console = Console()
@@ -228,34 +228,15 @@ class CleanupOrchestrator:
         Returns:
             TempProjectMetadata for the created project
         """
-        console.print("\n[dim]Creating temporary SonarQube project...[/dim]")
         current_branch = self.branch_analyzer.get_current_branch()
         user_email = self.branch_analyzer.get_user_email()
 
-        temp_project = await self.project_manager.create_temp_project(
+        return await self.project_manager.create_temp_project_with_settings(
             base_key=self.config.sonarqube_project_key,
             branch_name=current_branch,
             user_email=user_email,
+            console=console,
         )
-        console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
-
-        try:
-            copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
-                source_key=self.config.sonarqube_project_key,
-                target_key=temp_project.project_key,
-            )
-            if copied:
-                console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
-            if inherited_count:
-                console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
-            if failed_count:
-                console.print(f"[yellow]Warning: Failed to apply {failed_count} exclusion setting(s)[/yellow]")
-            if not copied and not inherited_count and not failed_count:
-                console.print("[dim]No exclusion settings configured on source project[/dim]")
-        except SonarQubeError as e:
-            console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
-
-        return temp_project
 
     async def _check_files_for_issues(
         self,
