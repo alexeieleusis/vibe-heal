@@ -141,22 +141,26 @@ def _redact_auth_properties(content: str) -> str:
 
 def _find_key_name_indices(
     lines: list[str],
-) -> tuple[int | None, int | None, str | None, str | None]:
-    """Return (key_idx, name_idx, orig_key_line, orig_name_line) from a properties file."""
-    key_idx: int | None = None
-    name_idx: int | None = None
+) -> tuple[list[int], list[int], str | None, str | None]:
+    """Return (key_indices, name_indices, orig_key_line, orig_name_line) from a properties file.
+
+    Collects ALL non-commented occurrences so duplicates don't survive patching
+    and override the temporary values (Java properties files use last-wins semantics).
+    """
+    key_indices: list[int] = []
+    name_indices: list[int] = []
     orig_key_line: str | None = None
     orig_name_line: str | None = None
     for i, line in enumerate(lines):
         if line.lstrip().startswith("#"):
             continue
-        if _KEY_RE.match(line) and key_idx is None:
-            key_idx = i
+        if _KEY_RE.match(line):
+            key_indices.append(i)
             orig_key_line = line.rstrip("\n").rstrip("\r")
-        elif _NAME_RE.match(line) and name_idx is None:
-            name_idx = i
+        elif _NAME_RE.match(line):
+            name_indices.append(i)
             orig_name_line = line.rstrip("\n").rstrip("\r")
-    return key_idx, name_idx, orig_key_line, orig_name_line
+    return key_indices, name_indices, orig_key_line, orig_name_line
 
 
 def _build_recovery_block(
@@ -178,16 +182,16 @@ def _build_recovery_block(
 
 def _patch_content(content: str, new_key: str, new_name: str) -> str:
     lines = content.splitlines(keepends=True)
-    key_idx, name_idx, orig_key_line, orig_name_line = _find_key_name_indices(lines)
+    key_indices, name_indices, orig_key_line, orig_name_line = _find_key_name_indices(lines)
 
     recovery = _build_recovery_block(orig_key_line, orig_name_line, new_key, new_name)
 
-    present = [i for i in (key_idx, name_idx) if i is not None]
-    if not present:
+    all_indices = key_indices + name_indices
+    if not all_indices:
         return content + f"sonar.projectKey={new_key}\n" + f"sonar.projectName={new_name}\n"
 
-    first_idx = min(present)
-    skip = set(present)
+    first_idx = min(all_indices)
+    skip = set(all_indices)
     result: list[str] = []
     for i, line in enumerate(lines):
         if i == first_idx:

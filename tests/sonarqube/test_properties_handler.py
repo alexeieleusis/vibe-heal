@@ -205,6 +205,26 @@ class TestPatchContent:
         # No real key found, so values appended at end
         assert result.endswith("sonar.projectKey=temp-key-123\nsonar.projectName=my-project review user main\n")
 
+    def test_duplicate_key_name_lines_all_removed(self) -> None:
+        original = (
+            "sonar.projectKey=first-project\n"
+            "sonar.projectName=First Project\n"
+            "sonar.sources=.\n"
+            "sonar.projectKey=second-project\n"
+            "sonar.projectName=Second Project\n"
+        )
+        result = _patch_content(original, "temp-key-123", "Temp Name")
+        assert "sonar.projectKey=temp-key-123" in result
+        assert "sonar.projectName=Temp Name" in result
+        # Duplicate lines should be removed; first-project is gone entirely
+        assert "first-project" not in result
+        # second-project appears only as a recovery comment, not as an active key line
+        assert "\nsonar.projectKey=second-project\n" not in result
+        # The recovery comment should reference the last (active) values
+        assert "# sonar.projectKey=second-project" in result
+        assert "# sonar.projectName=Second Project" in result
+        assert "sonar.sources=." in result
+
 
 class TestPatched:
     def test_patches_file_during_with_block(self, tmp_path: Path, config: VibeHealConfig) -> None:
