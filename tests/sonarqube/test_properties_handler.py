@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
+from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler, _patch_content
 
 
 @pytest.fixture
@@ -172,3 +172,77 @@ class TestBuildCommandWithFile:
         handler = SonarPropertiesHandler(tmp_path, config)
         cmd = handler.build_command("key", "Name", sources=[Path("src/a.py")])
         assert not any("sonar.sources" in arg for arg in cmd)
+
+
+class TestPatchContent:
+    def test_replaces_key_and_name_with_recovery_block(self) -> None:
+        original = "sonar.projectKey=my-project\nsonar.projectName=My Project\nsonar.sources=.\n"
+        result = _patch_content(original, "temp-key-123", "my-project review user main")
+        assert "sonar.projectKey=temp-key-123" in result
+        assert "sonar.projectName=my-project review user main" in result
+        assert "# sonar.projectKey=my-project" in result
+        assert "# sonar.projectName=My Project" in result
+        assert "vibe-heal: temporary analysis project" in result
+        assert "sonar.sources=." in result  # unrelated line preserved
+
+    def test_key_only_in_file_appends_new_name(self) -> None:
+        original = "sonar.projectKey=my-project\nsonar.sources=.\n"
+        result = _patch_content(original, "temp-key-123", "my-project review user main")
+        assert "sonar.projectKey=temp-key-123" in result
+        assert "sonar.projectName=my-project review user main" in result
+        assert "# sonar.projectKey=my-project" in result
+        assert "sonar.sources=." in result
+
+    def test_neither_key_nor_name_appended_at_end(self) -> None:
+        original = "sonar.sources=.\nsonar.host.url=https://sonar.test.com\n"
+        result = _patch_content(original, "temp-key-123", "my-project review user main")
+        assert result.endswith("sonar.projectKey=temp-key-123\nsonar.projectName=my-project review user main\n")
+        assert "sonar.sources=." in result
+
+    def test_commented_key_line_not_treated_as_property(self) -> None:
+        original = "# sonar.projectKey=commented\nsonar.sources=.\n"
+        result = _patch_content(original, "temp-key-123", "my-project review user main")
+        # No real key found, so values appended at end
+        assert result.endswith("sonar.projectKey=temp-key-123\nsonar.projectName=my-project review user main\n")
+
+
+class TestPatched:
+    def test_patches_file_during_with_block(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        props = tmp_path / "sonar-project.properties"
+        props.write_text("sonar.projectKey=original\nsonar.sources=.\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("temp-key", "Temp Name"):
+            content = props.read_text()
+            assert "sonar.projectKey=temp-key" in content
+            assert "# sonar.projectKey=original" in content
+
+    def test_restores_file_after_normal_exit(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        original = "sonar.projectKey=original\nsonar.sources=.\n"
+        props = tmp_path / "sonar-project.properties"
+        props.write_text(original)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("temp-key", "Temp Name"):
+            pass
+        assert props.read_text() == original
+
+    def test_restores_file_after_exception(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        original = "sonar.projectKey=original\nsonar.sources=.\n"
+        props = tmp_path / "sonar-project.properties"
+        props.write_text(original)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with pytest.raises(ValueError), handler.patched("temp-key", "Temp Name"):
+            raise ValueError("simulated failure")
+        assert props.read_text() == original
+
+    def test_noop_when_file_absent(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("temp-key", "Temp Name"):
+            pass  # must not raise
+
+    def test_noop_when_key_already_matches(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        original = "sonar.projectKey=same-key\n"
+        props = tmp_path / "sonar-project.properties"
+        props.write_text(original)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("same-key", "Same Name"):
+            assert props.read_text() == original  # file untouched
