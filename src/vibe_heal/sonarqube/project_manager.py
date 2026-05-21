@@ -54,10 +54,12 @@ class ProjectManager:
         base_key: str,
         branch_name: str,
         user_email: str,
+        command_name: str = "analysis",
     ) -> TempProjectMetadata:
         """Create temporary project for branch analysis.
 
-        Project key/name format: {base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}
+        Project key format: {base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}
+        Project name format: {base_key} {command_name} {email_local_part} {branch_with_dashes}
         Timestamp format: yymmdd-hhmm
         Sanitization: replace non-alphanumeric with underscore, lowercase.
 
@@ -65,6 +67,7 @@ class ProjectManager:
             base_key: Base project key (from .env.vibeheal)
             branch_name: Current branch name
             user_email: Git user email
+            command_name: Name of the command creating the project (e.g. "cleanup", "review")
 
         Returns:
             Metadata for the created project (for later cleanup)
@@ -79,9 +82,10 @@ class ProjectManager:
         # Generate timestamp in yymmdd-hhmm format
         timestamp = datetime.now(timezone.utc).strftime("%y%m%d-%H%M")
 
-        # Build project key and name
         project_key = f"{base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}"
-        project_name = project_key  # Use same value for both
+        email_local = user_email.split("@")[0] if "@" in user_email else user_email
+        branch_display = branch_name.replace("/", "-")
+        project_name = f"{base_key} {command_name} {email_local} {branch_display}"
 
         # Create project via API
         await self.client.create_project(project_key, project_name)
@@ -199,6 +203,7 @@ class ProjectManager:
         branch_name: str,
         user_email: str,
         console: Console,
+        command_name: str = "analysis",
     ) -> TempProjectMetadata:
         """Create temporary project and copy exclusion settings from source.
 
@@ -210,6 +215,7 @@ class ProjectManager:
             branch_name: Current branch name
             user_email: Git user email
             console: Rich console for progress output
+            command_name: Name of the command creating the project (e.g. "cleanup", "review")
 
         Returns:
             Metadata for the created project
@@ -219,6 +225,7 @@ class ProjectManager:
             base_key=base_key,
             branch_name=branch_name,
             user_email=user_email,
+            command_name=command_name,
         )
         console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
 

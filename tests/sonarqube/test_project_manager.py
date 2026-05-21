@@ -58,11 +58,11 @@ class TestCreateTempProject:
         assert timestamp[:6].isdigit()  # yymmdd
         assert timestamp[7:].isdigit()  # hhmm
 
-        # Verify project was created with the generated key
-        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_key)
+        # Verify project was created with the generated key and human-readable name
+        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_name)
 
         # Verify metadata
-        assert metadata.project_name == metadata.project_key
+        assert metadata.project_name == "my_project analysis user feature-new-api"
         assert metadata.base_project_key == base_key
         assert metadata.branch_name == branch_name
         assert metadata.user_email == user_email
@@ -87,7 +87,7 @@ class TestCreateTempProject:
         expected_prefix = "project_user_tag_example_co_uk_main_"
         assert metadata.project_key.startswith(expected_prefix)
         # Verify project was created with the generated key (including timestamp)
-        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_key)
+        mock_client.create_project.assert_called_once_with(metadata.project_key, metadata.project_name)
 
     @pytest.mark.asyncio
     async def test_create_temp_project_sanitizes_branch(
@@ -132,6 +132,57 @@ class TestCreateTempProject:
         assert metadata1.project_key != metadata2.project_key
         assert metadata1.project_key != metadata3.project_key
         assert metadata2.project_key != metadata3.project_key
+
+    @pytest.mark.asyncio
+    async def test_project_name_format_with_command(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        mock_client.create_project = AsyncMock()
+        metadata = await project_manager.create_temp_project(
+            base_key="my-project",
+            branch_name="feature/add-login",
+            user_email="alexei.eleusis@gmail.com",
+            command_name="review",
+        )
+        assert metadata.project_name == "my-project review alexei.eleusis feature-add-login"
+
+    @pytest.mark.asyncio
+    async def test_project_name_uses_default_command_name(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        mock_client.create_project = AsyncMock()
+        metadata = await project_manager.create_temp_project(
+            base_key="my-project",
+            branch_name="main",
+            user_email="user@example.com",
+        )
+        assert metadata.project_name == "my-project analysis user main"
+
+    @pytest.mark.asyncio
+    async def test_project_name_email_without_at_sign(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        mock_client.create_project = AsyncMock()
+        metadata = await project_manager.create_temp_project(
+            base_key="proj",
+            branch_name="main",
+            user_email="localonly",
+            command_name="cleanup",
+        )
+        assert metadata.project_name == "proj cleanup localonly main"
+
+    @pytest.mark.asyncio
+    async def test_project_name_branch_slashes_become_dashes(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        mock_client.create_project = AsyncMock()
+        metadata = await project_manager.create_temp_project(
+            base_key="proj",
+            branch_name="feature/nested/branch",
+            user_email="u@t.com",
+            command_name="dedupe-branch",
+        )
+        assert metadata.project_name == "proj dedupe-branch u feature-nested-branch"
 
 
 class TestDeleteProject:
