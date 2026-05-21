@@ -113,10 +113,30 @@ class SonarPropertiesHandler:
                 self.properties_file.write_text(original_content, encoding="utf-8")
             except OSError:
                 logger.exception(
-                    "Failed to restore %s. Original content:\n%s",
+                    "Failed to restore %s. Original content (auth properties redacted):\n%s",
                     self.properties_file,
-                    original_content,
+                    _redact_auth_properties(original_content),
                 )
+
+
+def _redact_auth_properties(content: str) -> str:
+    """Redact auth-related sonar properties before logging file contents."""
+
+    redacted_lines: list[str] = []
+    for line in content.splitlines(keepends=True):
+        if _AUTH_PROPS_RE.match(line):
+            key, sep, remainder = line.partition("=")
+            line_ending = ""
+            if remainder.endswith("\r\n"):
+                line_ending = "\r\n"
+            elif remainder.endswith("\n"):
+                line_ending = "\n"
+            elif remainder.endswith("\r"):
+                line_ending = "\r"
+            redacted_lines.append(f"{key}{sep}<redacted>{line_ending}")
+        else:
+            redacted_lines.append(line)
+    return "".join(redacted_lines)
 
 
 def _find_key_name_indices(
