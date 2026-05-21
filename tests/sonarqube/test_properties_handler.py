@@ -41,7 +41,7 @@ class TestExists:
 class TestBuildCommandNoFile:
     def test_includes_all_d_flags_token_auth(self, tmp_path: Path, config: VibeHealConfig) -> None:
         handler = SonarPropertiesHandler(tmp_path, config)
-        cmd = handler.build_command("test-key", "Test Project", tmp_path)
+        cmd = handler.build_command("test-key", "Test Project")
         assert "-Dsonar.projectKey=test-key" in cmd
         assert "-Dsonar.projectName=Test Project" in cmd
         assert "-Dsonar.host.url=https://sonar.test.com" in cmd
@@ -50,17 +50,17 @@ class TestBuildCommandNoFile:
 
     def test_default_sources_dot(self, tmp_path: Path, config: VibeHealConfig) -> None:
         handler = SonarPropertiesHandler(tmp_path, config)
-        cmd = handler.build_command("key", "Name", tmp_path, sources=None)
+        cmd = handler.build_command("key", "Name", sources=None)
         assert "-Dsonar.sources=." in cmd
 
     def test_explicit_sources(self, tmp_path: Path, config: VibeHealConfig) -> None:
         handler = SonarPropertiesHandler(tmp_path, config)
-        cmd = handler.build_command("key", "Name", tmp_path, sources=[Path("src/a.py"), Path("src/b.py")])
+        cmd = handler.build_command("key", "Name", sources=[Path("src/a.py"), Path("src/b.py")])
         assert "-Dsonar.sources=src/a.py,src/b.py" in cmd
 
     def test_basic_auth(self, tmp_path: Path, basic_auth_config: VibeHealConfig) -> None:
         handler = SonarPropertiesHandler(tmp_path, basic_auth_config)
-        cmd = handler.build_command("key", "Name", tmp_path)
+        cmd = handler.build_command("key", "Name")
         assert "-Dsonar.login=user" in cmd
         assert "-Dsonar.password=pass" in cmd
         assert not any("sonar.token" in arg for arg in cmd)

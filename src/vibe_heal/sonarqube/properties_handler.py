@@ -35,11 +35,10 @@ class SonarPropertiesHandler:
         self,
         project_key: str,
         project_name: str,
-        project_dir: Path,
         sources: list[Path] | None = None,
     ) -> list[str]:
         if not self.exists:
-            return self._build_full_command(project_key, project_name, project_dir, sources)
+            return self._build_full_command(project_key, project_name, sources)
         command = ["sonar-scanner"]
         if not self._has_auth_configured():
             if self.config.use_token_auth:
@@ -53,7 +52,6 @@ class SonarPropertiesHandler:
         self,
         project_key: str,
         project_name: str,
-        project_dir: Path,
         sources: list[Path] | None = None,
     ) -> list[str]:
         command = [
