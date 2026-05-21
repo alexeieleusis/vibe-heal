@@ -100,10 +100,17 @@ class AnalysisRunner:
                 console.print(f"[dim]    Scanner finished with exit code: {result.returncode}[/dim]")
 
                 if result.returncode != 0:
-                    error_output = stderr.decode() if stderr else stdout.decode()
-                    console.print(f"[red]    Scanner error: {error_output[:500]}[/red]")
-                    error_msg = f"sonar-scanner failed with exit code {result.returncode}: {error_output}"
-                    if handler.exists and _AUTH_ERROR_RE.search(error_output):
+                    stdout_text = stdout.decode() if stdout else ""
+                    stderr_text = stderr.decode() if stderr else ""
+                    combined_error_output = "\n".join(
+                        output for output in (stderr_text, stdout_text) if output
+                    )
+                    console.print(f"[red]    Scanner error: {combined_error_output[:500]}[/red]")
+                    error_msg = (
+                        f"sonar-scanner failed with exit code {result.returncode}: "
+                        f"{combined_error_output}"
+                    )
+                    if handler.exists and _AUTH_ERROR_RE.search(combined_error_output):
                         error_msg += _AUTH_HINT
                     return AnalysisResult(
                         success=False,
