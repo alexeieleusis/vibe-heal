@@ -1,5 +1,7 @@
 """AI tool integration for vibe-heal."""
 
+from typing import Any
+
 from vibe_heal.ai_tools.aider import AiderTool
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.claude_code import ClaudeCodeTool
@@ -21,7 +23,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy import of create_fix_prompt to avoid circular imports."""
     if name == "create_fix_prompt":
         from vibe_heal.ai_tools.prompts import create_fix_prompt as _create_fix_prompt
