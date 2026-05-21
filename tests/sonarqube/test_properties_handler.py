@@ -64,3 +64,111 @@ class TestBuildCommandNoFile:
         assert "-Dsonar.login=user" in cmd
         assert "-Dsonar.password=pass" in cmd
         assert not any("sonar.token" in arg for arg in cmd)
+
+
+class TestHasAuthConfigured:
+    def test_false_when_nothing_set(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is False
+
+    def test_true_via_sonar_token_env(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "secret")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is True
+
+    def test_true_via_sonarqube_token_env(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONARQUBE_TOKEN", "secret")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is True
+
+    def test_true_via_sonar_login_env(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_LOGIN", "user")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is True
+
+    def test_true_via_token_in_file(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("sonar.token=file-token\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is True
+
+    def test_true_via_login_in_file(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("sonar.login=user\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is True
+
+    def test_commented_token_line_not_counted(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("# sonar.token=commented\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        assert handler._has_auth_configured() is False
+
+
+class TestBuildCommandWithFile:
+    def test_minimal_command_when_auth_in_file(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\nsonar.token=file-token\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert cmd == ["sonar-scanner"]
+
+    def test_minimal_command_when_auth_in_env(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "env-token")
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert cmd == ["sonar-scanner"]
+
+    def test_injects_token_fallback_when_no_auth(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert cmd == ["sonar-scanner", "-Dsonar.token=test-token"]
+
+    def test_injects_basic_auth_fallback_when_no_auth(
+        self, tmp_path: Path, basic_auth_config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for v in ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN"):
+            monkeypatch.delenv(v, raising=False)
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, basic_auth_config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert cmd == ["sonar-scanner", "-Dsonar.login=user", "-Dsonar.password=pass"]
+
+    def test_sources_not_injected_when_file_present(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "tok")
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("key", "Name", sources=[Path("src/a.py")])
+        assert not any("sonar.sources" in arg for arg in cmd)
