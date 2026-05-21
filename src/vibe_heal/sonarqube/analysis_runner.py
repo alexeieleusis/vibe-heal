@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -11,9 +12,18 @@ from rich.console import Console
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
+from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+_AUTH_ERROR_RE = re.compile(r"401|403|unauthorized|authentication", re.IGNORECASE)
+_AUTH_HINT = (
+    "\nHint: authentication may be configured via environment variable "
+    "(SONAR_TOKEN, SONARQUBE_TOKEN) or the central scanner settings "
+    "(~/.sonar/sonar-scanner.properties). Check these if you expected "
+    "auth to be picked up automatically."
+)
 
 
 class AnalysisResult(BaseModel):
@@ -71,133 +81,89 @@ class AnalysisRunner:
                 "Install from: https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/",
             )
 
-        # Build scanner command
-        command = self._get_scanner_command(
-            project_key=project_key,
-            project_name=project_name,
-            project_dir=project_dir,
-            sources=sources,
-        )
+        handler = SonarPropertiesHandler(project_dir, self.config)
+        command = handler.build_command(project_key, project_name, sources)
 
         # Execute scanner
-        try:
-            console.print(f"[dim]    Executing: sonar-scanner (project: {project_key})[/dim]")
-            result = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=str(project_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            console.print("[dim]    Waiting for scanner to complete...[/dim]")
-            stdout, stderr = await result.communicate()
-            console.print(f"[dim]    Scanner finished with exit code: {result.returncode}[/dim]")
-
-            if result.returncode != 0:
-                error_output = stderr.decode() if stderr else stdout.decode()
-                console.print(f"[red]    Scanner error: {error_output[:500]}[/red]")
-                return AnalysisResult(
-                    success=False,
-                    error_message=f"sonar-scanner failed with exit code {result.returncode}: {error_output}",
-                )
-
-            # Extract task ID from scanner output
-            scanner_output = stdout.decode()
-            console.print("[dim]    Extracting task ID from scanner output...[/dim]")
-            task_id = self._extract_task_id(scanner_output)
-
-            if not task_id:
-                console.print("[red]    Could not find task ID in scanner output[/red]")
-                console.print("[dim]    See debug log for full scanner output[/dim]")
-                # Log full scanner output to debug log for troubleshooting
-                logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
-                return AnalysisResult(
-                    success=False,
-                    error_message="Could not extract task ID from scanner output",
-                )
-
-            console.print(f"[dim]    Task ID: {task_id}[/dim]")
-
-            # Wait for analysis to complete on server
-            console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
+        with handler.patched(project_key, project_name):
             try:
-                async with asyncio.timeout(300):
-                    analysis_success = await self._wait_for_analysis(task_id)
-            except TimeoutError:
-                console.print("[red]    Analysis timed out after 300 seconds[/red]")
-                return AnalysisResult(
-                    success=False,
-                    task_id=task_id,
-                    error_message="Analysis timed out after 300 seconds",
+                console.print(f"[dim]    Executing: sonar-scanner (project: {project_key})[/dim]")
+                result = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=str(project_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
 
-            if not analysis_success:
-                console.print("[red]    Analysis failed on server[/red]")
+                console.print("[dim]    Waiting for scanner to complete...[/dim]")
+                stdout, stderr = await result.communicate()
+                console.print(f"[dim]    Scanner finished with exit code: {result.returncode}[/dim]")
+
+                if result.returncode != 0:
+                    error_output = stderr.decode() if stderr else stdout.decode()
+                    console.print(f"[red]    Scanner error: {error_output[:500]}[/red]")
+                    error_msg = f"sonar-scanner failed with exit code {result.returncode}: {error_output}"
+                    if handler.exists and _AUTH_ERROR_RE.search(error_output):
+                        error_msg += _AUTH_HINT
+                    return AnalysisResult(
+                        success=False,
+                        error_message=error_msg,
+                    )
+
+                # Extract task ID from scanner output
+                scanner_output = stdout.decode()
+                console.print("[dim]    Extracting task ID from scanner output...[/dim]")
+                task_id = self._extract_task_id(scanner_output)
+
+                if not task_id:
+                    console.print("[red]    Could not find task ID in scanner output[/red]")
+                    console.print("[dim]    See debug log for full scanner output[/dim]")
+                    # Log full scanner output to debug log for troubleshooting
+                    logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
+                    return AnalysisResult(
+                        success=False,
+                        error_message="Could not extract task ID from scanner output",
+                    )
+
+                console.print(f"[dim]    Task ID: {task_id}[/dim]")
+
+                # Wait for analysis to complete on server
+                console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
+                try:
+                    async with asyncio.timeout(300):
+                        analysis_success = await self._wait_for_analysis(task_id)
+                except TimeoutError:
+                    console.print("[red]    Analysis timed out after 300 seconds[/red]")
+                    return AnalysisResult(
+                        success=False,
+                        task_id=task_id,
+                        error_message="Analysis timed out after 300 seconds",
+                    )
+
+                if not analysis_success:
+                    console.print("[red]    Analysis failed on server[/red]")
+                    return AnalysisResult(
+                        success=False,
+                        task_id=task_id,
+                        error_message="Analysis failed on server",
+                    )
+
+                console.print("[green]    ✓ Server-side analysis completed successfully[/green]")
+
+                # Build dashboard URL
+                dashboard_url = f"{self.config.sonarqube_url}/dashboard?id={project_key}"
+
                 return AnalysisResult(
-                    success=False,
+                    success=True,
                     task_id=task_id,
-                    error_message="Analysis failed on server",
+                    dashboard_url=dashboard_url,
                 )
 
-            console.print("[green]    ✓ Server-side analysis completed successfully[/green]")
-
-            # Build dashboard URL
-            dashboard_url = f"{self.config.sonarqube_url}/dashboard?id={project_key}"
-
-            return AnalysisResult(
-                success=True,
-                task_id=task_id,
-                dashboard_url=dashboard_url,
-            )
-
-        except Exception as e:
-            return AnalysisResult(
-                success=False,
-                error_message=f"Failed to run analysis: {e}",
-            )
-
-    def _get_scanner_command(
-        self,
-        project_key: str,
-        project_name: str,
-        project_dir: Path,
-        sources: list[Path] | None = None,
-    ) -> list[str]:
-        """Build sonar-scanner command with parameters.
-
-        Args:
-            project_key: SonarQube project key
-            project_name: SonarQube project name
-            project_dir: Root directory to analyze
-            sources: Optional list of specific files/dirs to analyze
-
-        Returns:
-            Command list ready for subprocess execution
-        """
-        command = [
-            "sonar-scanner",
-            f"-Dsonar.projectKey={project_key}",
-            f"-Dsonar.projectName={project_name}",
-            f"-Dsonar.host.url={self.config.sonarqube_url}",
-        ]
-
-        # Add authentication
-        if self.config.use_token_auth:
-            command.append(f"-Dsonar.token={self.config.sonarqube_token}")
-        else:
-            command.append(f"-Dsonar.login={self.config.sonarqube_username}")
-            command.append(f"-Dsonar.password={self.config.sonarqube_password}")
-
-        # Add sources if specified (optimization for partial analysis)
-        if sources:
-            # Convert Paths to strings, relative to project_dir
-            sources_str = ",".join(str(s) for s in sources)
-            command.append(f"-Dsonar.sources={sources_str}")
-        else:
-            # Default to current directory
-            command.append("-Dsonar.sources=.")
-
-        return command
+            except Exception as e:
+                return AnalysisResult(
+                    success=False,
+                    error_message=f"Failed to run analysis: {e}",
+                )
 
     async def _wait_for_analysis(self, task_id: str) -> bool:
         """Poll SonarQube for analysis completion.
