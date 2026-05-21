@@ -236,6 +236,7 @@ class CleanupOrchestrator:
             branch_name=current_branch,
             user_email=user_email,
             console=console,
+            command_name="cleanup",
         )
 
     async def _check_files_for_issues(
