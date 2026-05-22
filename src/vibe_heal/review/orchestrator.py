@@ -7,7 +7,7 @@ from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.deduplication.client import DuplicationClient
-from vibe_heal.deduplication.models import DuplicationGroup, DuplicationsResponse
+from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.review.github import GitHubReviewClient
@@ -457,25 +457,41 @@ class ReviewOrchestrator:
         # Use the lowest changed line in the block as the anchor so the GitHub
         # PR comment is attached to a line that is actually in the diff.
         anchor_line = min(changed_in_block)
-        other_locations = []
-        for block in group.get_other_blocks(target_ref):
-            file_info = response.get_file_info(block.ref)
-            if file_info is None:
-                continue
-            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
-            other_locations.append(
-                DuplicationLocation(
-                    file_path=other_file_path,
-                    from_line=block.from_line,
-                    to_line=block.to_line,
-                )
-            )
+        other_locations = self._build_other_locations(group, target_block, response)
         return ReviewDuplication(
             from_line=target_block.from_line,
             to_line=target_block.to_line,
             anchor_line=anchor_line,
             other_locations=other_locations,
         )
+
+    def _build_other_locations(
+        self,
+        group: DuplicationGroup,
+        target_block: DuplicationBlock,
+        response: DuplicationsResponse,
+    ) -> list[DuplicationLocation]:
+        """Build other_locations by iterating all blocks and skipping only the target block.
+
+        Preserves same-file duplicates by skipping only the specific target block
+        instance (by identity) rather than excluding all blocks with the same ref.
+        """
+        other_locations: list[DuplicationLocation] = []
+        for block in group.blocks:
+            if block is target_block:
+                continue
+            file_info = response.get_file_info(block.ref)
+            if file_info is None:
+                continue
+            block_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+            other_locations.append(
+                DuplicationLocation(
+                    file_path=block_file_path,
+                    from_line=block.from_line,
+                    to_line=block.to_line,
+                )
+            )
+        return other_locations
 
     async def _get_resolved_duplications(
         self,
@@ -567,19 +583,7 @@ class ReviewOrchestrator:
         # the ranges are unlikely to match exactly after edits).
         if any(a_from <= target_block.to_line and a_to >= target_block.from_line for a_from, a_to in active_dup_ranges):
             return None
-        other_locations = []
-        for block in group.get_other_blocks(target_ref):
-            file_info = response.get_file_info(block.ref)
-            if file_info is None:
-                continue
-            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
-            other_locations.append(
-                DuplicationLocation(
-                    file_path=other_file_path,
-                    from_line=block.from_line,
-                    to_line=block.to_line,
-                )
-            )
+        other_locations = self._build_other_locations(group, target_block, response)
         # Choose the new-side anchor closest to the block so the GitHub PR comment
         # is attached near the relevant change rather than an unrelated hunk.
         anchor_new_line = min(new_changed_lines, key=lambda ln: abs(ln - target_block.from_line))
