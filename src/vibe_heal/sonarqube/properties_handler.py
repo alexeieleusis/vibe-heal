@@ -16,7 +16,10 @@ PROPERTIES_FILENAME = "sonar-project.properties"
 _KEY_RE = re.compile(r"^\s*sonar\.projectKey\s*=", re.IGNORECASE)
 _NAME_RE = re.compile(r"^\s*sonar\.projectName\s*=", re.IGNORECASE)
 _AUTH_PROPS_RE = re.compile(r"^\s*sonar\.(token|login|password)\s*=\s*.+", re.IGNORECASE)
+_AUTH_REDACT_RE = re.compile(r"^\s*[#!]?\s*sonar\.(token|login|password)\s*=\s*.+", re.IGNORECASE)
 _AUTH_ENV_VARS = ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN")
+_HOST_URL_ENV_VARS = ("SONAR_HOST_URL", "SONARQUBE_HOST_URL")
+_HOST_URL_RE = re.compile(r"^\s*sonar\.host\.url\s*=\s*.+", re.IGNORECASE)
 
 
 class SonarPropertiesHandler:
@@ -40,6 +43,8 @@ class SonarPropertiesHandler:
         if not self.exists:
             return self._build_full_command(project_key, project_name, sources)
         command = ["sonar-scanner"]
+        if not self._has_host_url_configured():
+            command.append(f"-Dsonar.host.url={self.config.sonarqube_url}")
         if not self._has_auth_configured():
             if self.config.use_token_auth:
                 command.append(f"-Dsonar.token={self.config.sonarqube_token}")
@@ -84,6 +89,19 @@ class SonarPropertiesHandler:
                     return True
         return False
 
+    def _has_host_url_configured(self) -> bool:
+        for env_var in _HOST_URL_ENV_VARS:
+            if os.environ.get(env_var):
+                return True
+        if self.exists:
+            content = self.properties_file.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                if _HOST_URL_RE.match(line):
+                    return True
+        return False
+
     def _extract_property(self, content: str, key: str) -> str | None:
         pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*)", re.IGNORECASE)
         for line in content.splitlines():
@@ -124,7 +142,7 @@ def _redact_auth_properties(content: str) -> str:
 
     redacted_lines: list[str] = []
     for line in content.splitlines(keepends=True):
-        if _AUTH_PROPS_RE.match(line):
+        if _AUTH_REDACT_RE.match(line):
             key, sep, remainder = line.partition("=")
             line_ending = ""
             if remainder.endswith("\r\n"):
@@ -188,6 +206,8 @@ def _patch_content(content: str, new_key: str, new_name: str) -> str:
 
     all_indices = key_indices + name_indices
     if not all_indices:
+        if not content.endswith("\n"):
+            content += "\n"
         return content + f"sonar.projectKey={new_key}\n" + f"sonar.projectName={new_name}\n"
 
     first_idx = min(all_indices)

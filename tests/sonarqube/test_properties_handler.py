@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler, _patch_content
+from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler, _patch_content, _redact_auth_properties
 
 
 @pytest.fixture
@@ -133,7 +133,7 @@ class TestBuildCommandWithFile:
         (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\nsonar.token=file-token\n")
         handler = SonarPropertiesHandler(tmp_path, config)
         cmd = handler.build_command("temp-key", "Temp Name")
-        assert cmd == ["sonar-scanner"]
+        assert cmd == ["sonar-scanner", "-Dsonar.host.url=https://sonar.test.com"]
 
     def test_minimal_command_when_auth_in_env(
         self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
@@ -142,7 +142,7 @@ class TestBuildCommandWithFile:
         (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
         handler = SonarPropertiesHandler(tmp_path, config)
         cmd = handler.build_command("temp-key", "Temp Name")
-        assert cmd == ["sonar-scanner"]
+        assert cmd == ["sonar-scanner", "-Dsonar.host.url=https://sonar.test.com"]
 
     def test_injects_token_fallback_when_no_auth(
         self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
@@ -152,7 +152,7 @@ class TestBuildCommandWithFile:
         (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
         handler = SonarPropertiesHandler(tmp_path, config)
         cmd = handler.build_command("temp-key", "Temp Name")
-        assert cmd == ["sonar-scanner", "-Dsonar.token=test-token"]
+        assert cmd == ["sonar-scanner", "-Dsonar.host.url=https://sonar.test.com", "-Dsonar.token=test-token"]
 
     def test_injects_basic_auth_fallback_when_no_auth(
         self, tmp_path: Path, basic_auth_config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
@@ -162,7 +162,12 @@ class TestBuildCommandWithFile:
         (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
         handler = SonarPropertiesHandler(tmp_path, basic_auth_config)
         cmd = handler.build_command("temp-key", "Temp Name")
-        assert cmd == ["sonar-scanner", "-Dsonar.login=user", "-Dsonar.password=pass"]
+        assert cmd == [
+            "sonar-scanner",
+            "-Dsonar.host.url=https://sonar.test.com",
+            "-Dsonar.login=user",
+            "-Dsonar.password=pass",
+        ]
 
     def test_sources_not_injected_when_file_present(
         self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
@@ -172,6 +177,36 @@ class TestBuildCommandWithFile:
         handler = SonarPropertiesHandler(tmp_path, config)
         cmd = handler.build_command("key", "Name", sources=[Path("src/a.py")])
         assert not any("sonar.sources" in arg for arg in cmd)
+
+    def test_host_url_not_injected_when_configured_in_file(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "tok")
+        (tmp_path / "sonar-project.properties").write_text(
+            "sonar.projectKey=orig\nsonar.host.url=https://other.test.com\n"
+        )
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert not any("sonar.host.url" in arg for arg in cmd)
+
+    def test_host_url_not_injected_when_configured_in_env(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "tok")
+        monkeypatch.setenv("SONAR_HOST_URL", "https://env.test.com")
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert not any("sonar.host.url" in arg for arg in cmd)
+
+    def test_host_url_injected_when_not_configured(
+        self, tmp_path: Path, config: VibeHealConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SONAR_TOKEN", "tok")
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        handler = SonarPropertiesHandler(tmp_path, config)
+        cmd = handler.build_command("temp-key", "Temp Name")
+        assert "-Dsonar.host.url=https://sonar.test.com" in cmd
 
 
 class TestPatchContent:
@@ -204,6 +239,13 @@ class TestPatchContent:
         result = _patch_content(original, "temp-key-123", "my-project review user main")
         # No real key found, so values appended at end
         assert result.endswith("sonar.projectKey=temp-key-123\nsonar.projectName=my-project review user main\n")
+
+    def test_appends_newline_when_content_has_no_trailing_newline(self) -> None:
+        original = "sonar.sources=."
+        result = _patch_content(original, "temp-key-123", "Temp Name")
+        assert "sonar.sources=.\n" in result
+        assert "sonar.sources=.sonar.projectKey" not in result
+        assert result.endswith("sonar.projectKey=temp-key-123\nsonar.projectName=Temp Name\n")
 
     def test_duplicate_key_name_lines_all_removed(self) -> None:
         original = (
@@ -266,3 +308,34 @@ class TestPatched:
         handler = SonarPropertiesHandler(tmp_path, config)
         with handler.patched("same-key", "Same Name"):
             assert props.read_text() == original  # file untouched
+
+
+class TestRedactAuthProperties:
+    def test_redacts_uncommented_token(self) -> None:
+        result = _redact_auth_properties("sonar.token=my-secret\n")
+        assert "my-secret" not in result
+        assert "<redacted>" in result
+
+    def test_redacts_commented_token_with_hash(self) -> None:
+        result = _redact_auth_properties("# sonar.token=my-secret\n")
+        assert "my-secret" not in result
+        assert "<redacted>" in result
+
+    def test_redacts_commented_token_with_exclamation(self) -> None:
+        result = _redact_auth_properties("! sonar.login=user123\n")
+        assert "user123" not in result
+        assert "<redacted>" in result
+
+    def test_redacts_password_in_file(self) -> None:
+        result = _redact_auth_properties("  sonar.password=p@ssw0rd\n")
+        assert "p@ssw0rd" not in result
+        assert "<redacted>" in result
+
+    def test_preserves_non_auth_lines(self) -> None:
+        original = "sonar.projectKey=my-project\nsonar.token=secret123\nsonar.sources=.\n# sonar.password=oldpass\n"
+        result = _redact_auth_properties(original)
+        assert "sonar.projectKey=my-project\n" in result
+        assert "sonar.sources=.\n" in result
+        assert "secret123" not in result
+        assert "oldpass" not in result
+        assert result.count("<redacted>") == 2
