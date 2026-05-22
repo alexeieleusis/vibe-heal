@@ -457,14 +457,20 @@ class ReviewOrchestrator:
         # PR comment is attached to a line that is actually in the diff.
         anchor_line = min(changed_in_block)
         other_locations = []
-        for block in group.get_other_blocks(target_ref):
+        # Skip only the specific target block instance (by identity), not all
+        # blocks sharing the same ref. This preserves same-file duplicates in
+        # the other_locations list.
+        target_block_id = id(target_block)
+        for block in group.blocks:
+            if id(block) == target_block_id:
+                continue
             file_info = response.get_file_info(block.ref)
             if file_info is None:
                 continue
-            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+            block_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
             other_locations.append(
                 DuplicationLocation(
-                    file_path=other_file_path,
+                    file_path=block_file_path,
                     from_line=block.from_line,
                     to_line=block.to_line,
                 )
@@ -567,14 +573,20 @@ class ReviewOrchestrator:
         if any(a_from <= target_block.to_line and a_to >= target_block.from_line for a_from, a_to in active_dup_ranges):
             return None
         other_locations = []
-        for block in group.get_other_blocks(target_ref):
+        # Skip only the specific target block instance (by identity), not all
+        # blocks sharing the same ref. This preserves same-file duplicates in
+        # the other_locations list.
+        target_block_id = id(target_block)
+        for block in group.blocks:
+            if id(block) == target_block_id:
+                continue
             file_info = response.get_file_info(block.ref)
             if file_info is None:
                 continue
-            other_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
+            block_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
             other_locations.append(
                 DuplicationLocation(
-                    file_path=other_file_path,
+                    file_path=block_file_path,
                     from_line=block.from_line,
                     to_line=block.to_line,
                 )

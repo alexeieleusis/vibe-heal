@@ -769,6 +769,48 @@ class TestGetActiveDuplications:
         assert result == []
         assert diag.active_dup_api_status.startswith("error:ValueError:")
 
+    @pytest.mark.asyncio
+    async def test_same_file_duplication_includes_other_locations(self, orchestrator) -> None:
+        """When both duplication blocks are in the same file (same _ref), the other
+        block should still appear in other_locations."""
+        from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
+
+        # Both blocks share _ref="1" (same file)
+        target_block = DuplicationBlock(**{"from": 171, "size": 35, "_ref": "1"})
+        other_block = DuplicationBlock(**{"from": 249, "size": 35, "_ref": "1"})
+        group = DuplicationGroup(blocks=[target_block, other_block])
+
+        file_info = MagicMock()
+        file_info.key = "temp-project:src/file.py"
+
+        response = MagicMock(spec=DuplicationsResponse)
+        response.duplications = [group]
+        response.get_target_file_ref.return_value = "1"
+        response.get_file_info.return_value = file_info
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            diag = self._make_diag()
+            result = await orchestrator._get_active_duplications(
+                Path("src/file.py"),
+                {"src/file.py": {180, 190}},  # lines inside the target block
+                diag,
+                project_key="temp-project",
+            )
+
+        assert len(result) == 1
+        assert result[0].from_line == 171
+        assert result[0].to_line == 205
+        assert len(result[0].other_locations) == 1
+        assert result[0].other_locations[0].file_path == "src/file.py"
+        assert result[0].other_locations[0].from_line == 249
+        assert result[0].other_locations[0].to_line == 283
+
 
 class TestGetResolvedDuplications:
     """Tests for ReviewOrchestrator._get_resolved_duplications()."""
@@ -935,3 +977,47 @@ class TestGetResolvedDuplications:
         assert passed_config.sonarqube_project_key == "main-project"
         # Orchestrator's own config must be untouched
         assert orchestrator.config.sonarqube_project_key == "temp-project"
+
+    @pytest.mark.asyncio
+    async def test_same_file_resolved_duplication_includes_other_locations(self, orchestrator) -> None:
+        """When both duplication blocks are in the same file (same _ref) on main,
+        the other block should still appear in other_locations for resolved dups."""
+        from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
+
+        # Both blocks share _ref="1" (same file)
+        target_block = DuplicationBlock(**{"from": 171, "size": 35, "_ref": "1"})
+        other_block = DuplicationBlock(**{"from": 249, "size": 35, "_ref": "1"})
+        group = DuplicationGroup(blocks=[target_block, other_block])
+
+        file_info = MagicMock()
+        file_info.key = "main-project:src/file.py"
+
+        response = MagicMock(spec=DuplicationsResponse)
+        response.duplications = [group]
+        response.get_target_file_ref.return_value = "1"
+        response.get_file_info.return_value = file_info
+
+        mock_dup_instance = AsyncMock()
+        mock_dup_instance.get_duplications_for_file.return_value = response
+
+        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+            MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
+            MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            diag = self._make_diag()
+            result = await orchestrator._get_resolved_duplications(
+                Path("src/file.py"),
+                changed_lines_map={"src/file.py": {180}},  # new changed lines
+                old_changed_lines_map={"src/file.py": {180}},  # old lines inside block
+                active_dup_ranges=set(),  # not covered by active dups
+                original_project_key="main-project",
+                diag=diag,
+            )
+
+        assert len(result) == 1
+        assert result[0].main_from_line == 171
+        assert result[0].main_to_line == 205
+        assert len(result[0].other_locations) == 1
+        assert result[0].other_locations[0].file_path == "src/file.py"
+        assert result[0].other_locations[0].from_line == 249
+        assert result[0].other_locations[0].to_line == 283
