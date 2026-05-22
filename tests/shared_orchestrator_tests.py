@@ -8,17 +8,19 @@ import pytest
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
 from vibe_heal.sonarqube.project_manager import TempProjectMetadata
 
+TEST_USER_EMAIL = "user@example.com"
+
 
 @pytest.fixture
 def temp_project() -> TempProjectMetadata:
     """Create a test temporary project metadata."""
     return TempProjectMetadata(
         project_key="test-project-user_example_com-feature",
-        project_name="Test Project (user@example.com - feature)",
+        project_name=f"Test Project ({TEST_USER_EMAIL} - feature)",
         created_at="2024-01-01T00:00:00Z",
         base_project_key="test-project",
         branch_name="feature",
-        user_email="user@example.com",
+        user_email=TEST_USER_EMAIL,
     )
 
 
@@ -45,7 +47,7 @@ class BaseTestCreateTempProject:
             patch.object(
                 orchestrator.branch_analyzer,
                 "get_user_email",
-                return_value="user@example.com",
+                return_value=TEST_USER_EMAIL,
             ),
             patch.object(
                 orchestrator.project_manager,
@@ -78,7 +80,7 @@ class BaseTestCreateTempProject:
             patch.object(
                 orchestrator.branch_analyzer,
                 "get_user_email",
-                return_value="user@example.com",
+                return_value=TEST_USER_EMAIL,
             ),
             patch.object(
                 orchestrator.project_manager,
