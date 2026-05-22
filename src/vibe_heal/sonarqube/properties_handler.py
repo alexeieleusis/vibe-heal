@@ -32,7 +32,7 @@ class SonarPropertiesHandler:
 
     @property
     def exists(self) -> bool:
-        return self.properties_file.exists()
+        return self.properties_file.is_file()
 
     def build_command(
         self,
