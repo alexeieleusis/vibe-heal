@@ -706,6 +706,7 @@ class DedupeBranchOrchestrator:
             branch_name=branch_name,
             user_email=user_email,
             console=self.console,
+            command_name="dedupe-branch",
         )
 
     async def _cleanup_temp_project(self, temp_project: "TempProjectMetadata") -> None:

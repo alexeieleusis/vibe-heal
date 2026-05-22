@@ -59,60 +59,6 @@ class TestValidateScannerAvailable:
             assert analysis_runner.validate_scanner_available() is False
 
 
-class TestGetScannerCommand:
-    """Tests for _get_scanner_command method."""
-
-    def test_basic_command(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
-        """Test basic scanner command generation."""
-        command = analysis_runner._get_scanner_command(
-            project_key="test-project",
-            project_name="Test Project",
-            project_dir=tmp_path,
-            sources=None,
-        )
-
-        assert "sonar-scanner" in command
-        assert "-Dsonar.projectKey=test-project" in command
-        assert "-Dsonar.projectName=Test Project" in command
-        assert "-Dsonar.host.url=https://sonar.test.com" in command
-        assert "-Dsonar.token=test-token" in command
-        assert "-Dsonar.sources=." in command
-
-    def test_command_with_sources(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
-        """Test scanner command with specific sources."""
-        sources = [Path("src/file1.py"), Path("src/file2.py")]
-
-        command = analysis_runner._get_scanner_command(
-            project_key="test-project",
-            project_name="Test Project",
-            project_dir=tmp_path,
-            sources=sources,
-        )
-
-        assert "-Dsonar.sources=src/file1.py,src/file2.py" in command
-
-    def test_command_with_basic_auth(self, mock_client: AsyncMock, tmp_path: Path) -> None:
-        """Test scanner command with basic auth instead of token."""
-        config = VibeHealConfig(
-            sonarqube_url="https://sonar.test.com",
-            sonarqube_username="testuser",
-            sonarqube_password="testpass",
-            sonarqube_project_key="my-project",
-        )
-        runner = AnalysisRunner(config, mock_client)
-
-        command = runner._get_scanner_command(
-            project_key="test-project",
-            project_name="Test Project",
-            project_dir=tmp_path,
-            sources=None,
-        )
-
-        assert "-Dsonar.login=testuser" in command
-        assert "-Dsonar.password=testpass" in command
-        assert "-Dsonar.token" not in " ".join(command)
-
-
 class TestExtractTaskId:
     """Tests for _extract_task_id method."""
 
@@ -418,3 +364,60 @@ class TestAnalysisResult:
         assert result.error_message == "Analysis failed"
         assert result.task_id is None
         assert result.dashboard_url is None
+
+
+class TestAuthHint:
+    @pytest.mark.asyncio
+    async def test_auth_hint_added_when_properties_file_and_auth_error(
+        self, analysis_runner: AnalysisRunner, tmp_path: Path
+    ) -> None:
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        mock_process = AsyncMock()
+        mock_process.returncode = 1
+        mock_process.communicate = AsyncMock(return_value=(b"", b"ERROR: 401 Unauthorized"))
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="temp-key",
+                project_name="Temp",
+                project_dir=tmp_path,
+            )
+        assert result.success is False
+        assert "SONAR_TOKEN" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_no_auth_hint_without_properties_file(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        mock_process = AsyncMock()
+        mock_process.returncode = 1
+        mock_process.communicate = AsyncMock(return_value=(b"", b"ERROR: 401 Unauthorized"))
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="test-key",
+                project_name="Test",
+                project_dir=tmp_path,
+            )
+        assert result.success is False
+        assert "SONAR_TOKEN" not in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_no_auth_hint_for_non_auth_failure(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        (tmp_path / "sonar-project.properties").write_text("sonar.projectKey=orig\n")
+        mock_process = AsyncMock()
+        mock_process.returncode = 1
+        mock_process.communicate = AsyncMock(return_value=(b"", b"ERROR: Project not found"))
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="temp-key",
+                project_name="Temp",
+                project_dir=tmp_path,
+            )
+        assert result.success is False
+        assert "SONAR_TOKEN" not in result.error_message

@@ -306,6 +306,7 @@ class ReviewOrchestrator:
             base_key=self.config.sonarqube_project_key,
             branch_name=current_branch,
             user_email=user_email,
+            command_name="review",
         )
         console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
 
