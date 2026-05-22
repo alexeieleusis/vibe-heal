@@ -212,6 +212,29 @@ class SonarQubeRule(BaseModel):
         return text.strip()
 
     @property
+    def root_cause_html(self) -> str | None:
+        """Get the HTML content of the root_cause description section."""
+        for section in self.description_sections:
+            if section.key == "root_cause":
+                return section.content
+        return None
+
+    def as_details_block(self, summary_label: str | None = None) -> str | None:
+        """Format root_cause as a GitHub collapsed <details> section.
+
+        Args:
+            summary_label: Text for the <summary> tag. Defaults to "Why: {rule name}".
+
+        Returns:
+            Formatted <details> block, or None if no root_cause section exists.
+        """
+        html = self.root_cause_html
+        if not html:
+            return None
+        label = summary_label or f"Why: {self.name}"
+        return f"<details>\n\n<summary>{label}</summary>\n\n{html}\n\n</details>"
+
+    @property
     def public_doc_url(self) -> str:
         """Generate URL for public SonarSource rule documentation.
 

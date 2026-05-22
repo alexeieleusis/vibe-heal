@@ -29,6 +29,7 @@ from vibe_heal.review.reporter import (
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeAPIError
+from vibe_heal.sonarqube.models import SonarQubeRule
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 console = Console()
@@ -96,6 +97,7 @@ class ReviewOrchestrator:
         self.project_manager = ProjectManager(client)
         self.analysis_runner = AnalysisRunner(config, client)
         self.github_client = GitHubReviewClient()
+        self._rule_cache: dict[str, SonarQubeRule | None] = {}
 
     async def run_analysis(
         self,
@@ -205,6 +207,7 @@ class ReviewOrchestrator:
                 file_issues, diag = await self._get_filtered_issues(
                     file_path, changed_lines_map, verbose, project_key=temp_key
                 )
+                file_issues = await self._enrich_issues_with_descriptions(file_issues)
                 active_dups = await self._get_active_duplications(
                     file_path, strict_new_lines_map, diag, project_key=temp_key
                 )
@@ -291,6 +294,34 @@ class ReviewOrchestrator:
             f"{report.total_duplications} duplication finding(s) "
             f"as review comments on PR #{pr}.[/green]"
         )
+
+    async def _enrich_issues_with_descriptions(self, issues: list[ReviewIssue]) -> list[ReviewIssue]:
+        """Populate root_cause on each issue by fetching rule details from SonarQube.
+
+        Caches results per rule key for the lifetime of this orchestrator instance.
+        No-ops when config.include_rule_description is False.
+
+        Args:
+            issues: Issues to enrich in-place.
+
+        Returns:
+            The same list with root_cause populated where available.
+        """
+        if not self.config.include_rule_description:
+            return issues
+
+        for issue in issues:
+            if issue.rule not in self._rule_cache:
+                try:
+                    self._rule_cache[issue.rule] = await self.client.get_rule_details(issue.rule)
+                except Exception:
+                    self._rule_cache[issue.rule] = None
+
+            cached = self._rule_cache[issue.rule]
+            if cached is not None:
+                issue.root_cause = cached.root_cause_html
+
+        return issues
 
     async def _create_temp_project(self) -> TempProjectMetadata:
         """Create temporary SonarQube project for analysis.

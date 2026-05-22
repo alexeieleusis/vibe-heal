@@ -129,6 +129,11 @@ class GitHubReviewClient:
                 body = f"**{issue.rule}** {issue.message}"
                 if issue.doc_url:
                     body += f"\n\n{issue.doc_url}"
+                if issue.root_cause:
+                    body += (
+                        f"\n\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
+                        f"\n\n{issue.root_cause}\n\n</details>"
+                    )
                 comments.append({
                     "path": file_review.file_path,
                     "line": issue.line,
