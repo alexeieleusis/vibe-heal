@@ -103,7 +103,7 @@ async def fetch_url_content(url: str) -> str | None:
         if local.exists():
             logger.debug("Reading vibe-types doc locally from %s", local)
             try:
-                return local.read_text()
+                return local.read_bytes()[:_MAX_DOC_BYTES].decode("utf-8", errors="replace")
             except OSError as e:
                 logger.debug("Failed to read local vibe-types file %s: %s", local, e)
         else:
@@ -120,13 +120,12 @@ async def fetch_url_content(url: str) -> str | None:
 
 async def fetch_external_rule_docs(message: str) -> list[str]:
     """Extract URLs from an issue message and return fetched content for each."""
-    urls = [u for u in extract_urls(message) if _is_safe_url(u)]
+    urls = extract_urls(message)
     if not urls:
         return []
     docs = []
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        for url in urls:
-            content = await _stream_capped(url, client)
-            if content is not None:
-                docs.append(content)
+    for url in urls:
+        content = await fetch_url_content(url)
+        if content is not None:
+            docs.append(content)
     return docs

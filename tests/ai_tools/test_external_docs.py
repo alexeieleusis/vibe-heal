@@ -161,7 +161,7 @@ class TestFetchUrlContent:
 
         mock_path = MagicMock(spec=Path)
         mock_path.exists.return_value = True
-        mock_path.read_text.side_effect = OSError("permission denied")
+        mock_path.read_bytes.side_effect = OSError("permission denied")
 
         with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=mock_path):
             content = await fetch_url_content(raw_url)
@@ -194,6 +194,19 @@ class TestFetchUrlContent:
 
         assert content == "# fallback content"
 
+    @pytest.mark.asyncio
+    async def test_local_read_respects_max_doc_bytes(self, tmp_path: Path) -> None:
+        large_file = tmp_path / "large.md"
+        large_file.write_bytes(b"x" * (_MAX_DOC_BYTES + 1000))
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=large_file):
+            content = await fetch_url_content(
+                "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/large.md"
+            )
+
+        assert content is not None
+        assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
+
 
 class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
@@ -220,3 +233,14 @@ class TestFetchExternalRuleDocs:
     async def test_ssrf_url_in_message_is_skipped(self) -> None:
         docs = await fetch_external_rule_docs("See http://192.168.1.1/rule for details.")
         assert docs == []
+
+    @pytest.mark.asyncio
+    async def test_vibe_types_url_in_message_reads_locally(self, tmp_path: Path) -> None:
+        local_file = tmp_path / "T01.md"
+        local_file.write_text("# local doc content")
+
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/T01.md"
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=local_file):
+            docs = await fetch_external_rule_docs(f"See {url} for details.")
+
+        assert docs == ["# local doc content"]
