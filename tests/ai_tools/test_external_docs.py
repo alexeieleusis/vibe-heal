@@ -4,7 +4,39 @@ import httpx
 import pytest
 import respx
 
-from vibe_heal.ai_tools.external_docs import extract_urls, fetch_external_rule_docs, fetch_url_content
+from vibe_heal.ai_tools.external_docs import (
+    _MAX_DOC_BYTES,
+    _is_safe_url,
+    extract_urls,
+    fetch_external_rule_docs,
+    fetch_url_content,
+)
+
+
+class TestIsSafeUrl:
+    def test_localhost_blocked(self) -> None:
+        assert not _is_safe_url("http://localhost/evil")
+
+    def test_loopback_ip_blocked(self) -> None:
+        assert not _is_safe_url("http://127.0.0.1/evil")
+
+    def test_ipv6_loopback_blocked(self) -> None:
+        assert not _is_safe_url("http://[::1]/evil")
+
+    def test_private_class_a_blocked(self) -> None:
+        assert not _is_safe_url("http://10.0.0.1/evil")
+
+    def test_private_class_b_blocked(self) -> None:
+        assert not _is_safe_url("http://172.16.0.1/evil")
+
+    def test_private_class_c_blocked(self) -> None:
+        assert not _is_safe_url("http://192.168.1.1/evil")
+
+    def test_public_hostname_allowed(self) -> None:
+        assert _is_safe_url("https://next.sonarqube.com/sonarqube/coding_rules")
+
+    def test_public_ip_allowed(self) -> None:
+        assert _is_safe_url("https://1.1.1.1/doc")
 
 
 class TestExtractUrls:
@@ -49,6 +81,25 @@ class TestFetchUrlContent:
         content = await fetch_url_content("https://example.com/error.md")
         assert content is None
 
+    @pytest.mark.asyncio
+    async def test_ssrf_localhost_returns_none(self) -> None:
+        content = await fetch_url_content("http://localhost/secret")
+        assert content is None
+
+    @pytest.mark.asyncio
+    async def test_ssrf_private_ip_returns_none(self) -> None:
+        content = await fetch_url_content("http://192.168.1.1/secret")
+        assert content is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_large_response_is_truncated(self) -> None:
+        large_content = "x" * (_MAX_DOC_BYTES + 1000)
+        respx.get("https://example.com/large.md").mock(return_value=httpx.Response(200, text=large_content))
+        content = await fetch_url_content("https://example.com/large.md")
+        assert content is not None
+        assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
+
 
 class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
@@ -69,4 +120,9 @@ class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
     async def test_no_urls_returns_empty(self) -> None:
         docs = await fetch_external_rule_docs("No links in this message.")
+        assert docs == []
+
+    @pytest.mark.asyncio
+    async def test_ssrf_url_in_message_is_skipped(self) -> None:
+        docs = await fetch_external_rule_docs("See http://192.168.1.1/rule for details.")
         assert docs == []

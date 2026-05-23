@@ -318,13 +318,11 @@ class TestOrchestratorFixFile:
             return_value=["# External rule doc"],
         )
 
-        captured: dict = {}
-
-        async def capture_fix_issue(issue, file_path, rule=None, code_context=None, external_docs=None):  # type: ignore[no-untyped-def]
-            captured["external_docs"] = external_docs
-            return FixResult(success=True, files_modified=["test.py"])
-
-        mocker.patch.object(ClaudeCodeTool, "fix_issue", side_effect=capture_fix_issue)
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
 
         orchestrator = VibeHealOrchestrator(mock_config)
         test_file = tmp_path / "test.py"
@@ -334,4 +332,4 @@ class TestOrchestratorFixFile:
 
         assert summary.total_issues == 1
         assert summary.fixed == 1
-        assert captured["external_docs"] == ["# External rule doc"]
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# External rule doc"]
