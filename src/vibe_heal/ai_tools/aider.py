@@ -58,6 +58,7 @@ class AiderTool(AITool):
         file_path: str,
         rule: "SonarQubeRule | None" = None,
         code_context: "list[SourceLine] | None" = None,
+        external_docs: "list[str] | None" = None,
     ) -> FixResult:
         """Fix an issue using Aider.
 
@@ -66,6 +67,7 @@ class AiderTool(AITool):
             file_path: Path to the file containing the issue
             rule: Detailed rule information (optional)
             code_context: Source code lines around the issue (optional)
+            external_docs: Documentation fetched from URLs in the issue message (optional)
 
         Returns:
             Result of the fix attempt
@@ -87,7 +89,7 @@ class AiderTool(AITool):
             )
 
         # Create prompt with enriched context
-        prompt = create_fix_prompt(issue, file_path, rule=rule, code_context=code_context)
+        prompt = create_fix_prompt(issue, file_path, rule=rule, code_context=code_context, external_docs=external_docs)
 
         # Invoke Aider
         try:

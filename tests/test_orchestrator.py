@@ -10,6 +10,7 @@ from vibe_heal.ai_tools import AIToolType, ClaudeCodeTool, FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
 from vibe_heal.sonarqube.models import SonarQubeIssue
 
 
@@ -290,3 +291,45 @@ class TestOrchestratorFixFile:
         assert summary.fixed == 1
         assert summary.failed == 0
         assert len(summary.commits) == 0  # No commits in dry-run
+
+    @pytest.mark.asyncio
+    async def test_fix_file_rule_not_found_falls_back_to_external_docs(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """When get_rule_details raises SonarQubeRuleNotFoundError, external docs from the
+        issue message URLs are fetched and forwarded to fix_issue."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [sample_issue]
+        mock_client.get_rule_details.side_effect = SonarQubeRuleNotFoundError("rule not found")
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        # external_docs fetched from issue message URLs
+        mocker.patch(
+            "vibe_heal.orchestrator.fetch_external_rule_docs",
+            return_value=["# External rule doc"],
+        )
+
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        assert summary.total_issues == 1
+        assert summary.fixed == 1
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# External rule doc"]

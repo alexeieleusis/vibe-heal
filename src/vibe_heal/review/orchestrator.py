@@ -29,7 +29,12 @@ from vibe_heal.review.reporter import (
 )
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeAPIError, SonarQubeError
+from vibe_heal.sonarqube.exceptions import (
+    ComponentNotFoundError,
+    SonarQubeAPIError,
+    SonarQubeError,
+    SonarQubeRuleNotFoundError,
+)
 from vibe_heal.sonarqube.models import SonarQubeRule
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
@@ -313,6 +318,9 @@ class ReviewOrchestrator:
             if issue.rule not in self._rule_cache:
                 try:
                     self._rule_cache[issue.rule] = await self.client.get_rule_details(issue.rule)
+                except SonarQubeRuleNotFoundError:
+                    logger.debug("Rule %s not found in SonarQube (external rule); skipping root_cause", issue.rule)
+                    self._rule_cache[issue.rule] = None
                 except SonarQubeError as e:
                     logger.warning("Could not fetch rule details for %s: %s", issue.rule, e)
                     self._rule_cache[issue.rule] = None

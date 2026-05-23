@@ -29,3 +29,7 @@ class ComponentNotFoundError(SonarQubeError):
     This typically means the file was not included in the SonarQube analysis
     (e.g., documentation files, test files excluded from sources).
     """
+
+
+class SonarQubeRuleNotFoundError(SonarQubeError):
+    """Rule not found in SonarQube (external or unsupported rule)."""
