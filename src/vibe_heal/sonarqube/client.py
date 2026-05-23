@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.sonarqube.exceptions import (
@@ -277,7 +278,10 @@ class SonarQubeClient:
                 raise SonarQubeRuleNotFoundError(f"Rule not found in SonarQube: {rule_key}") from e
             raise
 
-        response = RuleResponse(**data)
+        try:
+            response = RuleResponse(**data)
+        except ValidationError as e:
+            raise SonarQubeRuleNotFoundError(f"Rule not found in SonarQube: {rule_key}") from e
         return response.rule
 
     async def get_source_lines(

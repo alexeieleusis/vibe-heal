@@ -500,3 +500,24 @@ class TestSonarQubeClient:
         assert req.url.params["component"] == "target-project"
         assert req.url.params["key"] == "sonar.cpd.exclusions"
         assert req.url.params.get_list("values") == ["**/generated/**", "**/*.gen.ts"]
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_rule_details_missing_fields_raises_rule_not_found(self, config: VibeHealConfig) -> None:
+        """External rules may return 200 but omit required fields; should raise SonarQubeRuleNotFoundError."""
+        from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
+
+        # Simulate an external ESLint rule response that has key/name but no lang/langName/severity
+        response_data = {
+            "rule": {
+                "key": "external_eslint_repo:vibe-types/no-callback-pyramid",
+                "repo": "external_eslint_repo",
+                "name": "No callback pyramid",
+                "type": "CODE_SMELL",
+            }
+        }
+        respx.get("https://sonar.test.com/api/rules/show").mock(return_value=httpx.Response(200, json=response_data))
+
+        async with SonarQubeClient(config) as client:
+            with pytest.raises(SonarQubeRuleNotFoundError):
+                await client.get_rule_details("external_eslint_repo:vibe-types/no-callback-pyramid")
