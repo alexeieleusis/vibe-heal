@@ -14,7 +14,7 @@ class TestExtractUrls:
 
     def test_multiple_urls(self) -> None:
         urls = extract_urls("See https://example.com/a and https://example.com/b.")
-        assert urls == ["https://example.com/a", "https://example.com/b."]
+        assert urls == ["https://example.com/a", "https://example.com/b"]
 
     def test_no_urls(self) -> None:
         assert extract_urls("No links here at all.") == []

@@ -8,11 +8,13 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _URL_PATTERN = re.compile(r"https?://\S+")
+_TRAILING_PUNCTUATION = frozenset(".,);:'\"")
+_MAX_DOC_BYTES = 50_000
 
 
 def extract_urls(text: str) -> list[str]:
-    """Extract all HTTP/HTTPS URLs from a string."""
-    return _URL_PATTERN.findall(text)
+    """Extract all HTTP/HTTPS URLs from a string, stripping trailing punctuation."""
+    return [url.rstrip("".join(_TRAILING_PUNCTUATION)) for url in _URL_PATTERN.findall(text)]
 
 
 async def fetch_url_content(url: str) -> str | None:
@@ -22,7 +24,7 @@ async def fetch_url_content(url: str) -> str | None:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.get(url)
             response.raise_for_status()
-            return response.text
+            return response.text[:_MAX_DOC_BYTES]
     except Exception as e:
         logger.debug("Failed to fetch %s: %s", url, e)
         return None

@@ -268,6 +268,10 @@ class SonarQubeClient:
 
         try:
             data = await self._request("GET", "/api/rules/show", params=params)
+        except ComponentNotFoundError as e:
+            # _request() raises ComponentNotFoundError for any 404 whose body contains
+            # "not found". Reclassify so callers see a consistent SonarQubeRuleNotFoundError.
+            raise SonarQubeRuleNotFoundError(f"Rule not found in SonarQube: {rule_key}") from e
         except SonarQubeAPIError as e:
             if e.status_code == 404:
                 raise SonarQubeRuleNotFoundError(f"Rule not found in SonarQube: {rule_key}") from e
