@@ -88,6 +88,26 @@ def _render_issues_table(issues: list[ReviewIssue]) -> list[str]:
     return lines
 
 
+def _render_rule_descriptions(issues: list[ReviewIssue]) -> list[str]:
+    """Render one collapsed <details> per unique rule that has a root_cause."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for issue in issues:
+        if issue.root_cause and issue.rule not in seen:
+            seen.add(issue.rule)
+            lines.extend([
+                "<details>",
+                "",
+                f"<summary>{issue.rule} — why this matters</summary>",
+                "",
+                issue.root_cause,
+                "",
+                "</details>",
+                "",
+            ])
+    return lines
+
+
 def _render_duplications(duplications: list[ReviewDuplication]) -> list[str]:
     """Render the active duplications section."""
     lines = ["### Active Duplications", "", "| Block (this file) | Duplicated in |", "|---|---|"]
@@ -122,6 +142,7 @@ def _render_file_section(fr: FileReview, base_branch: str = "main") -> list[str]
 
     if fr.issues:
         lines.extend(_render_issues_table(fr.issues))
+        lines.extend(_render_rule_descriptions(fr.issues))
 
     if fr.duplications:
         lines.extend(_render_duplications(fr.duplications))

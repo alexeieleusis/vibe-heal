@@ -386,12 +386,15 @@ class GitManager:
 
         body_parts.append("")
 
-        # Add public documentation link
+        # Add public documentation link and collapsed root-cause explanation
         if rule:
             body_parts.extend([
                 f"Rationale: {rule.public_doc_url}",
                 "",
             ])
+            details = rule.as_details_block()
+            if details:
+                body_parts.extend([details, ""])
 
         body_parts.extend([
             f"Fixed by: vibe-heal using {ai_tool_type.display_name}",

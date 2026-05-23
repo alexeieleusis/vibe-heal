@@ -23,6 +23,10 @@ class ReviewIssue(BaseModel):
             "during filtering and no source_is_new_map is passed to filter_issues()."
         ),
     )
+    root_cause: str | None = Field(
+        default=None,
+        description="HTML content of the root_cause description section from SonarQube rule API",
+    )
 
 
 class DuplicationLocation(BaseModel):

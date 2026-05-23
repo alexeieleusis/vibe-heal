@@ -313,6 +313,7 @@ class TestRunAnalysis:
             ) as mock_delete,
             patch.object(orchestrator, "_get_active_duplications", new_callable=AsyncMock, return_value=[]),
             patch.object(orchestrator, "_get_resolved_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator.client, "get_rule_details", AsyncMock(return_value=None)),
         ):
             result = await orchestrator.run_analysis(
                 base_branch="origin/main",
@@ -465,6 +466,7 @@ class TestRunAnalysis:
             ),
             patch.object(orchestrator, "_get_active_duplications", new_callable=AsyncMock, return_value=[]),
             patch.object(orchestrator, "_get_resolved_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator.client, "get_rule_details", AsyncMock(return_value=None)),
         ):
             report_path = tmp_path / "reports" / "review.json"
             result = await orchestrator.run_analysis(
