@@ -209,7 +209,7 @@ class ReviewOrchestrator:
                 file_issues, diag = await self._get_filtered_issues(
                     file_path, changed_lines_map, verbose, project_key=temp_key
                 )
-                file_issues = await self._enrich_issues_with_descriptions(file_issues)
+                await self._enrich_issues_with_descriptions(file_issues)
                 active_dups = await self._get_active_duplications(
                     file_path, strict_new_lines_map, diag, project_key=temp_key
                 )
@@ -297,20 +297,17 @@ class ReviewOrchestrator:
             f"as review comments on PR #{pr}.[/green]"
         )
 
-    async def _enrich_issues_with_descriptions(self, issues: list[ReviewIssue]) -> list[ReviewIssue]:
+    async def _enrich_issues_with_descriptions(self, issues: list[ReviewIssue]) -> None:
         """Populate root_cause on each issue by fetching rule details from SonarQube.
 
-        Caches results per rule key for the lifetime of this orchestrator instance.
-        No-ops when config.include_rule_description is False.
+        Mutates issues in-place. Caches results per rule key for the lifetime of
+        this orchestrator instance. No-ops when config.include_rule_description is False.
 
         Args:
             issues: Issues to enrich in-place.
-
-        Returns:
-            The same list with root_cause populated where available.
         """
         if not self.config.include_rule_description:
-            return issues
+            return
 
         for issue in issues:
             if issue.rule not in self._rule_cache:
@@ -323,8 +320,6 @@ class ReviewOrchestrator:
             cached = self._rule_cache[issue.rule]
             if cached is not None:
                 issue.root_cause = cached.root_cause_html
-
-        return issues
 
     async def _create_temp_project(self) -> TempProjectMetadata:
         """Create temporary SonarQube project for analysis.
