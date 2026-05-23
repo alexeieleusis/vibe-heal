@@ -1,5 +1,6 @@
 """Review orchestration for analyzing SonarQube issues on changed lines."""
 
+import logging
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -28,10 +29,11 @@ from vibe_heal.review.reporter import (
 )
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
-from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeAPIError
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError, SonarQubeAPIError, SonarQubeError
 from vibe_heal.sonarqube.models import SonarQubeRule
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 
@@ -314,7 +316,8 @@ class ReviewOrchestrator:
             if issue.rule not in self._rule_cache:
                 try:
                     self._rule_cache[issue.rule] = await self.client.get_rule_details(issue.rule)
-                except Exception:
+                except SonarQubeError as e:
+                    logger.warning("Could not fetch rule details for %s: %s", issue.rule, e)
                     self._rule_cache[issue.rule] = None
 
             cached = self._rule_cache[issue.rule]

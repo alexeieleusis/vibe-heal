@@ -151,3 +151,53 @@ class TestWriteReports:
         assert (custom_dir / "review.md").exists()
         loaded = load_report(custom_dir)
         assert loaded.total_issues == 3
+
+    def test_markdown_rule_descriptions_collapsed_section(self, tmp_path: Path) -> None:
+        """root_cause on ReviewIssue renders as one <details> block per unique rule."""
+        result = ReviewResult(
+            project_key="my-project",
+            branch="feature/test",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/example.py",
+                    issues=[
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Remove unused variable",
+                            line=10,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables clutter code.</p>",
+                        ),
+                        # Same rule — should produce only one <details> block
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Another unused variable",
+                            line=20,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables clutter code.</p>",
+                        ),
+                        # Different rule — should produce a second <details> block
+                        ReviewIssue(
+                            rule="python:S1192",
+                            message="Define a constant",
+                            line=30,
+                            severity="MINOR",
+                            root_cause="<p>Magic numbers reduce readability.</p>",
+                        ),
+                        # No root_cause — should produce no <details> block
+                        ReviewIssue(rule="python:S999", message="Other issue", line=40, severity="INFO"),
+                    ],
+                )
+            ],
+        )
+        write_reports(result, tmp_path)
+        md = (tmp_path / "review.md").read_text()
+
+        assert md.count("<details>") == 2
+        assert md.count("</details>") == 2
+        assert "python:S1481 — why this matters" in md
+        assert "python:S1192 — why this matters" in md
+        assert "<p>Unused variables clutter code.</p>" in md
+        assert "<p>Magic numbers reduce readability.</p>" in md
+        assert "python:S999" not in md.split("<details>")[1] if "<details>" in md else True
