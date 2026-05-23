@@ -1,7 +1,7 @@
 """Tests for external_docs URL extraction and fetching."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -68,8 +68,9 @@ class TestVibeTypesLocalPath:
         url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
         result = _vibe_types_local_path(url)
         assert result is not None
-        assert result.parts[-3:] == ("vendor", "vibe-types", "plugin") or "vendor/vibe-types" in str(result)
-        assert str(result).endswith("plugin/skills/typescript/catalog/T01-algebraic-data-types.md")
+        assert result.as_posix().endswith(
+            "vendor/vibe-types/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        )
 
     def test_raw_main_url(self) -> None:
         url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
@@ -88,6 +89,16 @@ class TestVibeTypesLocalPath:
 
     def test_other_github_repo_returns_none(self) -> None:
         assert _vibe_types_local_path("https://github.com/someother/repo/blob/main/file.md") is None
+
+    def test_path_traversal_returns_none(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/../../etc/passwd"
+        assert _vibe_types_local_path(url) is None
+
+    def test_url_with_query_string_strips_query(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md?token=secret"
+        result = _vibe_types_local_path(url)
+        assert result is not None
+        assert result.as_posix().endswith("vendor/vibe-types/plugin/file.md")
 
 
 class TestFetchUrlContent:
@@ -141,6 +152,33 @@ class TestFetchUrlContent:
             content = await fetch_url_content(url)
 
         assert content == "# T01 local content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_local_read_oserror_falls_back_to_http(self) -> None:
+        raw_url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md"
+        respx.get(raw_url).mock(return_value=httpx.Response(200, text="# http content"))
+
+        mock_path = MagicMock(spec=Path)
+        mock_path.exists.return_value = True
+        mock_path.read_text.side_effect = OSError("permission denied")
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=mock_path):
+            content = await fetch_url_content(raw_url)
+
+        assert content == "# http content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_blob_url_converts_to_raw_when_local_path_is_none(self) -> None:
+        raw_url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md"
+        respx.get(raw_url).mock(return_value=httpx.Response(200, text="# raw content"))
+
+        blob_url = "https://github.com/jpablo/vibe-types/blob/main/plugin/file.md"
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(blob_url)
+
+        assert content == "# raw content"
 
     @pytest.mark.asyncio
     @respx.mock
