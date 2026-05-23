@@ -1,5 +1,8 @@
 """Tests for external_docs URL extraction and fetching."""
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import httpx
 import pytest
 import respx
@@ -7,6 +10,7 @@ import respx
 from vibe_heal.ai_tools.external_docs import (
     _MAX_DOC_BYTES,
     _is_safe_url,
+    _vibe_types_local_path,
     extract_urls,
     fetch_external_rule_docs,
     fetch_url_content,
@@ -59,6 +63,44 @@ class TestExtractUrls:
         assert extract_urls("") == []
 
 
+class TestVibeTypesLocalPath:
+    def test_raw_refs_heads_url(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        result = _vibe_types_local_path(url)
+        assert result is not None
+        assert result.as_posix().endswith(
+            "vendor/vibe-types/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        )
+
+    def test_raw_main_url(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        result = _vibe_types_local_path(url)
+        assert result is not None
+        assert str(result).endswith("plugin/skills/typescript/catalog/T01-algebraic-data-types.md")
+
+    def test_blob_url(self) -> None:
+        url = "https://github.com/jpablo/vibe-types/blob/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        result = _vibe_types_local_path(url)
+        assert result is not None
+        assert str(result).endswith("plugin/skills/typescript/catalog/T01-algebraic-data-types.md")
+
+    def test_non_vibe_types_url_returns_none(self) -> None:
+        assert _vibe_types_local_path("https://example.com/doc.md") is None
+
+    def test_other_github_repo_returns_none(self) -> None:
+        assert _vibe_types_local_path("https://github.com/someother/repo/blob/main/file.md") is None
+
+    def test_path_traversal_returns_none(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/../../etc/passwd"
+        assert _vibe_types_local_path(url) is None
+
+    def test_url_with_query_string_strips_query(self) -> None:
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md?token=secret"
+        result = _vibe_types_local_path(url)
+        assert result is not None
+        assert result.as_posix().endswith("vendor/vibe-types/plugin/file.md")
+
+
 class TestFetchUrlContent:
     @pytest.mark.asyncio
     @respx.mock
@@ -100,6 +142,71 @@ class TestFetchUrlContent:
         assert content is not None
         assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
 
+    @pytest.mark.asyncio
+    async def test_vibe_types_url_reads_locally_when_file_exists(self, tmp_path: Path) -> None:
+        local_file = tmp_path / "T01.md"
+        local_file.write_text("# T01 local content")
+
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=local_file):
+            content = await fetch_url_content(url)
+
+        assert content == "# T01 local content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_local_read_oserror_falls_back_to_http(self) -> None:
+        raw_url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md"
+        respx.get(raw_url).mock(return_value=httpx.Response(200, text="# http content"))
+
+        mock_path = MagicMock(spec=Path)
+        mock_path.exists.return_value = True
+        mock_path.read_bytes.side_effect = OSError("permission denied")
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=mock_path):
+            content = await fetch_url_content(raw_url)
+
+        assert content == "# http content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_blob_url_converts_to_raw_when_local_path_is_none(self) -> None:
+        raw_url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/file.md"
+        respx.get(raw_url).mock(return_value=httpx.Response(200, text="# raw content"))
+
+        blob_url = "https://github.com/jpablo/vibe-types/blob/main/plugin/file.md"
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(blob_url)
+
+        assert content == "# raw content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_blob_url_falls_back_to_raw_when_no_submodule(self) -> None:
+        raw_url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        respx.get(raw_url).mock(return_value=httpx.Response(200, text="# fallback content"))
+
+        blob_url = "https://github.com/jpablo/vibe-types/blob/main/plugin/skills/typescript/catalog/T01-algebraic-data-types.md"
+        with patch(
+            "vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=Path("/nonexistent/path/T01.md")
+        ):
+            content = await fetch_url_content(blob_url)
+
+        assert content == "# fallback content"
+
+    @pytest.mark.asyncio
+    async def test_local_read_respects_max_doc_bytes(self, tmp_path: Path) -> None:
+        large_file = tmp_path / "large.md"
+        large_file.write_bytes(b"x" * (_MAX_DOC_BYTES + 1000))
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=large_file):
+            content = await fetch_url_content(
+                "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/large.md"
+            )
+
+        assert content is not None
+        assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
+
 
 class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
@@ -126,3 +233,14 @@ class TestFetchExternalRuleDocs:
     async def test_ssrf_url_in_message_is_skipped(self) -> None:
         docs = await fetch_external_rule_docs("See http://192.168.1.1/rule for details.")
         assert docs == []
+
+    @pytest.mark.asyncio
+    async def test_vibe_types_url_in_message_reads_locally(self, tmp_path: Path) -> None:
+        local_file = tmp_path / "T01.md"
+        local_file.write_text("# local doc content")
+
+        url = "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/plugin/T01.md"
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=local_file):
+            docs = await fetch_external_rule_docs(f"See {url} for details.")
+
+        assert docs == ["# local doc content"]
