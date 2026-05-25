@@ -674,16 +674,13 @@ async def _run_review_post(
             console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
 
     if dry_run:
-        from vibe_heal.review.github import GitHubReviewClient
-
-        payload = GitHubReviewClient()._build_payload(report)
+        payload = github_client.build_payload(report)
         comments = payload["comments"]
         console.print(f"[yellow][dry-run] Would post {len(comments)} inline comment(s) to PR #{pr}:[/yellow]")
+        console.print(f"[dim]Review body: {payload['body']}[/dim]")
         for comment in comments:
             console.print(f"\n  [dim]{comment['path']}:{comment['line']}[/dim]")
             console.print(comment["body"])
-        if not comments:
-            console.print(f"  [dim]{payload['body']}[/dim]")
         return
 
     await github_client.post_review(pr, report)

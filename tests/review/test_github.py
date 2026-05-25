@@ -319,7 +319,7 @@ class TestPostReview:
 
     @pytest.mark.asyncio
     async def test_root_cause_in_inline_comment_and_review_body(self, mocker) -> None:
-        """Root-cause <details> blocks appear in each inline comment body AND deduplicated in the review body."""
+        """Root-cause <details> blocks appear in each inline comment body, but are not duplicated in the review body (which contains only the summary)."""
         report_with_root_cause = ReviewResult(
             project_key="test",
             branch="feat",
