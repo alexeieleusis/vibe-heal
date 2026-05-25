@@ -71,6 +71,56 @@ AI_TOOL=claude-code  # or "aider"
 # PRE_COMMIT_COMMAND=pre-commit run --files  # explicit command
 ```
 
+## sonar-project.properties Support
+
+If your project already has a `sonar-project.properties` file at the repository root, vibe-heal detects it automatically and adjusts its scanner invocation accordingly.
+
+### How It Works
+
+**Without the file** — vibe-heal passes all scanner settings as `-D` flags:
+
+```
+sonar-scanner -Dsonar.projectKey=... -Dsonar.projectName=... -Dsonar.host.url=... -Dsonar.token=... -Dsonar.sources=.
+```
+
+**With the file** — vibe-heal builds a minimal command and only appends flags that are not already configured:
+
+```
+sonar-scanner  # -Dsonar.token=... added only if no auth found in file or env
+```
+
+Auth presence is checked in both the properties file itself and the environment variables `SONAR_TOKEN`, `SONARQUBE_TOKEN`, `SONAR_LOGIN`. Host URL is similarly checked against `SONAR_HOST_URL` and `SONARQUBE_HOST_URL`.
+
+### Temporary Project Patching
+
+`cleanup` (and `dedupe-branch`) create a **temporary** SonarQube project for the analysis run. Because the properties file governs the project key, vibe-heal patches `sonar.projectKey` and `sonar.projectName` in the file for the duration of the analysis, then restores the original content.
+
+Before patching, vibe-heal writes a recovery comment block so the file can be restored manually if the process is interrupted:
+
+```properties
+# vibe-heal: temporary analysis project. If this process was interrupted,
+# restore the lines below (remove the '#' prefix):
+# sonar.projectKey=my-project
+# sonar.projectName=My Project
+sonar.projectKey=my-project_user_example_com_feature_new_api_260525-1430
+sonar.projectName=vibe-heal cleanup: my-project (feature/new-api @ 2026-05-25 14:30)
+```
+
+On normal completion the original values are restored automatically.
+
+### If sonar-scanner Reports Authentication Errors
+
+When the properties file exists and a scanner run fails with an auth-related error (401/403), vibe-heal prints a hint:
+
+```
+Hint: authentication may be configured via environment variable
+(SONAR_TOKEN, SONARQUBE_TOKEN) or the central scanner settings
+(~/.sonar/sonar-scanner.properties). Check these if you expected
+auth to be picked up automatically.
+```
+
+If auth is already in the properties file or env, vibe-heal will not add it again, so check both places.
+
 ## Basic Usage
 
 ### Clean up current branch

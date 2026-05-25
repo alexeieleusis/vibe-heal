@@ -58,6 +58,12 @@ INCLUDE_RULE_DESCRIPTION=true  # default: true
 
 No AI tool configuration is required for the review command — it only reads, never writes.
 
+## sonar-project.properties Support
+
+If your project has a `sonar-project.properties` file, vibe-heal uses it automatically. Only auth or host-URL flags that are absent from both the file and the environment are appended to the `sonar-scanner` command. All other scanner settings (exclusions, language plugins, coverage paths, etc.) are preserved as-is.
+
+For the temporary SonarQube project created during `review`, vibe-heal patches `sonar.projectKey` and `sonar.projectName` in the file while the scanner runs, then restores the originals. A recovery comment is written first so you can restore manually if the process is interrupted. See the [Branch Cleanup Guide](branch-cleanup-guide.md#sonar-projectproperties-support) for full details.
+
 ## Basic Usage
 
 ### Analyze changed lines

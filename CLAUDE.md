@@ -289,6 +289,31 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - `FileDedupResult` model - tracks per-file deduplication results
 - `DedupeBranchResult` model - tracks overall branch deduplication results
 
+**`review/`**: Branch review workflow — reports SonarQube issues scoped to changed lines
+
+- `ReviewOrchestrator` - orchestrates the two-phase review workflow
+  - `run_analysis(base_branch, file_patterns, report_file, verbose)` - analyze changed lines for issues
+    - Workflow: get modified files → parse diff (changed lines) → create temp project → run analysis → filter issues/duplications to changed lines → write report → delete temp project
+    - Saves `review.json` and `review.md` to `~/.vibe-heal/reviews/<project-key>/<branch>/` by default
+    - Enriches issues with rule `root_cause` HTML (gated on `INCLUDE_RULE_DESCRIPTION`)
+    - Caches rule lookups per orchestrator instance to avoid redundant API calls
+  - `run_post(report_file, pr_number, verbose)` - post saved report to a GitHub PR
+  - `_enrich_issues_with_descriptions(issues)` - populates `root_cause` on each issue from rule API; mutates in-place
+- `ReviewAnalysisResult` model - result of `run_analysis`; includes `total_issues`, `total_duplications`, `files_analyzed`
+- `ReviewResult` / `FileReview` / `ReviewIssue` models (`review/models.py`) - serializable report data
+  - `ReviewIssue.root_cause` - persisted in `review.json` so `--post` can include descriptions without re-fetching
+  - `ReviewDuplication` - active duplication block intersecting changed lines (reported against temp project)
+  - `ResolvedDuplication` - duplication block from `main` that was modified but is no longer active in the branch
+- `IssueLineFilter` (`review/line_filter.py`) - filters SonarQube issues to changed lines from diff
+- `GitHubReviewClient` (`review/github.py`) - posts review results as inline comments via `gh` CLI
+  - `detect_pr()` - auto-detects open PR for the current branch
+  - `post_review(pr, report)` - submits inline comments + review body to GitHub
+  - Appends collapsed `<details>` block with `root_cause` HTML to each inline comment
+  - **Requirement**: `gh` CLI must be installed and authenticated
+- `reporter.py` - writes `review.json` and `review.md` reports
+  - `default_report_dir(project_key, branch)` - `~/.vibe-heal/reviews/<project-key>/<branch>/`
+  - Markdown report: issues table per file + one collapsed `<details>` per unique rule (deduped)
+
 **`cli.py`**: Command-line interface with typer
 
 - `vibe-heal fix <file>` - fix issues in a single file
@@ -305,6 +330,16 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--env-file`, `--verbose`
   - Creates temporary SonarQube project, runs analysis, dedupes files iteratively
   - Displays per-file results with duplications fixed counts
+- `vibe-heal review` - analyze SonarQube issues on changed lines (read-only, no fixes)
+  - Flags: `--base-branch` (default: origin/main), `--pattern`, `--report-file`, `--env-file`, `--verbose`
+  - Creates temporary SonarQube project, runs analysis, reports issues/duplications on changed lines only
+  - Saves `review.json` + `review.md` to `~/.vibe-heal/reviews/<project-key>/<branch>/` by default
+  - Displays per-file breakdown table (issues, highest severity, duplication findings)
+- `vibe-heal review --post` - post a saved review report as inline GitHub PR comments
+  - Additional flags: `--post`, `--dry-run`, `--pr` (explicit PR number)
+  - Loads previously saved `review.json` (from default path or `--report-file`); no SonarQube call needed
+  - Auto-detects open PR via `gh` CLI; use `--pr` to override
+  - `--dry-run` previews comments without making GitHub API calls
 - `vibe-heal config` - shows current configuration
   - Flags: `--env-file`
 - `vibe-heal version` - shows version information
