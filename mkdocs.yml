@@ -10,6 +10,7 @@ copyright: Maintained by <a href="https://alexeieleusis.com">alexeieleusis</a>.
 nav:
   - Home: index.md
   - Branch Cleanup Guide: branch-cleanup-guide.md
+  - Review Guide: review-guide.md
   - Architecture: ARCHITECTURE.md
   - API Reference: modules.md
 plugins:

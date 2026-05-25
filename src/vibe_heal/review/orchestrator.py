@@ -212,7 +212,11 @@ class ReviewOrchestrator:
                 # - FileReview.file_path (GitHub requires repo-root-relative paths)
                 repo_relative = self._to_repo_relative(file_path)
                 file_issues, diag = await self._get_filtered_issues(
-                    file_path, changed_lines_map, verbose, project_key=temp_key
+                    file_path,
+                    changed_lines_map,
+                    verbose,
+                    project_key=temp_key,
+                    strict_changed_lines_map=strict_new_lines_map,
                 )
                 await self._enrich_issues_with_descriptions(file_issues)
                 active_dups = await self._get_active_duplications(
@@ -371,13 +375,19 @@ class ReviewOrchestrator:
         changed_lines_map: dict[str, set[int]],
         verbose: bool,
         project_key: str,
+        strict_changed_lines_map: dict[str, set[int]] | None = None,
     ) -> tuple[list[ReviewIssue], FileDiagnostics]:
         """Fetch issues for a file and filter to changed lines.
 
         Args:
             file_path: Path to the file.
-            changed_lines_map: Mapping of file paths to changed line sets.
+            changed_lines_map: Mapping of file paths to changed line sets
+                (may include trailing context lines from DiffParser).
             verbose: Enable verbose output.
+            project_key: SonarQube project key to query.
+            strict_changed_lines_map: Unexpanded changed lines (no trailing
+                context). Issues only in the trailing window are included but
+                marked on_changed_line=False so they are not posted inline.
 
         Returns:
             Tuple of (filtered ReviewIssues, FileDiagnostics for this file).
@@ -407,7 +417,8 @@ class ReviewOrchestrator:
                 console.print(f"[dim]  {file_path}: no changed lines in diff[/dim]")
             return [], diag
 
-        filtered = IssueLineFilter.filter_issues(issues, changed_lines)
+        strict_lines = strict_changed_lines_map.get(repo_relative) if strict_changed_lines_map else None
+        filtered = IssueLineFilter.filter_issues(issues, changed_lines, strict_changed_lines=strict_lines)
 
         if verbose and filtered:
             console.print(f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]")

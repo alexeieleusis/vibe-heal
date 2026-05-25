@@ -45,8 +45,11 @@ src/vibe_heal/
 │   └── loader.py           # Configuration loading logic
 ├── sonarqube/
 │   ├── __init__.py
-│   ├── client.py           # SonarQube API client
-│   └── models.py           # SonarQube response models
+│   ├── client.py               # SonarQube API client
+│   ├── models.py               # SonarQube response models
+│   ├── analysis_runner.py      # sonar-scanner subprocess + poll for completion
+│   ├── project_manager.py      # Temp project lifecycle
+│   └── properties_handler.py  # sonar-project.properties detection, command building, and patching
 ├── ai_tools/
 │   ├── __init__.py
 │   ├── base.py             # Abstract base class + AIToolType enum
@@ -146,6 +149,28 @@ class VibeHealConfig(BaseSettings):
 - `/api/issues/search` - Search for issues
   - Params: `componentKeys`, `resolved=false`
   - Filter by file path in results
+
+### 2a. SonarPropertiesHandler (`sonarqube/properties_handler.py`)
+
+**Purpose**: Detect `sonar-project.properties`, build the `sonar-scanner` command with the minimal set of `-D` flags needed, and temporarily patch the file for temp-project analysis runs.
+
+**Key class**:
+- `SonarPropertiesHandler(project_dir, config)`
+  - `exists` — `True` when `sonar-project.properties` is present in `project_dir`
+  - `build_command(project_key, project_name, sources) -> list[str]` — returns the full scanner command
+    - **No file**: passes `projectKey`, `projectName`, `host.url`, auth, and `sources` as `-D` flags
+    - **File exists**: starts with `["sonar-scanner"]` and appends only flags missing from both the file and the environment
+  - `patched(project_key, project_name)` — context manager; if the file exists and its project key differs from the requested one, replaces `sonar.projectKey` / `sonar.projectName` for the duration, then restores the original content
+    - Writes a recovery comment block before patching so the file can be restored manually if the process is interrupted
+    - On `OSError` during restore, logs the original content (auth properties redacted)
+
+**Auth / host-URL detection** — checks environment variables first (`SONAR_TOKEN`, `SONARQUBE_TOKEN`, `SONAR_LOGIN` for auth; `SONAR_HOST_URL`, `SONARQUBE_HOST_URL` for the host URL), then falls back to scanning non-commented lines in the properties file. A flag is only appended when it is absent from both sources.
+
+**`AnalysisRunner` integration** (`sonarqube/analysis_runner.py`):
+- Instantiates `SonarPropertiesHandler` on every `run_analysis` call
+- Uses `handler.build_command(...)` to produce the scanner command
+- Wraps the subprocess call in `handler.patched(...)` so key/name are patched while the scanner runs
+- When the properties file exists and the scanner exits with an auth-related error (401/403), appends a human-readable hint pointing to env vars and `~/.sonar/sonar-scanner.properties`
 
 ### 3. Issue Processor (`processor/`)
 

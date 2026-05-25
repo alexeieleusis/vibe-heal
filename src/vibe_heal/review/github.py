@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any, cast
 from urllib.parse import urlparse
 
 from vibe_heal.ai_tools.utils import run_command
-from vibe_heal.review.models import ReviewResult
+from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubReviewError(Exception):
@@ -88,7 +91,7 @@ class GitHubReviewClient:
         """
         await self.validate_installed()
         owner_repo = await self._get_owner_repo()
-        payload = self._build_payload(report)
+        payload = self.build_payload(report)
 
         try:
             await self._post_json(
@@ -103,7 +106,17 @@ class GitHubReviewClient:
                 ],
                 payload,
             )
-        except GitHubReviewError:
+        except GitHubReviewError as inline_err:
+            logger.warning(
+                "Inline review failed (%s) — falling back to top-level comment",
+                inline_err,
+            )
+            from rich.console import Console as _Console
+
+            _Console(stderr=True).print(
+                f"[yellow]Warning: inline review rejected by GitHub ({inline_err}) — "
+                "posting as a top-level comment instead.[/yellow]"
+            )
             fallback = self._build_fallback_payload(report)
             try:
                 await self._post_json(
@@ -121,71 +134,90 @@ class GitHubReviewClient:
             except GitHubReviewError as e:
                 raise GitHubReviewError(f"Review posting failed: {e}") from e
 
-    def _build_payload(self, report: ReviewResult) -> dict[str, Any]:
+    def build_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build the GitHub review payload with inline comments."""
         comments: list[dict[str, Any]] = []
+        nearby_lines: list[str] = []
         for file_review in report.files:
-            for issue in file_review.issues:
-                body = f"**{issue.rule}** {issue.message}"
-                if issue.doc_url:
-                    body += f"\n\n{issue.doc_url}"
-                if issue.root_cause:
-                    body += (
-                        f"\n\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
-                        f"\n\n{issue.root_cause}\n\n</details>"
-                    )
-                comments.append({
-                    "path": file_review.file_path,
-                    "line": issue.line,
-                    "side": "RIGHT",
-                    "body": body,
-                })
-            for dup in file_review.duplications:
-                locations = ", ".join(
-                    f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
-                )
-                body = (
-                    f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n"
-                    f"This block is duplicated in: {locations}"
-                )
-                # Use anchor_line (a changed line in the diff) so the GitHub API
-                # accepts the comment; fall back to from_line for older reports.
-                anchor = dup.anchor_line if dup.anchor_line is not None else dup.from_line
-                comments.append({
-                    "path": file_review.file_path,
-                    "line": anchor,
-                    "side": "RIGHT",
-                    "body": body,
-                })
-            for res in file_review.resolved_duplications:
-                other = "\n".join(
-                    f"- `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations
-                )
-                base_branch = report.base_branch
-                body = (
-                    f"**Possible missed update** - lines {res.main_from_line}-{res.main_to_line} in `{base_branch}` were duplicated.\n\n"
-                    "You modified this region. The duplication may be resolved here, but check the other instances:\n\n"
-                    f"{other}"
-                )
-                comments.append({
-                    "path": file_review.file_path,
-                    "line": res.anchor_new_line,
-                    "side": "RIGHT",
-                    "body": body,
-                })
-        payload: dict[str, Any] = {"event": "COMMENT", "comments": comments}
-        if not comments:
-            payload["body"] = "No issues found on changed lines."
-        return payload
+            self._collect_file_comments(file_review, report.base_branch, comments, nearby_lines)
+        total_findings = len(comments) + len(nearby_lines)
+        if total_findings:
+            breakdown = []
+            if comments:
+                breakdown.append(f"{len(comments)} inline")
+            if nearby_lines:
+                breakdown.append(f"{len(nearby_lines)} near changed lines")
+            summary = f"SonarQube: {total_findings} finding(s) ({', '.join(breakdown)})."
+        else:
+            summary = "SonarQube: no findings on or near changed lines."
+        body_parts = [summary]
+        if nearby_lines:
+            body_parts.append(
+                "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
+                + "\n".join(nearby_lines)
+            )
+        return {"event": "COMMENT", "body": "\n\n".join(body_parts), "comments": comments}
+
+    def _build_issue_body(self, issue: ReviewIssue) -> str:
+        body = f"**{issue.rule}** {issue.message}"
+        if issue.doc_url:
+            body += f"\n\n{issue.doc_url}"
+        if issue.root_cause:
+            body += (
+                f"\n\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
+                f"\n\n{issue.root_cause}\n\n</details>"
+            )
+        return body
+
+    def _collect_file_comments(
+        self,
+        file_review: FileReview,
+        base_branch: str,
+        comments: list[dict[str, Any]],
+        nearby_lines: list[str],
+    ) -> None:
+        for issue in file_review.issues:
+            body = self._build_issue_body(issue)
+            if issue.on_changed_line:
+                comments.append({"path": file_review.file_path, "line": issue.line, "side": "RIGHT", "body": body})
+            else:
+                nearby_lines.append(f"- **{issue.rule}** ({file_review.file_path}:{issue.line}) {issue.message}")
+        for dup in file_review.duplications:
+            locations = ", ".join(
+                f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
+            )
+            body = (
+                f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n"
+                f"This block is duplicated in: {locations}"
+            )
+            # Use anchor_line (a changed line in the diff) so the GitHub API
+            # accepts the comment; fall back to from_line for older reports.
+            anchor = dup.anchor_line if dup.anchor_line is not None else dup.from_line
+            comments.append({"path": file_review.file_path, "line": anchor, "side": "RIGHT", "body": body})
+        for res in file_review.resolved_duplications:
+            other = "\n".join(f"- `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations)
+            body = (
+                f"**Possible missed update** - lines {res.main_from_line}-{res.main_to_line} in `{base_branch}` were duplicated.\n\n"
+                "You modified this region. The duplication may be resolved here, but check the other instances:\n\n"
+                f"{other}"
+            )
+            comments.append({"path": file_review.file_path, "line": res.anchor_new_line, "side": "RIGHT", "body": body})
 
     def _build_fallback_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build a fallback payload with a top-level summary comment."""
         lines: list[str] = []
+        seen_rules: set[str] = set()
         for file_review in report.files:
             for issue in file_review.issues:
                 lines.append(
                     f"- **{issue.rule}** ({file_review.file_path}:{issue.line}) {issue.message}",
                 )
+                if issue.root_cause and issue.rule not in seen_rules:
+                    seen_rules.add(issue.rule)
+                    lines.append(
+                        f"\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
+                        f"\n\n{issue.root_cause}\n\n</details>\n"
+                    )
             for dup in file_review.duplications:
                 lines.append(
                     f"- **Duplication** ({file_review.file_path} lines {dup.from_line}-{dup.to_line}) "
@@ -238,8 +270,8 @@ class GitHubReviewClient:
         if process.returncode != 0:
             stderr_msg = stderr_bytes.decode().strip()
             stdout_msg = stdout_bytes.decode().strip()
-            # GitHub sometimes returns the error body via stdout instead of stderr
-            error_msg = stderr_msg or stdout_msg or "Unknown error"
+            parts = [p for p in (stderr_msg, stdout_msg) if p]
+            error_msg = " — ".join(parts) if parts else "Unknown error"
             raise GitHubReviewError(error_msg)
 
     async def _get_owner_repo(self) -> str:

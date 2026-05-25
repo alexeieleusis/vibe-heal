@@ -25,6 +25,8 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 
 - **Branch cleanup**: Automatically fix all modified files in a branch before code review
 - **Code deduplication**: AI-powered removal of duplicate code blocks
+- **Branch review**: Report SonarQube issues scoped to changed lines and post inline GitHub PR comments
+- **`sonar-project.properties` support**: Honors your existing scanner configuration file — only adds missing auth or host flags, and temporarily patches the project key/name for temp-project runs
 - Fetch SonarQube issues for any file
 - AI-powered issue fixing with **Claude Code** or **Aider**
 - **Enriched AI prompts** with full rule documentation and code context
@@ -162,6 +164,24 @@ vibe-heal dedupe-branch --max-iterations 20
 vibe-heal dedupe-branch --env-file .env.production
 ```
 
+**Option E: Review changed lines for issues (no fixes)**
+```bash
+# Report SonarQube issues scoped to your changed lines
+vibe-heal review
+
+# Compare against a different base branch
+vibe-heal review --base-branch origin/develop
+
+# Limit to specific file patterns
+vibe-heal review --pattern "*.py"
+
+# Post the saved report as inline GitHub PR comments
+vibe-heal review --post
+
+# Preview what would be posted without making API calls
+vibe-heal review --post --dry-run
+```
+
 ## Development Setup
 
 For developers contributing to vibe-heal:
@@ -286,6 +306,19 @@ This is useful for:
    AIDER_API_KEY=sk-your-openai-key
    ```
 
+## sonar-project.properties Support
+
+If your repository already has a `sonar-project.properties` file, vibe-heal respects it automatically — no extra configuration required.
+
+**What vibe-heal does when the file exists**:
+
+- **Minimal command**: only appends auth and/or host-URL flags that are not already configured in the file or in environment variables (`SONAR_TOKEN`, `SONARQUBE_TOKEN`, `SONAR_LOGIN`, `SONAR_HOST_URL`, `SONARQUBE_HOST_URL`). All other scanner settings (language plugins, exclusions, coverage paths, etc.) are preserved.
+- **Temp-project patching**: commands that create a temporary SonarQube project (`cleanup`, `dedupe-branch`, `review`) temporarily replace `sonar.projectKey` and `sonar.projectName` in the file for the duration of the analysis, then restore the original content. A recovery comment block is written to the file before patching so you can restore it manually if the process is interrupted.
+
+**What vibe-heal does when the file does not exist**:
+
+All scanner settings are passed as `-D` flags on the command line, exactly as before. No change in behaviour.
+
 ## Project Structure
 
 ```
@@ -295,9 +328,10 @@ vibe-heal/
 │   ├── sonarqube/       # SonarQube API client
 │   ├── ai_tools/        # AI tool integrations (Claude Code + Aider)
 │   ├── processor/       # Issue processing logic
-│   ├── git/             # Git operations & branch analysis
+│   ├── git/             # Git operations, branch analysis & diff parsing
 │   ├── cleanup/         # Branch cleanup orchestration
 │   ├── deduplication/   # Code deduplication
+│   ├── review/          # Branch review & GitHub PR commenting
 │   ├── cli.py           # Command-line interface
 │   ├── orchestrator.py  # Workflow orchestration
 │   └── models.py        # Top-level models
