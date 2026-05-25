@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any, cast
 from urllib.parse import urlparse
 
 from vibe_heal.ai_tools.utils import run_command
 from vibe_heal.review.models import ReviewResult
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubReviewError(Exception):
@@ -103,7 +106,17 @@ class GitHubReviewClient:
                 ],
                 payload,
             )
-        except GitHubReviewError:
+        except GitHubReviewError as inline_err:
+            logger.warning(
+                "Inline review failed (%s) — falling back to top-level comment",
+                inline_err,
+            )
+            from rich.console import Console as _Console
+
+            _Console(stderr=True).print(
+                f"[yellow]Warning: inline review rejected by GitHub ({inline_err}) — "
+                "posting as a top-level comment instead.[/yellow]"
+            )
             fallback = self._build_fallback_payload(report)
             try:
                 await self._post_json(
@@ -124,6 +137,7 @@ class GitHubReviewClient:
     def _build_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build the GitHub review payload with inline comments."""
         comments: list[dict[str, Any]] = []
+        nearby_lines: list[str] = []  # issues in trailing context window (not inline-postable)
         for file_review in report.files:
             for issue in file_review.issues:
                 body = f"**{issue.rule}** {issue.message}"
@@ -134,12 +148,15 @@ class GitHubReviewClient:
                         f"\n\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
                         f"\n\n{issue.root_cause}\n\n</details>"
                     )
-                comments.append({
-                    "path": file_review.file_path,
-                    "line": issue.line,
-                    "side": "RIGHT",
-                    "body": body,
-                })
+                if issue.on_changed_line:
+                    comments.append({
+                        "path": file_review.file_path,
+                        "line": issue.line,
+                        "side": "RIGHT",
+                        "body": body,
+                    })
+                else:
+                    nearby_lines.append(f"- **{issue.rule}** ({file_review.file_path}:{issue.line}) {issue.message}")
             for dup in file_review.duplications:
                 locations = ", ".join(
                     f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
@@ -173,19 +190,35 @@ class GitHubReviewClient:
                     "side": "RIGHT",
                     "body": body,
                 })
-        payload: dict[str, Any] = {"event": "COMMENT", "comments": comments}
-        if not comments:
-            payload["body"] = "No issues found on changed lines."
-        return payload
+        total_findings = len(comments) + len(nearby_lines)
+        summary = (
+            f"SonarQube: {total_findings} issue(s) found on changed lines."
+            if total_findings
+            else "No issues found on changed lines."
+        )
+        body_parts = [summary]
+        if nearby_lines:
+            body_parts.append(
+                "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
+                + "\n".join(nearby_lines)
+            )
+        return {"event": "COMMENT", "body": "\n\n".join(body_parts), "comments": comments}
 
     def _build_fallback_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build a fallback payload with a top-level summary comment."""
         lines: list[str] = []
+        seen_rules: set[str] = set()
         for file_review in report.files:
             for issue in file_review.issues:
                 lines.append(
                     f"- **{issue.rule}** ({file_review.file_path}:{issue.line}) {issue.message}",
                 )
+                if issue.root_cause and issue.rule not in seen_rules:
+                    seen_rules.add(issue.rule)
+                    lines.append(
+                        f"\n<details>\n\n<summary>{issue.rule} — why this matters</summary>"
+                        f"\n\n{issue.root_cause}\n\n</details>\n"
+                    )
             for dup in file_review.duplications:
                 lines.append(
                     f"- **Duplication** ({file_review.file_path} lines {dup.from_line}-{dup.to_line}) "
@@ -238,8 +271,8 @@ class GitHubReviewClient:
         if process.returncode != 0:
             stderr_msg = stderr_bytes.decode().strip()
             stdout_msg = stdout_bytes.decode().strip()
-            # GitHub sometimes returns the error body via stdout instead of stderr
-            error_msg = stderr_msg or stdout_msg or "Unknown error"
+            parts = [p for p in (stderr_msg, stdout_msg) if p]
+            error_msg = " — ".join(parts) if parts else "Unknown error"
             raise GitHubReviewError(error_msg)
 
     async def _get_owner_repo(self) -> str:

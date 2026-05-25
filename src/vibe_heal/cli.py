@@ -642,6 +642,7 @@ async def _run_review_post(
     report_file: Path,
     pr_number: int | None,
     verbose: bool,
+    dry_run: bool = False,
 ) -> None:
     """Run review post workflow (no SonarQube config needed).
 
@@ -651,6 +652,7 @@ async def _run_review_post(
         report_file: Path to the saved review.json file.
         pr_number: Optional explicit PR number.
         verbose: Enable verbose output.
+        dry_run: Preview what would be posted without making GitHub API calls.
     """
     from vibe_heal.review.github import GitHubReviewClient
     from vibe_heal.review.reporter import load_report_from_path
@@ -671,6 +673,19 @@ async def _run_review_post(
         if verbose:
             console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
 
+    if dry_run:
+        from vibe_heal.review.github import GitHubReviewClient
+
+        payload = GitHubReviewClient()._build_payload(report)
+        comments = payload["comments"]
+        console.print(f"[yellow][dry-run] Would post {len(comments)} inline comment(s) to PR #{pr}:[/yellow]")
+        for comment in comments:
+            console.print(f"\n  [dim]{comment['path']}:{comment['line']}[/dim]")
+            console.print(comment["body"])
+        if not comments:
+            console.print(f"  [dim]{payload['body']}[/dim]")
+        return
+
     await github_client.post_review(pr, report)
     console.print(
         f"[green]Posted {report.total_issues} issue(s) and "
@@ -684,6 +699,7 @@ def _review_post_mode(
     pr_number: int | None,
     env_file: str | None,
     verbose: bool,
+    dry_run: bool = False,
 ) -> None:
     """Handle the --post branch of the review command.
 
@@ -696,6 +712,7 @@ def _review_post_mode(
         pr_number: Explicit PR number (None = auto-detect).
         env_file: Optional path to a custom env file (for config loading).
         verbose: Enable verbose output.
+        dry_run: Preview what would be posted without making GitHub API calls.
     """
     try:
         if report_file is None:
@@ -717,6 +734,7 @@ def _review_post_mode(
                 report_file=report_file,
                 pr_number=pr_number,
                 verbose=verbose,
+                dry_run=dry_run,
             )
         )
     except NoOpenPrError as e:
@@ -738,6 +756,11 @@ def review(
         False,
         "--post",
         help="Post saved report to GitHub PR",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview what would be posted to GitHub without making API calls (only applies with --post)",
     ),
     pr_number: int | None = typer.Option(
         None,
@@ -781,7 +804,9 @@ def review(
     setup_logging(verbose)
 
     if post:
-        _review_post_mode(report_file=report_file, pr_number=pr_number, env_file=env_file, verbose=verbose)
+        _review_post_mode(
+            report_file=report_file, pr_number=pr_number, env_file=env_file, verbose=verbose, dry_run=dry_run
+        )
         return
 
     try:

@@ -27,6 +27,15 @@ class ReviewIssue(BaseModel):
         default=None,
         description="HTML content of the root_cause description section from SonarQube rule API",
     )
+    on_changed_line: bool = Field(
+        default=True,
+        description=(
+            "True when the issue falls on a strictly changed line in the git diff. "
+            "False when it falls only in the trailing context window added by DiffParser. "
+            "GitHub rejects inline PR comments on trailing-context lines (422), so only "
+            "issues with on_changed_line=True are posted inline."
+        ),
+    )
 
 
 class DuplicationLocation(BaseModel):

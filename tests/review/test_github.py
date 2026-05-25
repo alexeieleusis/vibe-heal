@@ -318,6 +318,181 @@ class TestPostReview:
         assert stdin_json["comments"] == []
 
     @pytest.mark.asyncio
+    async def test_root_cause_in_inline_comment_and_review_body(self, mocker) -> None:
+        """Root-cause <details> blocks appear in each inline comment body AND deduplicated in the review body."""
+        report_with_root_cause = ReviewResult(
+            project_key="test",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/example.py",
+                    issues=[
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Remove unused variable",
+                            line=10,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables waste memory.</p>",
+                        ),
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Another unused variable",
+                            line=20,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables waste memory.</p>",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"{}", b"")
+        mock_process.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            return_value=mock_process,
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report_with_root_cause)
+
+        payload = json.loads(mock_process.communicate.call_args[0][0])
+        # root_cause IS in each individual inline comment body
+        for comment in payload["comments"]:
+            assert "<details>" in comment["body"]
+            assert "why this matters" in comment["body"]
+        # top-level review body is just the summary — no duplicate rule details
+        assert "<details>" not in payload["body"]
+        assert "SonarQube:" in payload["body"]
+
+    @pytest.mark.asyncio
+    async def test_inline_payload_includes_nonempty_body(self, sample_report, mocker) -> None:
+        """Inline review payload always includes a non-empty body (GitHub rejects empty body for COMMENT reviews)."""
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"{}", b"")
+        mock_process.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            return_value=mock_process,
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, sample_report)
+
+        stdin_json = json.loads(mock_process.communicate.call_args[0][0])
+        assert "body" in stdin_json
+        assert stdin_json["body"]  # must be non-empty
+
+    @pytest.mark.asyncio
+    async def test_fallback_includes_root_cause_details(self, mocker) -> None:
+        """Fallback comment includes collapsed <details> blocks for issues with root_cause."""
+        report_with_root_cause = ReviewResult(
+            project_key="test",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/example.py",
+                    issues=[
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Remove unused variable",
+                            line=10,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables clutter the code.</p>",
+                        ),
+                        ReviewIssue(
+                            rule="python:S1481",
+                            message="Remove another unused variable",
+                            line=20,
+                            severity="MAJOR",
+                            root_cause="<p>Unused variables clutter the code.</p>",
+                        ),
+                        ReviewIssue(
+                            rule="python:S1192",
+                            message="No root cause here",
+                            line=30,
+                            severity="MINOR",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report_with_root_cause)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "<details>" in body
+        assert "python:S1481 — why this matters" in body
+        assert "<p>Unused variables clutter the code.</p>" in body
+        # Deduplicated — only one <details> block for python:S1481
+        assert body.count("<details>") == 1
+        # Issue without root_cause produces no <details> block for its rule
+        assert "python:S1192" in body
+        assert "python:S1192 — why this matters" not in body
+
+    @pytest.mark.asyncio
+    async def test_fallback_logs_warning_with_inline_error(self, sample_report, mocker, caplog) -> None:
+        """post_review logs a warning with the inline error reason before falling back."""
+        import logging
+
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b"", b"validation error: line outside diff")
+        mock_fail.returncode = 1
+
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        with caplog.at_level(logging.WARNING, logger="vibe_heal.review.github"):
+            await client.post_review(42, sample_report)
+
+        assert any("Inline review failed" in r.message for r in caplog.records)
+        assert any("falling back" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_multiple_files_aggregated(self, mocker) -> None:
         """post_review aggregates comments from multiple files into one review."""
         multi_file_report = ReviewResult(
