@@ -284,6 +284,11 @@ class SourceLine(BaseModel):
         alias="isNew",
         description="Whether line is new code",
     )
+    line_hits: int | None = Field(
+        default=None,
+        alias="lineHits",
+        description="Times this line was executed by tests. None = not instrumented.",
+    )
 
     @property
     def plain_code(self) -> str:

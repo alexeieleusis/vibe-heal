@@ -2,7 +2,7 @@
 
 import pytest
 
-from vibe_heal.sonarqube.models import IssuesResponse, SonarQubeIssue
+from vibe_heal.sonarqube.models import IssuesResponse, SonarQubeIssue, SourceLine
 
 
 class TestSonarQubeIssue:
@@ -174,3 +174,27 @@ class TestIssuesResponse:
 
         assert response.issues == []
         assert response.paging == {}
+
+
+class TestSourceLineLineCoverage:
+    def test_line_hits_parsed_when_present(self) -> None:
+        sl = SourceLine.model_validate({"line": 24, "code": "x", "lineHits": 3})
+        assert sl.line_hits == 3
+
+    def test_line_hits_zero_parsed(self) -> None:
+        sl = SourceLine.model_validate({"line": 24, "code": "x", "lineHits": 0})
+        assert sl.line_hits == 0
+
+    def test_line_hits_none_when_absent(self) -> None:
+        sl = SourceLine.model_validate({"line": 24, "code": "x"})
+        assert sl.line_hits is None
+
+    def test_unknown_fields_still_ignored(self) -> None:
+        sl = SourceLine.model_validate({
+            "line": 1,
+            "code": "y",
+            "lineHits": 1,
+            "utLineHits": 1,
+            "someFutureField": "ignored",
+        })
+        assert sl.line_hits == 1
