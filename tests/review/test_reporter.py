@@ -201,3 +201,45 @@ class TestWriteReports:
         assert "<p>Unused variables clutter code.</p>" in md
         assert "<p>Magic numbers reduce readability.</p>" in md
         assert "python:S999" not in md.split("<details>")[1] if "<details>" in md else True
+
+
+class TestCoverageInMarkdown:
+    def _result(self, **kwargs) -> ReviewResult:
+        return ReviewResult(
+            project_key="p",
+            branch="feature/x",
+            base_branch="origin/main",
+            files=[FileReview(file_path="src/f.py", **kwargs)],
+        )
+
+    def test_coverage_pct_rendered_when_present(self, tmp_path: Path) -> None:
+        write_reports(self._result(coverage_pct=72.0, covered_lines=18, instrumented_changed_lines=25), tmp_path)
+        md = (tmp_path / "review.md").read_text()
+        assert "72.0%" in md
+        assert "18/25" in md
+
+    def test_coverage_zero_percent_rendered(self, tmp_path: Path) -> None:
+        write_reports(self._result(coverage_pct=0.0, covered_lines=0, instrumented_changed_lines=5), tmp_path)
+        md = (tmp_path / "review.md").read_text()
+        assert "0.0%" in md
+        assert "0/5" in md
+
+    def test_coverage_100_percent_rendered(self, tmp_path: Path) -> None:
+        write_reports(self._result(coverage_pct=100.0, covered_lines=10, instrumented_changed_lines=10), tmp_path)
+        md = (tmp_path / "review.md").read_text()
+        assert "100.0%" in md
+
+    def test_no_coverage_line_when_coverage_pct_none(self, tmp_path: Path) -> None:
+        write_reports(self._result(), tmp_path)  # coverage_pct defaults to None
+        md = (tmp_path / "review.md").read_text()
+        assert "Coverage on changed lines" not in md
+
+    def test_no_issues_label_absent_when_only_coverage_present(self, tmp_path: Path) -> None:
+        """A file with only coverage data (no issues/dups) must not show 'No issues.'"""
+        write_reports(
+            self._result(coverage_pct=80.0, covered_lines=8, instrumented_changed_lines=10),
+            tmp_path,
+        )
+        md = (tmp_path / "review.md").read_text()
+        assert "No issues." not in md
+        assert "80.0%" in md
