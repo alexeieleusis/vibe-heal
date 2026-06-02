@@ -223,7 +223,7 @@ Coverage data must be present in SonarQube. This typically means:
 1. Running your test suite with a coverage tool (e.g. `pytest --cov`, `jest --coverage`, `jacoco`) and generating a coverage report.
 2. Passing the coverage report path to `sonar-scanner` (e.g. `sonar.python.coverage.reportPaths=coverage.xml`) before vibe-heal runs its analysis.
 
-If SonarQube has no coverage data for a file, `--coverage` silently omits that file from coverage output (no error, no column entry). With `--verbose`, a note is printed: `no coverage data (run tests before sonar-scanner)`.
+If SonarQube has no coverage data for a file, `--coverage` shows `—` for that file when the Coverage column is present, and omits the file from the Coverage section in PR/Markdown output. With `--verbose`, a note is printed: `no coverage data available`.
 
 ### Example
 
