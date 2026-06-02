@@ -255,14 +255,12 @@ class GitHubReviewClient:
         self,
         cmd: list[str],
         payload: dict[str, Any],
-        timeout: int = 60,
     ) -> None:
         """Post JSON data to a gh API endpoint via stdin.
 
         Args:
             cmd: Command to run (must accept JSON on stdin).
             payload: JSON-serialisable payload to send.
-            timeout: Timeout in seconds (default 60).
 
         Raises:
             GitHubReviewError: If the command fails or times out.
@@ -275,14 +273,12 @@ class GitHubReviewClient:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(stdin_data),
-                timeout=timeout,
-            )
+            async with asyncio.timeout(60):
+                stdout_bytes, stderr_bytes = await process.communicate(stdin_data)
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            raise GitHubReviewError(f"gh API call timed out after {timeout}s") from None
+            raise GitHubReviewError("gh API call timed out after 60s") from None
         if process.returncode != 0:
             stderr_msg = stderr_bytes.decode().strip()
             stdout_msg = stdout_bytes.decode().strip()
