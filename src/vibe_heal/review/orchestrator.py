@@ -677,6 +677,8 @@ class ReviewOrchestrator:
         if not coverage:
             return None, 0, 0
         changed_lines_for_file = changed_lines_map.get(repo_relative, set())
+        if not changed_lines_for_file:
+            return None, 0, 0
         try:
             cov = await self.client.get_line_coverage(repo_relative, changed_lines_for_file, project_key=project_key)
         except Exception as exc:
@@ -686,7 +688,7 @@ class ReviewOrchestrator:
             covered_lines, instrumented_changed_lines = cov
             return round(covered_lines / instrumented_changed_lines * 100, 1), covered_lines, instrumented_changed_lines
         if verbose:
-            console.print(f"[dim]  {repo_relative}: no coverage data (run tests before sonar-scanner)[/dim]")
+            console.print(f"[dim]  {repo_relative}: no coverage data available[/dim]")
         return None, 0, 0
 
     async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
