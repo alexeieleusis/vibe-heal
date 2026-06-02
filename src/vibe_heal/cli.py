@@ -584,6 +584,9 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         table.add_column("Issues", justify="right")
         table.add_column("Highest Severity", justify="right")
         table.add_column("Duplications", justify="right")
+        show_coverage = any(f.coverage_pct is not None for f in result.files)
+        if show_coverage:
+            table.add_column("Coverage", justify="right")
 
         severity_order = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
 
@@ -597,7 +600,11 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
                 )
             else:
                 highest_severity = "N/A"
-            table.add_row(file_review.file_path, str(issue_count), highest_severity, str(dup_count))
+            row: list[str] = [file_review.file_path, str(issue_count), highest_severity, str(dup_count)]
+            if show_coverage:
+                cov_str = f"{file_review.coverage_pct}%" if file_review.coverage_pct is not None else "—"
+                row.append(cov_str)
+            table.add_row(*row)
 
         console.print(table)
     elif total_issues == 0 and total_duplications == 0:
@@ -613,6 +620,7 @@ async def _run_review(
     file_patterns: list[str] | None,
     report_file: Path | None,
     verbose: bool,
+    coverage: bool = False,
 ) -> None:
     """Run review analysis workflow.
 
@@ -622,6 +630,7 @@ async def _run_review(
         file_patterns: Optional file patterns to filter.
         report_file: Optional path override for the report; None uses the default.
         verbose: Enable verbose output.
+        coverage: When True, fetch and display line coverage for changed lines.
     """
     async with SonarQubeClient(config) as client:
         orchestrator = ReviewOrchestrator(config, client)
@@ -630,6 +639,7 @@ async def _run_review(
             file_patterns=file_patterns,
             report_file=report_file,
             verbose=verbose,
+            coverage=coverage,
         )
         _display_review_results(result)
         if not result.success:
@@ -792,6 +802,7 @@ def review(
         "-v",
         help=VERBOSE_OUTPUT_HELP,
     ),
+    coverage: bool = typer.Option(False, "--coverage", help="Report test coverage for changed lines."),
 ) -> None:
     """Analyze SonarQube issues on changed lines.
 
@@ -816,6 +827,7 @@ def review(
                 file_patterns=file_patterns,
                 report_file=report_file,
                 verbose=verbose,
+                coverage=coverage,
             )
         )
 
