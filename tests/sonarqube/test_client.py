@@ -521,3 +521,25 @@ class TestSonarQubeClient:
         async with SonarQubeClient(config) as client:
             with pytest.raises(SonarQubeRuleNotFoundError):
                 await client.get_rule_details("external_eslint_repo:vibe-types/no-callback-pyramid")
+
+
+class TestGetSourceLinesProjectKey:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_uses_config_project_key_by_default(self, config: VibeHealConfig) -> None:
+        route = respx.get("https://sonar.test.com/api/sources/lines").mock(
+            return_value=httpx.Response(200, json={"sources": [{"line": 1, "code": "x"}]})
+        )
+        async with SonarQubeClient(config) as client:
+            await client.get_source_lines("src/file.py")
+        assert route.calls.last.request.url.params["key"] == "my-project:src/file.py"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_uses_provided_project_key(self, config: VibeHealConfig) -> None:
+        route = respx.get("https://sonar.test.com/api/sources/lines").mock(
+            return_value=httpx.Response(200, json={"sources": [{"line": 1, "code": "x"}]})
+        )
+        async with SonarQubeClient(config) as client:
+            await client.get_source_lines("src/file.py", project_key="temp-abc-123")
+        assert route.calls.last.request.url.params["key"] == "temp-abc-123:src/file.py"

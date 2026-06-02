@@ -289,6 +289,7 @@ class SonarQubeClient:
         file_path: str,
         from_line: int | None = None,
         to_line: int | None = None,
+        project_key: str | None = None,
     ) -> list[SourceLine]:
         """Get source code lines for a specific file.
 
@@ -296,6 +297,7 @@ class SonarQubeClient:
             file_path: Path to the file (relative to project root)
             from_line: Start line number (1-based, inclusive). If None, starts from line 1
             to_line: End line number (1-based, inclusive). If None, gets all lines
+            project_key: SonarQube project key. If None, uses the configured project key
 
         Returns:
             List of source code lines
@@ -305,7 +307,8 @@ class SonarQubeClient:
             SonarQubeAPIError: API request failed
         """
         # Build component identifier: projectKey:filePath
-        component = f"{self.config.sonarqube_project_key}:{file_path}"
+        effective_key = project_key if project_key is not None else self.config.sonarqube_project_key
+        component = f"{effective_key}:{file_path}"
 
         params: dict[str, Any] = {
             "key": component,
