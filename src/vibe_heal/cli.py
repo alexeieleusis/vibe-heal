@@ -572,7 +572,7 @@ def _get_highest_severity(
     """Return the highest severity string for a list of issues."""
     if not issues:
         return "N/A"
-    order = severity_order or _SEVERITY_ORDER
+    order = _SEVERITY_ORDER if severity_order is None else severity_order
     return min(
         (issue.severity for issue in issues),
         key=lambda s: order.index(s) if s in order else len(order),
