@@ -25,7 +25,7 @@ vibe-heal integrates with SonarQube to automatically fix code quality issues usi
 
 - **Branch cleanup**: Automatically fix all modified files in a branch before code review
 - **Code deduplication**: AI-powered removal of duplicate code blocks
-- **Branch review**: Report SonarQube issues scoped to changed lines and post inline GitHub PR comments
+- **Branch review**: Report SonarQube issues scoped to changed lines, optionally include test coverage metrics, and post inline GitHub PR comments
 - **`sonar-project.properties` support**: Honors your existing scanner configuration file — only adds missing auth or host flags, and temporarily patches the project key/name for temp-project runs
 - Fetch SonarQube issues for any file
 - AI-powered issue fixing with **Claude Code** or **Aider**
@@ -174,6 +174,9 @@ vibe-heal review --base-branch origin/develop
 
 # Limit to specific file patterns
 vibe-heal review --pattern "*.py"
+
+# Include test coverage for changed lines (requires coverage data in SonarQube)
+vibe-heal review --coverage
 
 # Post the saved report as inline GitHub PR comments
 vibe-heal review --post

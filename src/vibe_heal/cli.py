@@ -22,6 +22,7 @@ from vibe_heal.deduplication.orchestrator import (
 )
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
+from vibe_heal.review.models import ReviewIssue
 from vibe_heal.review.orchestrator import ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
@@ -561,6 +562,51 @@ def dedupe_branch(
         sys.exit(1)
 
 
+_SEVERITY_ORDER = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
+
+
+def _get_highest_severity(
+    issues: list[ReviewIssue],
+    severity_order: list[str] | None = None,
+) -> str:
+    """Return the highest severity string for a list of issues."""
+    if not issues:
+        return "N/A"
+    order = severity_order or _SEVERITY_ORDER
+    return min(
+        (issue.severity for issue in issues),
+        key=lambda s: order.index(s) if s in order else len(order),
+    )
+
+
+def _build_review_table(result: ReviewAnalysisResult) -> None:
+    """Build and print the per-file breakdown table for review results."""
+    if not result.files:
+        return
+
+    console.print("\n[bold]Per-File Breakdown:[/bold]")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("File", style="cyan")
+    table.add_column("Issues", justify="right")
+    table.add_column("Highest Severity", justify="right")
+    table.add_column("Duplications", justify="right")
+    show_coverage = any(f.coverage_pct is not None for f in result.files)
+    if show_coverage:
+        table.add_column("Coverage", justify="right")
+
+    for file_review in result.files:
+        issue_count = len(file_review.issues)
+        dup_count = len(file_review.duplications) + len(file_review.resolved_duplications)
+        highest_severity = _get_highest_severity(file_review.issues)
+        row: list[str] = [file_review.file_path, str(issue_count), highest_severity, str(dup_count)]
+        if show_coverage:
+            cov_str = f"{file_review.coverage_pct}%" if file_review.coverage_pct is not None else "—"
+            row.append(cov_str)
+        table.add_row(*row)
+
+    console.print(table)
+
+
 def _display_review_results(result: ReviewAnalysisResult) -> None:
     """Display review analysis results.
 
@@ -578,35 +624,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
     console.print(f"  [green]Duplication findings: {total_duplications}[/green]")
 
     if result.files:
-        console.print("\n[bold]Per-File Breakdown:[/bold]")
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("File", style="cyan")
-        table.add_column("Issues", justify="right")
-        table.add_column("Highest Severity", justify="right")
-        table.add_column("Duplications", justify="right")
-        show_coverage = any(f.coverage_pct is not None for f in result.files)
-        if show_coverage:
-            table.add_column("Coverage", justify="right")
-
-        severity_order = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
-
-        for file_review in result.files:
-            issue_count = len(file_review.issues)
-            dup_count = len(file_review.duplications) + len(file_review.resolved_duplications)
-            if issue_count > 0:
-                highest_severity = min(
-                    (issue.severity for issue in file_review.issues),
-                    key=lambda s: severity_order.index(s) if s in severity_order else len(severity_order),
-                )
-            else:
-                highest_severity = "N/A"
-            row: list[str] = [file_review.file_path, str(issue_count), highest_severity, str(dup_count)]
-            if show_coverage:
-                cov_str = f"{file_review.coverage_pct}%" if file_review.coverage_pct is not None else "—"
-                row.append(cov_str)
-            table.add_row(*row)
-
-        console.print(table)
+        _build_review_table(result)
     elif total_issues == 0 and total_duplications == 0:
         console.print("\n[green]No issues found on changed lines.[/green]")
 
