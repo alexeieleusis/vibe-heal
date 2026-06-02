@@ -535,3 +535,34 @@ class TestPostReview:
         paths = {c["path"] for c in stdin_json["comments"]}
         assert "src/a.py" in paths
         assert "src/b.py" in paths
+
+
+class TestBuildPayloadCoverage:
+    def _make_report(self, **file_kwargs) -> ReviewResult:
+        return ReviewResult(
+            project_key="p",
+            branch="feature/x",
+            base_branch="origin/main",
+            files=[FileReview(file_path="src/f.py", **file_kwargs)],
+        )
+
+    def test_coverage_included_in_body_when_present(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(coverage_pct=72.0, covered_lines=18, instrumented_changed_lines=25)
+        payload = client.build_payload(report)
+        assert "72.0%" in payload["body"]
+        assert "18/25" in payload["body"]
+        assert "Coverage on changed lines" in payload["body"]
+
+    def test_coverage_absent_from_body_when_none(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report()  # coverage_pct defaults to None
+        payload = client.build_payload(report)
+        assert "Coverage on changed lines" not in payload["body"]
+
+    def test_coverage_included_in_fallback_body(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(coverage_pct=50.0, covered_lines=5, instrumented_changed_lines=10)
+        payload = client._build_fallback_payload(report)
+        assert "50.0%" in payload["body"]
+        assert "Coverage on changed lines" in payload["body"]

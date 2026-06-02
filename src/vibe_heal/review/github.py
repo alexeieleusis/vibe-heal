@@ -35,7 +35,7 @@ class GitHubReviewClient:
         """
         try:
             result = await run_command(["gh", "--version"], timeout=10)
-        except (FileNotFoundError, OSError) as exc:
+        except OSError as exc:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg) from exc
         if not result.success:
@@ -156,6 +156,13 @@ class GitHubReviewClient:
                 "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
                 + "\n".join(nearby_lines)
             )
+        coverage_lines = [
+            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
+            for fr in report.files
+            if fr.coverage_pct is not None
+        ]
+        if coverage_lines:
+            body_parts.append("**Coverage on changed lines:**\n" + "\n".join(coverage_lines))
         return {"event": "COMMENT", "body": "\n\n".join(body_parts), "comments": comments}
 
     def _build_issue_body(self, issue: ReviewIssue) -> str:
@@ -229,6 +236,15 @@ class GitHubReviewClient:
                     f"lines {res.main_from_line}-{res.main_to_line} in main were duplicated; "
                     f"{len(res.other_locations)} other instance(s) may need updating",
                 )
+        coverage_lines = [
+            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
+            for fr in report.files
+            if fr.coverage_pct is not None
+        ]
+        if coverage_lines:
+            lines.append("")
+            lines.append("**Coverage on changed lines:**")
+            lines.extend(coverage_lines)
         return {
             "event": "COMMENT",
             "body": "\n".join(lines),
@@ -239,14 +255,12 @@ class GitHubReviewClient:
         self,
         cmd: list[str],
         payload: dict[str, Any],
-        timeout: int = 60,
     ) -> None:
         """Post JSON data to a gh API endpoint via stdin.
 
         Args:
             cmd: Command to run (must accept JSON on stdin).
             payload: JSON-serialisable payload to send.
-            timeout: Timeout in seconds (default 60).
 
         Raises:
             GitHubReviewError: If the command fails or times out.
@@ -259,14 +273,12 @@ class GitHubReviewClient:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(stdin_data),
-                timeout=timeout,
-            )
+            async with asyncio.timeout(60):
+                stdout_bytes, stderr_bytes = await process.communicate(stdin_data)
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            raise GitHubReviewError(f"gh API call timed out after {timeout}s") from None
+            raise GitHubReviewError("gh API call timed out after 60s") from None
         if process.returncode != 0:
             stderr_msg = stderr_bytes.decode().strip()
             stdout_msg = stdout_bytes.decode().strip()

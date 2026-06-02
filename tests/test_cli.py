@@ -905,3 +905,63 @@ class TestReviewCommand:
 
         assert result.exit_code == 0
         assert "review" in result.stdout
+
+
+class TestDisplayReviewResultsCoverage:
+    def test_no_crash_with_coverage_data(self) -> None:
+        """_display_review_results runs without error when coverage data is present."""
+        from vibe_heal.cli import _display_review_results
+        from vibe_heal.review.models import FileReview
+        from vibe_heal.review.orchestrator import ReviewAnalysisResult
+
+        result = ReviewAnalysisResult(
+            success=True,
+            project_key="p",
+            branch="feature/x",
+            base_branch="main",
+            files=[
+                FileReview(
+                    file_path="src/f.py",
+                    coverage_pct=72.0,
+                    covered_lines=18,
+                    instrumented_changed_lines=25,
+                ),
+            ],
+            files_analyzed=1,
+        )
+        _display_review_results(result)  # must not raise
+
+    def test_no_crash_without_coverage_data(self) -> None:
+        """_display_review_results runs without error when no coverage data."""
+        from vibe_heal.cli import _display_review_results
+        from vibe_heal.review.models import FileReview
+        from vibe_heal.review.orchestrator import ReviewAnalysisResult
+
+        result = ReviewAnalysisResult(
+            success=True,
+            project_key="p",
+            branch="feature/x",
+            base_branch="main",
+            files=[FileReview(file_path="src/f.py")],
+            files_analyzed=1,
+        )
+        _display_review_results(result)  # must not raise; no Coverage column
+
+    def test_mixed_coverage_and_no_coverage_files(self) -> None:
+        """Multiple files where only some have coverage_pct."""
+        from vibe_heal.cli import _display_review_results
+        from vibe_heal.review.models import FileReview
+        from vibe_heal.review.orchestrator import ReviewAnalysisResult
+
+        result = ReviewAnalysisResult(
+            success=True,
+            project_key="p",
+            branch="feature/x",
+            base_branch="main",
+            files=[
+                FileReview(file_path="src/a.py", coverage_pct=50.0, covered_lines=5, instrumented_changed_lines=10),
+                FileReview(file_path="src/b.py"),  # no coverage data → shown as "—"
+            ],
+            files_analyzed=2,
+        )
+        _display_review_results(result)  # must not raise

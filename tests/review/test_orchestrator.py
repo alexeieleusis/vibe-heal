@@ -1039,3 +1039,144 @@ class TestSameFileDuplication:
         assert result[0].other_locations[0].file_path == "src/file.py"
         assert result[0].other_locations[0].from_line == 249
         assert result[0].other_locations[0].to_line == 283
+
+
+class TestRunAnalysisCoverage:
+    """Tests for the --coverage flag in run_analysis."""
+
+    @pytest.fixture
+    def mock_diff_parser(self) -> MagicMock:
+        mock = MagicMock()
+        # Default: "src/file.py" has changed lines {10, 20} so changed_lines_for_file is non-empty
+        mock.get_diff_lines.return_value = DiffLines(new_lines={"src/file.py": {10, 20}}, old_lines={})
+        mock.get_raw_diff.return_value = ""
+        return mock
+
+    @pytest.fixture
+    def orchestrator(self, config: VibeHealConfig, mock_diff_parser: MagicMock) -> ReviewOrchestrator:
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        mock_client = AsyncMock()
+        return ReviewOrchestrator(config, mock_client, MagicMock(), mock_diff_parser)
+
+    def _standard_patches(self, orchestrator):
+        """All patches needed to reach the per-file loop."""
+        return (
+            _basic_analysis_patches(orchestrator),
+            patch.object(
+                orchestrator.project_manager,
+                "copy_exclusion_settings",
+                return_value=([], 0),
+            ),
+            patch.object(
+                orchestrator.analysis_runner,
+                "run_analysis",
+                return_value=AnalysisResult(success=True, task_id="t1", dashboard_url="http://d"),
+            ),
+            patch.object(orchestrator.project_manager, "delete_project", new_callable=AsyncMock),
+        )
+
+    @pytest.mark.asyncio
+    async def test_coverage_false_does_not_call_get_line_coverage(self, orchestrator, tmp_path: Path) -> None:
+        mock_glc = AsyncMock(return_value=(5, 10))
+        with ExitStack() as stack:
+            for ctx in self._standard_patches(orchestrator):
+                stack.enter_context(ctx)
+            stack.enter_context(patch.object(orchestrator.client, "get_issues", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_active_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_resolved_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator.client, "get_line_coverage", mock_glc))
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+                coverage=False,
+            )
+        assert result.success is True
+        mock_glc.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_coverage_true_populates_coverage_pct(self, orchestrator, tmp_path: Path) -> None:
+        with ExitStack() as stack:
+            for ctx in self._standard_patches(orchestrator):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch.object(orchestrator.client, "get_issues", AsyncMock(return_value=[_make_sonar_issue(10)]))
+            )
+            stack.enter_context(patch.object(orchestrator, "_get_active_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_resolved_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator.client, "get_line_coverage", AsyncMock(return_value=(8, 10))))
+            stack.enter_context(patch.object(orchestrator.client, "get_rule_details", AsyncMock(return_value=None)))
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+                coverage=True,
+            )
+        assert result.success is True
+        assert len(result.files) == 1
+        fr = result.files[0]
+        assert fr.coverage_pct == 80.0
+        assert fr.covered_lines == 8
+        assert fr.instrumented_changed_lines == 10
+
+    @pytest.mark.asyncio
+    async def test_coverage_true_none_result_keeps_file_when_issues_exist(self, orchestrator, tmp_path: Path) -> None:
+        with ExitStack() as stack:
+            for ctx in self._standard_patches(orchestrator):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch.object(orchestrator.client, "get_issues", AsyncMock(return_value=[_make_sonar_issue(10)]))
+            )
+            stack.enter_context(patch.object(orchestrator, "_get_active_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_resolved_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator.client, "get_line_coverage", AsyncMock(return_value=None)))
+            stack.enter_context(patch.object(orchestrator.client, "get_rule_details", AsyncMock(return_value=None)))
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+                coverage=True,
+            )
+        assert result.success is True
+        assert len(result.files) == 1
+        assert result.files[0].coverage_pct is None
+
+    @pytest.mark.asyncio
+    async def test_coverage_exception_is_caught_processing_continues(self, orchestrator, tmp_path: Path) -> None:
+        with ExitStack() as stack:
+            for ctx in self._standard_patches(orchestrator):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch.object(orchestrator.client, "get_issues", AsyncMock(return_value=[_make_sonar_issue(10)]))
+            )
+            stack.enter_context(patch.object(orchestrator, "_get_active_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_resolved_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(
+                patch.object(
+                    orchestrator.client, "get_line_coverage", AsyncMock(side_effect=RuntimeError("network error"))
+                )
+            )
+            stack.enter_context(patch.object(orchestrator.client, "get_rule_details", AsyncMock(return_value=None)))
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+                coverage=True,
+            )
+        assert result.success is True
+        assert result.files[0].coverage_pct is None
+
+    @pytest.mark.asyncio
+    async def test_coverage_only_file_included_when_coverage_pct_not_none(self, orchestrator, tmp_path: Path) -> None:
+        """A file with no issues/dups but coverage data IS included in result.files."""
+        with ExitStack() as stack:
+            for ctx in self._standard_patches(orchestrator):
+                stack.enter_context(ctx)
+            stack.enter_context(patch.object(orchestrator.client, "get_issues", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_active_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator, "_get_resolved_duplications", AsyncMock(return_value=[])))
+            stack.enter_context(patch.object(orchestrator.client, "get_line_coverage", AsyncMock(return_value=(3, 5))))
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+                coverage=True,
+            )
+        assert len(result.files) == 1
+        assert result.files[0].coverage_pct == 60.0

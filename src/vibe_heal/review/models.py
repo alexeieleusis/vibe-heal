@@ -97,6 +97,14 @@ class FileReview(BaseModel):
         default_factory=list,
         description="Blocks duplicated in main that were modified; other instances may need updating",
     )
+    coverage_pct: float | None = Field(
+        default=None,
+        description="Percentage of instrumented changed lines covered by tests.",
+    )
+    covered_lines: int = Field(default=0, description="Instrumented changed lines that were covered.")
+    instrumented_changed_lines: int = Field(
+        default=0, description="Changed lines that could be covered (lineHits not None)."
+    )
 
 
 class FileDiagnostics(BaseModel):

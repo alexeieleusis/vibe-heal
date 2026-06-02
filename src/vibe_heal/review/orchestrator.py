@@ -112,6 +112,7 @@ class ReviewOrchestrator:
         file_patterns: list[str] | None = None,
         report_file: Path | None = None,
         verbose: bool = False,
+        coverage: bool = False,
     ) -> ReviewAnalysisResult:
         """Analyze SonarQube issues on changed lines.
 
@@ -131,6 +132,10 @@ class ReviewOrchestrator:
             report_file: Optional path to write the report JSON to.
                 If provided, the parent directory is used for report output.
             verbose: Enable verbose output.
+            coverage: When True, fetch line coverage data for changed lines and
+                populate coverage_pct/covered_lines/instrumented_changed_lines on
+                each FileReview. Files with coverage data are included even if they
+                have no issues or duplications.
 
         Returns:
             ReviewAnalysisResult with success status and review data.
@@ -226,14 +231,20 @@ class ReviewOrchestrator:
                 resolved_dups = await self._get_resolved_duplications(
                     file_path, changed_lines_map, old_changed_lines_map, active_ranges, original_project_key, diag
                 )
+                coverage_pct, covered_lines, instrumented_changed_lines = await self._fetch_coverage(
+                    repo_relative, changed_lines_map, temp_key, coverage, verbose
+                )
                 result.diagnostics.append(diag)
-                if file_issues or active_dups or resolved_dups:
+                if file_issues or active_dups or resolved_dups or coverage_pct is not None:
                     result.files.append(
                         FileReview(
                             file_path=repo_relative,
                             issues=file_issues,
                             duplications=active_dups,
                             resolved_duplications=resolved_dups,
+                            coverage_pct=coverage_pct,
+                            covered_lines=covered_lines,
+                            instrumented_changed_lines=instrumented_changed_lines,
                         )
                     )
                 elif verbose:
@@ -641,6 +652,44 @@ class ReviewOrchestrator:
             other_locations=other_locations,
             anchor_new_line=anchor_new_line,
         )
+
+    async def _fetch_coverage(
+        self,
+        repo_relative: str,
+        changed_lines_map: dict[str, set[int]],
+        project_key: str,
+        coverage: bool,
+        verbose: bool,
+    ) -> tuple[float | None, int, int]:
+        """Fetch line coverage for a file's changed lines from the temp project.
+
+        Args:
+            repo_relative: Repo-root-relative POSIX path to the file.
+            changed_lines_map: Mapping of file paths to changed line sets.
+            project_key: Temporary SonarQube project key.
+            coverage: When False, returns (None, 0, 0) immediately without any API call.
+            verbose: Enable verbose output.
+
+        Returns:
+            Tuple of (coverage_pct, covered_lines, instrumented_changed_lines).
+            coverage_pct is None when coverage is False, data is unavailable, or fetch fails.
+        """
+        if not coverage:
+            return None, 0, 0
+        changed_lines_for_file = changed_lines_map.get(repo_relative, set())
+        if not changed_lines_for_file:
+            return None, 0, 0
+        try:
+            cov = await self.client.get_line_coverage(repo_relative, changed_lines_for_file, project_key=project_key)
+        except Exception as exc:
+            console.print(f"[yellow]  {repo_relative}: coverage fetch failed: {exc}[/yellow]")
+            cov = None
+        if cov is not None:
+            covered_lines, instrumented_changed_lines = cov
+            return round(covered_lines / instrumented_changed_lines * 100, 1), covered_lines, instrumented_changed_lines
+        if verbose:
+            console.print(f"[dim]  {repo_relative}: no coverage data available[/dim]")
+        return None, 0, 0
 
     async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
         """Clean up temporary SonarQube project.

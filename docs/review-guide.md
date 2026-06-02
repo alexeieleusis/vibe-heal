@@ -78,6 +78,9 @@ vibe-heal review --base-branch origin/develop
 # Limit to specific file patterns
 vibe-heal review --pattern "src/**/*.py"
 
+# Include test coverage for changed lines (requires coverage data in SonarQube)
+vibe-heal review --coverage
+
 # Save report to a custom path
 vibe-heal review --report-file /tmp/my-review.json
 ```
@@ -107,6 +110,7 @@ vibe-heal review --post --report-file /tmp/my-review.json
 | `--report-file` | auto | Override report output path |
 | `--env-file` | `.env.vibeheal` | Path to custom config file |
 | `--verbose` / `-v` | off | Enable debug logging |
+| `--coverage` | off | Report test coverage for changed lines (requires coverage data in SonarQube) |
 | `--post` | off | Post saved report to GitHub PR instead of analyzing |
 | `--dry-run` | off | With `--post`: preview comments without API calls |
 | `--pr` | auto | With `--post`: explicit GitHub PR number |
@@ -126,10 +130,12 @@ vibe-heal review --post --report-file /tmp/my-review.json
 8. Detect resolved duplications: blocks that existed on the base branch but
    are no longer active — warns if only one copy was deduplicated
 9. Optionally enrich each issue with rule root_cause documentation
-10. Write report to ~/.vibe-heal/reviews/<project-key>/<branch>/review.json
+10. If --coverage: fetch lineHits data per changed line from SonarQube and
+    compute coverage_pct/covered_lines/instrumented_changed_lines per file
+11. Write report to ~/.vibe-heal/reviews/<project-key>/<branch>/review.json
     and review.md
-11. Delete temporary SonarQube project
-12. Display per-file summary table in terminal
+12. Delete temporary SonarQube project
+13. Display per-file summary table in terminal (with Coverage column when applicable)
 ```
 
 ### Post phase
@@ -147,6 +153,7 @@ The two phases are decoupled — you can run `review` in CI and `review --post` 
 
 ### Terminal output (analyze phase)
 
+Without `--coverage`:
 ```
 Review Summary:
   Branch: feature/new-api (base: origin/main)
@@ -164,12 +171,24 @@ Per-File Breakdown:
 Report saved to /Users/you/.vibe-heal/reviews/my-project/feature-new-api/review.json
 ```
 
+With `--coverage` (adds a Coverage column when SonarQube has coverage data):
+```
+Per-File Breakdown:
+  File                      Issues  Highest Severity  Duplications  Coverage
+  src/api/users.py               3          CRITICAL             0     66.7%
+  src/api/auth.py                2             MAJOR             1     50.0%
+  src/models/user.py             2             MINOR             0      100%
+  tests/test_api.py              0               N/A             0        —
+```
+
+The Coverage column shows the percentage of **instrumented changed lines** (lines SonarQube has hit-count data for) that were covered by at least one test. Lines with no instrumentation data (e.g. comments, blank lines, or files not processed by the coverage tool) are excluded from the calculation. `—` means no coverage data was available for that file.
+
 ### Report files
 
 Two files are written after each analysis:
 
-- **`review.json`** — machine-readable report; includes `root_cause` HTML per issue so `--post` can include rule docs without re-fetching.
-- **`review.md`** — human-readable Markdown with issues per file and one collapsed `<details>` block per unique rule (deduped).
+- **`review.json`** — machine-readable report; includes `root_cause` HTML per issue so `--post` can include rule docs without re-fetching. Also stores `coverage_pct`, `covered_lines`, and `instrumented_changed_lines` per file when `--coverage` was used.
+- **`review.md`** — human-readable Markdown with issues per file and one collapsed `<details>` block per unique rule (deduped). When coverage data is present, each file section opens with a bold coverage line (e.g. `**Coverage on changed lines: 66.7% (4/6 instrumented lines covered)**`).
 
 Default report directory: `~/.vibe-heal/reviews/<project-key>/<branch>/`
 
@@ -184,6 +203,37 @@ Each issue becomes an inline comment anchored to the relevant line. Comments inc
 Duplication findings appear as comments noting the other locations where the same code exists.
 
 Resolved duplications (code that was duplicated on the base branch but is no longer duplicated in your branch — possibly meaning you fixed only one copy) appear with a warning to check the remaining copies.
+
+When the report contains coverage data (i.e. `review` was run with `--coverage`), the PR review body includes a **Coverage on changed lines** section listing each file's coverage percentage and instrumented line counts.
+
+## Coverage Reporting
+
+When `--coverage` is passed, vibe-heal fetches SonarQube's `lineHits` data for each changed file and computes coverage metrics scoped to the lines you actually changed.
+
+### What is counted
+
+- **Instrumented line** — a changed line for which SonarQube has hit-count data (i.e. the line was processed by the coverage tool during test execution). Comments, blank lines, and lines outside the coverage tool's scope are not instrumented.
+- **Covered line** — an instrumented line with `lineHits > 0` (executed at least once during testing).
+- **`coverage_pct`** — `covered_lines / instrumented_changed_lines × 100`, rounded to one decimal place.
+
+### Prerequisites
+
+Coverage data must be present in SonarQube. This typically means:
+
+1. Running your test suite with a coverage tool (e.g. `pytest --cov`, `jest --coverage`, `jacoco`) and generating a coverage report.
+2. Passing the coverage report path to `sonar-scanner` (e.g. `sonar.python.coverage.reportPaths=coverage.xml`) before vibe-heal runs its analysis.
+
+If SonarQube has no coverage data for a file, `--coverage` shows `—` for that file when the Coverage column is present, and omits the file from the Coverage section in PR/Markdown output. With `--verbose`, a note is printed: `no coverage data available`.
+
+### Example
+
+```bash
+# Run tests and generate coverage first
+uv run pytest --cov --cov-report=xml
+
+# Then review with coverage
+vibe-heal review --coverage
+```
 
 ## Duplication Findings
 
@@ -332,6 +382,14 @@ vibe-heal review --post --report-file /tmp/review.json
 ### "sonar-scanner is not installed or not in PATH"
 
 See the [Branch Cleanup Guide troubleshooting section](branch-cleanup-guide.md#issue-sonar-scanner-is-not-installed-or-not-in-path) for installation instructions.
+
+### Coverage column not shown despite using `--coverage`
+
+Coverage data must be uploaded to SonarQube before running `vibe-heal review`. Make sure you:
+
+1. Run your test suite with coverage enabled and generate a report (e.g. `coverage.xml`).
+2. Verify that your `sonar-project.properties` or `sonar-scanner` flags include the coverage report path (e.g. `sonar.python.coverage.reportPaths=coverage.xml`).
+3. Run `vibe-heal review --coverage --verbose` — if coverage is missing, vibe-heal prints `no coverage data (run tests before sonar-scanner)` for each affected file.
 
 ### No issues reported despite known violations
 

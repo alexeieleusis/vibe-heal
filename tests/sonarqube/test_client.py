@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -13,6 +14,16 @@ from vibe_heal.sonarqube import (
     SonarQubeAuthError,
     SonarQubeClient,
 )
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
+from vibe_heal.sonarqube.models import SourceLine
+
+
+def _make_line(line: int, line_hits: int | None) -> SourceLine:
+    """Build a SourceLine with a specific lineHits value."""
+    data: dict[str, object] = {"line": line, "code": "x"}
+    if line_hits is not None:
+        data["lineHits"] = line_hits
+    return SourceLine.model_validate(data)
 
 
 @pytest.fixture
@@ -521,3 +532,104 @@ class TestSonarQubeClient:
         async with SonarQubeClient(config) as client:
             with pytest.raises(SonarQubeRuleNotFoundError):
                 await client.get_rule_details("external_eslint_repo:vibe-types/no-callback-pyramid")
+
+
+class TestGetSourceLinesProjectKey:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_uses_config_project_key_by_default(self, config: VibeHealConfig) -> None:
+        route = respx.get("https://sonar.test.com/api/sources/lines").mock(
+            return_value=httpx.Response(200, json={"sources": [{"line": 1, "code": "x"}]})
+        )
+        async with SonarQubeClient(config) as client:
+            await client.get_source_lines("src/file.py")
+        assert route.calls.last.request.url.params["key"] == "my-project:src/file.py"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_uses_provided_project_key(self, config: VibeHealConfig) -> None:
+        route = respx.get("https://sonar.test.com/api/sources/lines").mock(
+            return_value=httpx.Response(200, json={"sources": [{"line": 1, "code": "x"}]})
+        )
+        async with SonarQubeClient(config) as client:
+            await client.get_source_lines("src/file.py", project_key="temp-abc-123")
+        assert route.calls.last.request.url.params["key"] == "temp-abc-123:src/file.py"
+
+
+class TestGetLineCoverage:
+    @pytest.mark.asyncio
+    async def test_empty_changed_lines_returns_none(self, config: VibeHealConfig) -> None:
+        async with SonarQubeClient(config) as client:
+            result = await client.get_line_coverage("src/f.py", set())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_component_not_found_returns_none(self, config: VibeHealConfig) -> None:
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(side_effect=ComponentNotFoundError("not found"))):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_all_changed_lines_covered(self, config: VibeHealConfig) -> None:
+        source_lines = [_make_line(10, 2), _make_line(20, 1)]
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=source_lines)):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result == (2, 2)
+
+    @pytest.mark.asyncio
+    async def test_no_changed_lines_covered(self, config: VibeHealConfig) -> None:
+        source_lines = [_make_line(10, 0), _make_line(20, 0)]
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=source_lines)):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result == (0, 2)
+
+    @pytest.mark.asyncio
+    async def test_mixed_covered_uncovered(self, config: VibeHealConfig) -> None:
+        source_lines = [_make_line(10, 3), _make_line(20, 0), _make_line(30, 1)]
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=source_lines)):
+                result = await client.get_line_coverage("src/f.py", {10, 20, 30})
+        assert result == (2, 3)
+
+    @pytest.mark.asyncio
+    async def test_all_non_instrumented_returns_none(self, config: VibeHealConfig) -> None:
+        source_lines = [_make_line(10, None), _make_line(20, None)]
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=source_lines)):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_empty_source_lines_response_returns_none(self, config: VibeHealConfig) -> None:
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=[])):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_passes_project_key_to_get_source_lines(self, config: VibeHealConfig) -> None:
+        mock_gsl = AsyncMock(return_value=[_make_line(10, 1)])
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", mock_gsl):
+                await client.get_line_coverage("src/f.py", {10}, project_key="temp-xyz")
+        mock_gsl.assert_called_once_with("src/f.py", from_line=10, to_line=10, project_key="temp-xyz")
+
+    @pytest.mark.asyncio
+    async def test_passes_min_max_bounds_to_get_source_lines(self, config: VibeHealConfig) -> None:
+        mock_gsl = AsyncMock(return_value=[_make_line(10, 1), _make_line(30, 0)])
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", mock_gsl):
+                await client.get_line_coverage("src/f.py", {10, 20, 30})
+        mock_gsl.assert_called_once_with("src/f.py", from_line=10, to_line=30, project_key=None)
+
+    @pytest.mark.asyncio
+    async def test_only_counts_lines_in_changed_set(self, config: VibeHealConfig) -> None:
+        # Source returns lines 10, 15, 20 but only 10 and 20 are in changed_lines
+        source_lines = [_make_line(10, 1), _make_line(15, 0), _make_line(20, 1)]
+        async with SonarQubeClient(config) as client:
+            with patch.object(client, "get_source_lines", AsyncMock(return_value=source_lines)):
+                result = await client.get_line_coverage("src/f.py", {10, 20})
+        assert result == (2, 2)  # line 15 excluded

@@ -411,3 +411,31 @@ class TestDuplicationModels:
         )
 
         assert result.total_duplications == 4  # 1+1 + 2+0
+
+
+class TestFileReviewCoverageFields:
+    def test_coverage_fields_default_to_none_and_zero(self) -> None:
+        fr = FileReview(file_path="src/f.py")
+        assert fr.coverage_pct is None
+        assert fr.covered_lines == 0
+        assert fr.instrumented_changed_lines == 0
+
+    def test_coverage_fields_serialise_to_dict(self) -> None:
+        fr = FileReview(file_path="src/f.py", coverage_pct=72.5, covered_lines=18, instrumented_changed_lines=25)
+        data = fr.model_dump()
+        assert data["coverage_pct"] == 72.5
+        assert data["covered_lines"] == 18
+        assert data["instrumented_changed_lines"] == 25
+
+    def test_coverage_fields_round_trip(self) -> None:
+        fr = FileReview(file_path="src/f.py", coverage_pct=50.0, covered_lines=5, instrumented_changed_lines=10)
+        restored = FileReview.model_validate(fr.model_dump())
+        assert restored.coverage_pct == 50.0
+        assert restored.covered_lines == 5
+        assert restored.instrumented_changed_lines == 10
+
+    def test_old_json_without_coverage_fields_loads_safely(self) -> None:
+        old_data = {"file_path": "src/f.py", "issues": [], "duplications": [], "resolved_duplications": []}
+        fr = FileReview.model_validate(old_data)
+        assert fr.coverage_pct is None
+        assert fr.covered_lines == 0
