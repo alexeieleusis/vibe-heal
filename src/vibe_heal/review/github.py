@@ -35,7 +35,7 @@ class GitHubReviewClient:
         """
         try:
             result = await run_command(["gh", "--version"], timeout=10)
-        except (FileNotFoundError, OSError) as exc:
+        except OSError as exc:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg) from exc
         if not result.success:
