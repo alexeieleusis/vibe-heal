@@ -156,6 +156,13 @@ class GitHubReviewClient:
                 "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
                 + "\n".join(nearby_lines)
             )
+        coverage_lines = [
+            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
+            for fr in report.files
+            if fr.coverage_pct is not None
+        ]
+        if coverage_lines:
+            body_parts.append("**Coverage on changed lines:**\n" + "\n".join(coverage_lines))
         return {"event": "COMMENT", "body": "\n\n".join(body_parts), "comments": comments}
 
     def _build_issue_body(self, issue: ReviewIssue) -> str:
@@ -229,6 +236,15 @@ class GitHubReviewClient:
                     f"lines {res.main_from_line}-{res.main_to_line} in main were duplicated; "
                     f"{len(res.other_locations)} other instance(s) may need updating",
                 )
+        coverage_lines = [
+            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
+            for fr in report.files
+            if fr.coverage_pct is not None
+        ]
+        if coverage_lines:
+            lines.append("")
+            lines.append("**Coverage on changed lines:**")
+            lines.extend(coverage_lines)
         return {
             "event": "COMMENT",
             "body": "\n".join(lines),
