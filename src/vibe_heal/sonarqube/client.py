@@ -324,6 +324,44 @@ class SonarQubeClient:
 
         return response.sources
 
+    async def get_line_coverage(
+        self,
+        file_path: str,
+        changed_lines: set[int],
+        project_key: str | None = None,
+    ) -> tuple[int, int] | None:
+        """Return (covered_lines, instrumented_changed_lines) for the given changed lines.
+
+        A line is instrumented if lineHits is not None (i.e. SonarQube has coverage data for it).
+        A line is covered if lineHits > 0.
+        Returns None if changed_lines is empty, the component is not found, or no changed
+        line is instrumented. Any exception other than ComponentNotFoundError propagates to the caller.
+
+        Args:
+            file_path: Path to the file (relative to project root)
+            changed_lines: Set of line numbers to check coverage for
+            project_key: SonarQube project key. If None, uses the configured project key
+
+        Returns:
+            Tuple of (covered_lines, instrumented_changed_lines), or None
+        """
+        if not changed_lines:
+            return None
+        try:
+            source_lines = await self.get_source_lines(
+                file_path,
+                from_line=min(changed_lines),
+                to_line=max(changed_lines),
+                project_key=project_key,
+            )
+        except ComponentNotFoundError:
+            return None
+        instrumented = [ln for ln in source_lines if ln.line in changed_lines and ln.line_hits is not None]
+        if not instrumented:
+            return None
+        covered = sum(1 for ln in instrumented if (ln.line_hits or 0) > 0)
+        return (covered, len(instrumented))
+
     async def create_project(self, key: str, name: str) -> None:
         """Create a new SonarQube project.
 
