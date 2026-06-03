@@ -149,7 +149,8 @@ class OpenCodeTool(AITool):
         if self.model:
             cmd.extend(["-m", self.model])
 
-        result = await run_command(cmd, timeout=self.timeout)
+        async with asyncio.timeout(self.timeout):
+            result = await run_command(cmd)
 
         if result.success:
             return FixResult(

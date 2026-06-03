@@ -34,7 +34,8 @@ class GitHubReviewClient:
             OSError: If gh is not installed or not in PATH.
         """
         try:
-            result = await run_command(["gh", "--version"], timeout=10)
+            async with asyncio.timeout(10):
+                result = await run_command(["gh", "--version"])
         except OSError as exc:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg) from exc
@@ -60,10 +61,10 @@ class GitHubReviewClient:
             return pr_number
         await self.validate_installed()
 
-        result = await run_command(
-            ["gh", "pr", "view", "--json", "number"],
-            timeout=30,
-        )
+        async with asyncio.timeout(30):
+            result = await run_command(
+                ["gh", "pr", "view", "--json", "number"],
+            )
         if not result.success:
             stderr = result.stderr.strip()
             if "no pull requests found" in stderr.lower():
@@ -294,10 +295,10 @@ class GitHubReviewClient:
         Returns:
             String in 'owner/repo' format.
         """
-        result = await run_command(
-            ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner.login)/\\(.name)"'],
-            timeout=15,
-        )
+        async with asyncio.timeout(15):
+            result = await run_command(
+                ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner.login)/\\(.name)"'],
+            )
         if result.success and result.stdout.strip():
             return result.stdout.strip()
 

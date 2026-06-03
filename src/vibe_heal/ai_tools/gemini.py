@@ -173,7 +173,8 @@ class GeminiCliTool(AITool):
                 "auto_edit",
             ]
 
-            command_result = await run_command(cmd, 600)
+            async with asyncio.timeout(600):
+                command_result = await run_command(cmd)
             if command_result.success:
                 # Parse JSON response to extract information
                 files_modified = self._parse_modified_files(command_result.stdout, file_path)
