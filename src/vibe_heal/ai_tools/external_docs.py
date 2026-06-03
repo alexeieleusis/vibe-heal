@@ -44,22 +44,18 @@ _RAW_PREFIXES = (
 )
 
 
-def _vibe_types_local_path(url: str) -> Path | None:
-    """Map a vibe-types GitHub URL to its local submodule path, or None if not a vibe-types URL."""
-    rel: str | None = None
+def _extract_rel_path(url: str) -> str | None:
+    """Strip a vibe-types GitHub prefix from url, returning the relative path portion or None."""
     if url.startswith(_BLOB_PREFIX):
-        rel = url[len(_BLOB_PREFIX) :]
-    else:
-        for prefix in _RAW_PREFIXES:
-            if url.startswith(prefix):
-                rel = url[len(prefix) :]
-                break
-    if rel is None:
-        return None
-    rel = rel.split("?")[0].split("#")[0]
-    rel_path = Path(rel)
-    if rel_path.is_absolute() or ".." in rel_path.parts:
-        return None
+        return url[len(_BLOB_PREFIX) :]
+    for prefix in _RAW_PREFIXES:
+        if url.startswith(prefix):
+            return url[len(prefix) :]
+    return None
+
+
+def _resolve_candidate(rel_path: Path) -> Path | None:
+    """Resolve rel_path against the vendor/vibe-types submodule, or None if not safe."""
     for parent in Path(__file__).resolve().parents:
         if (parent / ".git").exists():
             submodule_root = (parent / "vendor" / "vibe-types").resolve()
@@ -70,6 +66,18 @@ def _vibe_types_local_path(url: str) -> Path | None:
                 return None
             return candidate
     return None
+
+
+def _vibe_types_local_path(url: str) -> Path | None:
+    """Map a vibe-types GitHub URL to its local submodule path, or None if not a vibe-types URL."""
+    rel = _extract_rel_path(url)
+    if rel is None:
+        return None
+    rel = rel.split("?")[0].split("#")[0]
+    rel_path = Path(rel)
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        return None
+    return _resolve_candidate(rel_path)
 
 
 def extract_urls(text: str) -> list[str]:
