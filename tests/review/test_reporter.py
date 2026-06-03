@@ -305,3 +305,8 @@ class TestFormatCoverageTable:
     def test_file_path_in_table(self) -> None:
         table = format_coverage_table([self._make_fr(file_path="src/components/foo.tsx")])
         assert "src/components/foo.tsx" in table
+
+    def test_returns_empty_string_when_all_coverage_none(self) -> None:
+        fr = self._make_fr()
+        fr.coverage_pct = None
+        assert format_coverage_table([fr]) == ""

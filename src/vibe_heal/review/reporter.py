@@ -155,6 +155,8 @@ def format_coverage_table(file_reviews: list[FileReview]) -> str:
         if fr.coverage_pct < 80.0:
             pct_str = f"**{pct_str}**"
         rows.append(f"| {fr.file_path} | {fr.covered_lines} | {fr.instrumented_changed_lines} | {pct_str} |")
+    if not rows:
+        return ""
     return "\n".join([header, alignment, *rows])
 
 
