@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from vibe_heal.ai_tools.utils import run_command
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+from vibe_heal.review.reporter import format_coverage_table
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ class GitHubReviewClient:
             OSError: If gh is not installed or not in PATH.
         """
         try:
-            result = await run_command(["gh", "--version"], timeout=10)
+            async with asyncio.timeout(10):
+                result = await run_command(["gh", "--version"])
         except OSError as exc:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg) from exc
@@ -60,10 +62,10 @@ class GitHubReviewClient:
             return pr_number
         await self.validate_installed()
 
-        result = await run_command(
-            ["gh", "pr", "view", "--json", "number"],
-            timeout=30,
-        )
+        async with asyncio.timeout(30):
+            result = await run_command(
+                ["gh", "pr", "view", "--json", "number"],
+            )
         if not result.success:
             stderr = result.stderr.strip()
             if "no pull requests found" in stderr.lower():
@@ -156,13 +158,9 @@ class GitHubReviewClient:
                 "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
                 + "\n".join(nearby_lines)
             )
-        coverage_lines = [
-            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
-            for fr in report.files
-            if fr.coverage_pct is not None
-        ]
-        if coverage_lines:
-            body_parts.append("**Coverage on changed lines:**\n" + "\n".join(coverage_lines))
+        files_with_coverage = [fr for fr in report.files if fr.coverage_pct is not None]
+        if files_with_coverage:
+            body_parts.append("**Coverage on changed lines:**\n\n" + format_coverage_table(files_with_coverage))
         return {"event": "COMMENT", "body": "\n\n".join(body_parts), "comments": comments}
 
     def _build_issue_body(self, issue: ReviewIssue) -> str:
@@ -236,15 +234,9 @@ class GitHubReviewClient:
                     f"lines {res.main_from_line}-{res.main_to_line} in main were duplicated; "
                     f"{len(res.other_locations)} other instance(s) may need updating",
                 )
-        coverage_lines = [
-            f"- `{fr.file_path}`: {fr.coverage_pct}% ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)"
-            for fr in report.files
-            if fr.coverage_pct is not None
-        ]
-        if coverage_lines:
-            lines.append("")
-            lines.append("**Coverage on changed lines:**")
-            lines.extend(coverage_lines)
+        files_with_coverage = [fr for fr in report.files if fr.coverage_pct is not None]
+        if files_with_coverage:
+            lines.extend(["", "**Coverage on changed lines:**\n\n" + format_coverage_table(files_with_coverage)])
         return {
             "event": "COMMENT",
             "body": "\n".join(lines),
@@ -294,10 +286,10 @@ class GitHubReviewClient:
         Returns:
             String in 'owner/repo' format.
         """
-        result = await run_command(
-            ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner.login)/\\(.name)"'],
-            timeout=15,
-        )
+        async with asyncio.timeout(15):
+            result = await run_command(
+                ["gh", "repo", "view", "--json", "owner,name", "--jq", '"\\(.owner.login)/\\(.name)"'],
+            )
         if result.success and result.stdout.strip():
             return result.stdout.strip()
 

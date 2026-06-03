@@ -183,6 +183,65 @@ class VibeHealOrchestrator:
             logger.warning(f"Failed to fetch source lines: {e}. Continuing without code context.")
             return None
 
+    async def _fetch_rule_details(
+        self,
+        issue: SonarQubeIssue,
+    ) -> tuple[SonarQubeRule | None, list[str] | None]:
+        """Fetch rule details or fallback external docs for an issue.
+
+        Args:
+            issue: Issue to fetch rule details for
+
+        Returns:
+            Tuple of (rule, external_docs)
+        """
+        if not self.config.include_rule_description:
+            return None, None
+
+        try:
+            async with SonarQubeClient(self.config) as sonar_client:
+                rule = await sonar_client.get_rule_details(issue.rule)
+                return rule, None
+        except SonarQubeRuleNotFoundError:
+            logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
+            docs = await fetch_external_rule_docs(issue.message)
+            return None, docs if docs else None
+        except Exception as e:
+            logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
+            return None, None
+
+    def _extract_code_context(
+        self,
+        issue: SonarQubeIssue,
+        source_lines: list,
+    ) -> list | None:
+        """Extract code context lines around an issue.
+
+        Args:
+            issue: Issue to extract context for
+            source_lines: Source lines of the file
+
+        Returns:
+            List of context lines or None
+        """
+        if not issue.line:
+            return None
+
+        context_lines = self.config.code_context_lines
+        start_line = max(1, issue.line - context_lines)
+        end_line = issue.line + context_lines
+        code_context = [line for line in source_lines if start_line <= line.line <= end_line]
+
+        if not code_context:
+            return None
+
+        logger.debug("Code context for issue %s (line %s):", issue.key, issue.line)
+        for source_line in code_context:
+            marker = ">>>" if source_line.line == issue.line else "   "
+            logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
+
+        return code_context
+
     async def _fetch_enriched_context(
         self,
         issue: SonarQubeIssue,
@@ -197,35 +256,9 @@ class VibeHealOrchestrator:
         Returns:
             Tuple of (rule, code_context, external_docs)
         """
-        rule = None
-        code_context = None
-        external_docs: list[str] | None = None
+        rule, external_docs = await self._fetch_rule_details(issue)
 
-        if self.config.include_rule_description:
-            try:
-                async with SonarQubeClient(self.config) as sonar_client:
-                    rule = await sonar_client.get_rule_details(issue.rule)
-            except SonarQubeRuleNotFoundError:
-                logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
-                docs = await fetch_external_rule_docs(issue.message)
-                if docs:
-                    external_docs = docs
-            except Exception as e:
-                logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
-
-        # Extract code context around the issue line
-        if source_lines and issue.line:
-            context_lines = self.config.code_context_lines
-            start_line = max(1, issue.line - context_lines)
-            end_line = issue.line + context_lines
-            code_context = [line for line in source_lines if start_line <= line.line <= end_line]
-
-            # Log code context at debug level
-            if code_context:
-                logger.debug("Code context for issue %s (line %s):", issue.key, issue.line)
-                for source_line in code_context:
-                    marker = ">>>" if source_line.line == issue.line else "   "
-                    logger.debug("%s %d: %s", marker, source_line.line, source_line.plain_code)
+        code_context = self._extract_code_context(issue, source_lines) if source_lines else None
 
         return rule, code_context, external_docs
 

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
-from vibe_heal.review.reporter import default_report_dir, load_report, write_reports
+from vibe_heal.review.reporter import default_report_dir, format_coverage_table, load_report, write_reports
 
 
 def _make_result() -> ReviewResult:
@@ -215,14 +215,17 @@ class TestCoverageInMarkdown:
     def test_coverage_pct_rendered_when_present(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=72.0, covered_lines=18, instrumented_changed_lines=25), tmp_path)
         md = (tmp_path / "review.md").read_text()
-        assert "72.0%" in md
-        assert "18/25" in md
+        assert "**72.0%**" in md  # 72.0 < 80, so bold
+        assert "| 18 |" in md
+        assert "| 25 |" in md
+        assert "Coverage on changed lines" in md
 
     def test_coverage_zero_percent_rendered(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=0.0, covered_lines=0, instrumented_changed_lines=5), tmp_path)
         md = (tmp_path / "review.md").read_text()
-        assert "0.0%" in md
-        assert "0/5" in md
+        assert "**0.0%**" in md  # 0.0 < 80, so bold
+        assert "| 0 |" in md
+        assert "| 5 |" in md
 
     def test_coverage_100_percent_rendered(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=100.0, covered_lines=10, instrumented_changed_lines=10), tmp_path)
@@ -232,14 +235,78 @@ class TestCoverageInMarkdown:
     def test_no_coverage_line_when_coverage_pct_none(self, tmp_path: Path) -> None:
         write_reports(self._result(), tmp_path)  # coverage_pct defaults to None
         md = (tmp_path / "review.md").read_text()
-        assert "Coverage on changed lines" not in md
+        assert "## Coverage on changed lines" not in md
 
-    def test_no_issues_label_absent_when_only_coverage_present(self, tmp_path: Path) -> None:
-        """A file with only coverage data (no issues/dups) must not show 'No issues.'"""
+    def test_no_issues_label_present_when_only_coverage_data(self, tmp_path: Path) -> None:
+        """A file with only coverage data (no issues/dups) shows 'No issues.' in file section."""
         write_reports(
             self._result(coverage_pct=80.0, covered_lines=8, instrumented_changed_lines=10),
             tmp_path,
         )
         md = (tmp_path / "review.md").read_text()
-        assert "No issues." not in md
-        assert "80.0%" in md
+        assert "No issues." in md  # guard condition will change — coverage-only file shows "No issues."
+        assert "80.0%" in md  # still appears in the summary table
+
+
+class TestFormatCoverageTable:
+    def _make_fr(
+        self,
+        file_path: str = "src/foo.py",
+        covered_lines: int = 8,
+        instrumented_changed_lines: int = 10,
+        coverage_pct: float = 80.0,
+    ) -> FileReview:
+        return FileReview(
+            file_path=file_path,
+            issues=[],
+            duplications=[],
+            resolved_duplications=[],
+            covered_lines=covered_lines,
+            instrumented_changed_lines=instrumented_changed_lines,
+            coverage_pct=coverage_pct,
+        )
+
+    def test_returns_empty_string_for_empty_list(self) -> None:
+        assert format_coverage_table([]) == ""
+
+    def test_header_row_present(self) -> None:
+        table = format_coverage_table([self._make_fr()])
+        assert "| File | Covered Lines | Instrumented Changed Lines | Coverage % |" in table
+
+    def test_alignment_row_present(self) -> None:
+        table = format_coverage_table([self._make_fr()])
+        assert "| :--- | ---: | ---: | ---: |" in table
+
+    def test_covered_and_instrumented_in_correct_columns(self) -> None:
+        table = format_coverage_table([
+            self._make_fr(covered_lines=18, instrumented_changed_lines=25, coverage_pct=72.0)
+        ])
+        assert "| 18 |" in table
+        assert "| 25 |" in table
+
+    def test_coverage_pct_bold_when_below_80(self) -> None:
+        table = format_coverage_table([self._make_fr(coverage_pct=79.9)])
+        assert "**79.9%**" in table
+
+    def test_coverage_pct_not_bold_at_exactly_80(self) -> None:
+        table = format_coverage_table([self._make_fr(coverage_pct=80.0)])
+        assert "**80.0%**" not in table
+        assert "80.0%" in table
+
+    def test_coverage_pct_not_bold_above_80(self) -> None:
+        table = format_coverage_table([self._make_fr(coverage_pct=95.5)])
+        assert "**95.5%**" not in table
+        assert "95.5%" in table
+
+    def test_coverage_pct_one_decimal_place(self) -> None:
+        table = format_coverage_table([self._make_fr(coverage_pct=72.0)])
+        assert "72.0%" in table
+
+    def test_file_path_in_table(self) -> None:
+        table = format_coverage_table([self._make_fr(file_path="src/components/foo.tsx")])
+        assert "src/components/foo.tsx" in table
+
+    def test_returns_empty_string_when_all_coverage_none(self) -> None:
+        fr = self._make_fr()
+        fr.coverage_pct = None
+        assert format_coverage_table([fr]) == ""
