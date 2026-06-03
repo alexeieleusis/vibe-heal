@@ -191,9 +191,8 @@ class GitHubReviewClient:
             locations = ", ".join(
                 f"`{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
             )
-            body = (
-                f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n"
-                f"This block is duplicated in: {locations}"
+            body = f"**Duplication detected** (lines {dup.from_line}-{dup.to_line})\n\n" + (
+                f"This block is duplicated in: {locations}" if locations else "This block is duplicated elsewhere."
             )
             # Use anchor_line (a changed line in the diff) so the GitHub API
             # accepts the comment; fall back to from_line for older reports.
