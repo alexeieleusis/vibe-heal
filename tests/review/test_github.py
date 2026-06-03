@@ -550,8 +550,9 @@ class TestBuildPayloadCoverage:
         client = GitHubReviewClient()
         report = self._make_report(coverage_pct=72.0, covered_lines=18, instrumented_changed_lines=25)
         payload = client.build_payload(report)
-        assert "72.0%" in payload["body"]
-        assert "18/25" in payload["body"]
+        assert "**72.0%**" in payload["body"]  # 72.0 < 80, so bold
+        assert "| 18 |" in payload["body"]
+        assert "| 25 |" in payload["body"]
         assert "Coverage on changed lines" in payload["body"]
 
     def test_coverage_absent_from_body_when_none(self) -> None:
@@ -564,5 +565,7 @@ class TestBuildPayloadCoverage:
         client = GitHubReviewClient()
         report = self._make_report(coverage_pct=50.0, covered_lines=5, instrumented_changed_lines=10)
         payload = client._build_fallback_payload(report)
-        assert "50.0%" in payload["body"]
+        assert "**50.0%**" in payload["body"]  # 50.0 < 80, so bold
+        assert "| 5 |" in payload["body"]
+        assert "| 10 |" in payload["body"]
         assert "Coverage on changed lines" in payload["body"]
