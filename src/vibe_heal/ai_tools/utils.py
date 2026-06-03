@@ -34,7 +34,12 @@ async def run_command(
         cwd=Path.cwd(),
     )
 
-    stdout_bytes, stderr_bytes = await process.communicate()
+    try:
+        stdout_bytes, stderr_bytes = await process.communicate()
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        process.kill()
+        await process.wait()
+        raise
 
     stdout = stdout_bytes.decode() if stdout_bytes else ""
     stderr = stderr_bytes.decode() if stderr_bytes else ""
