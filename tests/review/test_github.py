@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from vibe_heal.review.github import GitHubReviewClient, GitHubReviewError
-from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
+from vibe_heal.review.models import (
+    DuplicationLocation,
+    FileReview,
+    ResolvedDuplication,
+    ReviewDuplication,
+    ReviewIssue,
+    ReviewResult,
+)
 
 
 @pytest.fixture
@@ -535,6 +542,339 @@ class TestPostReview:
         paths = {c["path"] for c in stdin_json["comments"]}
         assert "src/a.py" in paths
         assert "src/b.py" in paths
+
+    @pytest.mark.asyncio
+    async def test_fallback_active_duplication_shows_other_location(self, mocker) -> None:
+        """Fallback body lists the specific file and lines of the duplicate, not just a count."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[
+                        ReviewDuplication(
+                            from_line=10,
+                            to_line=30,
+                            anchor_line=10,
+                            other_locations=[
+                                DuplicationLocation(
+                                    file_path="src/bar.py",
+                                    from_line=50,
+                                    to_line=70,
+                                )
+                            ],
+                        )
+                    ],
+                    resolved_duplications=[],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "`src/bar.py` lines 50-70" in body
+        assert "also found in" in body
+        assert "1 other location(s)" not in body  # old count-only format must be gone
+
+    @pytest.mark.asyncio
+    async def test_fallback_active_duplication_shows_multiple_other_locations(self, mocker) -> None:
+        """Fallback body lists every other location when there are multiple duplicates."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[
+                        ReviewDuplication(
+                            from_line=10,
+                            to_line=30,
+                            anchor_line=10,
+                            other_locations=[
+                                DuplicationLocation(file_path="src/bar.py", from_line=50, to_line=70),
+                                DuplicationLocation(file_path="src/baz.py", from_line=100, to_line=120),
+                            ],
+                        )
+                    ],
+                    resolved_duplications=[],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "`src/bar.py` lines 50-70" in body
+        assert "`src/baz.py` lines 100-120" in body
+
+    @pytest.mark.asyncio
+    async def test_fallback_active_duplication_empty_locations_uses_count(self, mocker) -> None:
+        """When other_locations is empty, fall back to a count-only string."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[ReviewDuplication(from_line=10, to_line=30, anchor_line=10, other_locations=[])],
+                    resolved_duplications=[],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "duplicated in 0 other location(s)" in body
+
+    @pytest.mark.asyncio
+    async def test_fallback_resolved_duplication_shows_other_location(self, mocker) -> None:
+        """Fallback body lists the other location for resolved duplications and names the base branch."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[],
+                    resolved_duplications=[
+                        ResolvedDuplication(
+                            main_from_line=255,
+                            main_to_line=287,
+                            anchor_new_line=255,
+                            other_locations=[
+                                DuplicationLocation(
+                                    file_path="src/related.py",
+                                    from_line=111,
+                                    to_line=143,
+                                )
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "`src/related.py` lines 111-143" in body
+        assert "origin/main" in body  # report.base_branch must appear
+        assert "check if these other instances" in body
+        assert "1 other instance(s)" not in body  # old count-only format must be gone
+
+    @pytest.mark.asyncio
+    async def test_fallback_resolved_duplication_shows_multiple_other_locations(self, mocker) -> None:
+        """Fallback body lists all other locations for resolved duplications."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[],
+                    resolved_duplications=[
+                        ResolvedDuplication(
+                            main_from_line=100,
+                            main_to_line=130,
+                            anchor_new_line=100,
+                            other_locations=[
+                                DuplicationLocation(file_path="src/a.py", from_line=10, to_line=40),
+                                DuplicationLocation(file_path="src/b.py", from_line=200, to_line=230),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "`src/a.py` lines 10-40" in body
+        assert "`src/b.py` lines 200-230" in body
+        assert "check if these other instances" in body  # lead-in phrase must be present
+
+    @pytest.mark.asyncio
+    async def test_fallback_resolved_duplication_empty_locations_uses_count(self, mocker) -> None:
+        """When other_locations is empty, fall back to a count-only string."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[],
+                    resolved_duplications=[
+                        ResolvedDuplication(
+                            main_from_line=100,
+                            main_to_line=130,
+                            anchor_new_line=100,
+                            other_locations=[],
+                        )
+                    ],
+                )
+            ],
+        )
+        mock_fail = AsyncMock()
+        mock_fail.communicate.return_value = (b'{"message": "Unprocessable Entity"}', b"")
+        mock_fail.returncode = 1
+        mock_success = AsyncMock()
+        mock_success.communicate.return_value = (b"{}", b"")
+        mock_success.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            side_effect=[mock_fail, mock_success],
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        body = json.loads(mock_success.communicate.call_args[0][0])["body"]
+        assert "0 other instance(s) may need updating" in body
+
+    @pytest.mark.asyncio
+    async def test_inline_active_duplication_body_unchanged(self, mocker) -> None:
+        """Inline comment path still uses 'This block is duplicated in:', not fallback wording."""
+        report = ReviewResult(
+            project_key="proj",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path="src/foo.py",
+                    issues=[],
+                    duplications=[
+                        ReviewDuplication(
+                            from_line=10,
+                            to_line=30,
+                            anchor_line=10,
+                            other_locations=[DuplicationLocation(file_path="src/bar.py", from_line=50, to_line=70)],
+                        )
+                    ],
+                    resolved_duplications=[],
+                )
+            ],
+        )
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"{}", b"")
+        mock_process.returncode = 0
+        mocker.patch(
+            "vibe_heal.review.github.asyncio.create_subprocess_exec",
+            return_value=mock_process,
+        )
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=True, stdout="myorg/myrepo"),
+        )
+
+        client = GitHubReviewClient()
+        await client.post_review(42, report)
+
+        stdin_json = json.loads(mock_process.communicate.call_args[0][0])
+        comment_bodies = [c["body"] for c in stdin_json.get("comments", [])]
+        assert any("This block is duplicated in:" in b for b in comment_bodies)
+        assert not any("also found in:" in b for b in comment_bodies)
 
 
 class TestBuildPayloadCoverage:

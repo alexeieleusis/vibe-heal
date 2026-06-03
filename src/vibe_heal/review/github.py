@@ -224,16 +224,35 @@ class GitHubReviewClient:
                         f"\n\n{issue.root_cause}\n\n</details>\n"
                     )
             for dup in file_review.duplications:
-                lines.append(
-                    f"- **Duplication** ({file_review.file_path} lines {dup.from_line}-{dup.to_line}) "
-                    f"duplicated in {len(dup.other_locations)} other location(s)",
-                )
+                if dup.other_locations:
+                    location_list = "\n".join(
+                        f"  - `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in dup.other_locations
+                    )
+                    lines.append(
+                        f"- **Duplication** (`{file_review.file_path}` lines {dup.from_line}-{dup.to_line})"
+                        f" also found in:\n{location_list}"
+                    )
+                else:
+                    lines.append(
+                        f"- **Duplication** (`{file_review.file_path}` lines {dup.from_line}-{dup.to_line})"
+                        f" duplicated in 0 other location(s)"
+                    )
             for res in file_review.resolved_duplications:
-                lines.append(
-                    f"- **Possible missed update** ({file_review.file_path}) - "
-                    f"lines {res.main_from_line}-{res.main_to_line} in main were duplicated; "
-                    f"{len(res.other_locations)} other instance(s) may need updating",
-                )
+                if res.other_locations:
+                    location_list = "\n".join(
+                        f"  - `{loc.file_path}` lines {loc.from_line}-{loc.to_line}" for loc in res.other_locations
+                    )
+                    lines.append(
+                        f"- **Possible missed update** (`{file_review.file_path}`"
+                        f" lines {res.main_from_line}-{res.main_to_line} in `{report.base_branch}`)"
+                        f" - you modified this region; check if these other instances also need updating:\n{location_list}"
+                    )
+                else:
+                    lines.append(
+                        f"- **Possible missed update** (`{file_review.file_path}`) - "
+                        f"lines {res.main_from_line}-{res.main_to_line} in `{report.base_branch}`"
+                        f" were duplicated; 0 other instance(s) may need updating"
+                    )
         files_with_coverage = [fr for fr in report.files if fr.coverage_pct is not None]
         if files_with_coverage:
             lines.extend(["", "**Coverage on changed lines:**\n\n" + format_coverage_table(files_with_coverage)])
