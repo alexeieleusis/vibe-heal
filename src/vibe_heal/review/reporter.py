@@ -162,13 +162,6 @@ def _render_file_section(fr: FileReview, base_branch: str = "main") -> list[str]
     """Render a single file's review section."""
     lines = [f"## `{fr.file_path}`", ""]
 
-    if fr.coverage_pct is not None:
-        lines.append(
-            f"**Coverage on changed lines: {fr.coverage_pct}%"
-            f" ({fr.covered_lines}/{fr.instrumented_changed_lines} instrumented lines covered)**"
-        )
-        lines.append("")
-
     if fr.issues:
         lines.extend(_render_issues_table(fr.issues))
         lines.extend(_render_rule_descriptions(fr.issues))
@@ -179,7 +172,7 @@ def _render_file_section(fr: FileReview, base_branch: str = "main") -> list[str]
     if fr.resolved_duplications:
         lines.extend(_render_resolved_duplications(fr.resolved_duplications, base_branch))
 
-    if not fr.issues and not fr.duplications and not fr.resolved_duplications and fr.coverage_pct is None:
+    if not fr.issues and not fr.duplications and not fr.resolved_duplications:
         lines.extend(["No issues.", ""])
 
     return lines
@@ -201,5 +194,12 @@ def _write_markdown(result: ReviewResult, path: Path) -> None:
 
     for fr in result.files:
         lines.extend(_render_file_section(fr, result.base_branch))
+
+    files_with_coverage = [fr for fr in result.files if fr.coverage_pct is not None]
+    if files_with_coverage:
+        lines.append("## Coverage on changed lines")
+        lines.append("")
+        lines.append(format_coverage_table(files_with_coverage))
+        lines.append("")
 
     path.write_text("\n".join(lines), encoding="utf-8")

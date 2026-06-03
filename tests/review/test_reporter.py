@@ -215,14 +215,17 @@ class TestCoverageInMarkdown:
     def test_coverage_pct_rendered_when_present(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=72.0, covered_lines=18, instrumented_changed_lines=25), tmp_path)
         md = (tmp_path / "review.md").read_text()
-        assert "72.0%" in md
-        assert "18/25" in md
+        assert "**72.0%**" in md  # 72.0 < 80, so bold
+        assert "| 18 |" in md
+        assert "| 25 |" in md
+        assert "Coverage on changed lines" in md
 
     def test_coverage_zero_percent_rendered(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=0.0, covered_lines=0, instrumented_changed_lines=5), tmp_path)
         md = (tmp_path / "review.md").read_text()
-        assert "0.0%" in md
-        assert "0/5" in md
+        assert "**0.0%**" in md  # 0.0 < 80, so bold
+        assert "| 0 |" in md
+        assert "| 5 |" in md
 
     def test_coverage_100_percent_rendered(self, tmp_path: Path) -> None:
         write_reports(self._result(coverage_pct=100.0, covered_lines=10, instrumented_changed_lines=10), tmp_path)
@@ -232,17 +235,17 @@ class TestCoverageInMarkdown:
     def test_no_coverage_line_when_coverage_pct_none(self, tmp_path: Path) -> None:
         write_reports(self._result(), tmp_path)  # coverage_pct defaults to None
         md = (tmp_path / "review.md").read_text()
-        assert "Coverage on changed lines" not in md
+        assert "## Coverage on changed lines" not in md
 
-    def test_no_issues_label_absent_when_only_coverage_present(self, tmp_path: Path) -> None:
-        """A file with only coverage data (no issues/dups) must not show 'No issues.'"""
+    def test_no_issues_label_present_when_only_coverage_data(self, tmp_path: Path) -> None:
+        """A file with only coverage data (no issues/dups) shows 'No issues.' in file section."""
         write_reports(
             self._result(coverage_pct=80.0, covered_lines=8, instrumented_changed_lines=10),
             tmp_path,
         )
         md = (tmp_path / "review.md").read_text()
-        assert "No issues." not in md
-        assert "80.0%" in md
+        assert "No issues." in md  # guard condition will change — coverage-only file shows "No issues."
+        assert "80.0%" in md  # still appears in the summary table
 
 
 class TestFormatCoverageTable:
