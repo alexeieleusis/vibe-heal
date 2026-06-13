@@ -977,6 +977,9 @@ def convert_report(
     except json.JSONDecodeError as e:
         console.print(f"[red]Error: Invalid JSON in {input_file}: {e}[/red]")
         sys.exit(1)
+    except OSError as e:
+        console.print(f"[red]Error: Cannot read {input_file}: {e}[/red]")
+        sys.exit(1)
 
     if not isinstance(data, dict):
         console.print(f"[red]Error: Expected a JSON object, got {type(data).__name__}[/red]")
