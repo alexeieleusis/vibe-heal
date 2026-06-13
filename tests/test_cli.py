@@ -965,3 +965,77 @@ class TestDisplayReviewResultsCoverage:
             files_analyzed=2,
         )
         _display_review_results(result)  # must not raise
+
+
+class TestConvertReportCommand:
+    """Tests for convert-report command."""
+
+    def test_input_file_not_found(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["convert-report", str(tmp_path / "nonexistent.json")])
+        assert result.exit_code == 1
+
+    def test_default_output_path(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text('{"diagnostics": []}')
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 0
+        assert (tmp_path / "report.eslint.json").exists()
+
+    def test_default_output_path_double_suffix(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.eslint.json"
+        input_file.write_text('{"diagnostics": []}')
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 0
+        assert (tmp_path / "report.eslint.eslint.json").exists()
+
+    def test_explicit_output_path(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        output_file = tmp_path / "custom-output.json"
+        input_file.write_text('{"diagnostics": []}')
+        result = runner.invoke(app, ["convert-report", str(input_file), str(output_file)])
+        assert result.exit_code == 0
+        assert output_file.exists()
+
+    def test_invalid_json_exits_1(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text("not json {{{")
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 1
+
+    def test_json_list_not_dict_exits_1(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text("[]")
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 1
+
+    def test_missing_diagnostics_key_exits_1(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text('{"other": []}')
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 1
+
+    def test_diagnostics_null_exits_1(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text('{"diagnostics": null}')
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 1
+
+    def test_existing_output_overwritten_silently(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text('{"diagnostics": []}')
+        output_file = tmp_path / "report.eslint.json"
+        output_file.write_text("old content")
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 0
+        assert output_file.read_text() != "old content"
+
+    def test_success_prints_converted_summary(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text(
+            '{"diagnostics": [{"filename": "src/foo.ts", "message": "test",'
+            ' "code": "no-unused-vars", "severity": "warning",'
+            ' "labels": [{"span": {"offset": 0, "length": 5, "line": 1, "column": 0}}]}]}'
+        )
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        assert result.exit_code == 0
+        assert "Converted 1 diagnostics across 1 files" in result.output
