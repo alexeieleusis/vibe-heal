@@ -997,7 +997,11 @@ def convert_report(
         Path(output_file) if output_file is not None else input_path.with_name(input_path.stem + ".eslint.json")
     )
 
-    eslint_data = convert_oxlint_to_eslint(data)
+    try:
+        eslint_data = convert_oxlint_to_eslint(data)
+    except KeyError as e:
+        console.print(f"[red]Error: Malformed diagnostic — missing field {e}[/red]")
+        sys.exit(1)
 
     try:
         output_path.write_text(json.dumps(eslint_data, indent=2))
