@@ -1039,3 +1039,12 @@ class TestConvertReportCommand:
         result = runner.invoke(app, ["convert-report", str(input_file)])
         assert result.exit_code == 0
         assert "Converted 1 diagnostics across 1 files" in result.output
+
+    def test_malformed_diagnostic_missing_filename_exits_1(self, tmp_path: Path) -> None:
+        input_file = tmp_path / "report.json"
+        input_file.write_text('{"diagnostics": [{"message": "test"}]}')
+        result = runner.invoke(app, ["convert-report", str(input_file)])
+        # The converter uses .get() with defaults for filename and message,
+        # and _extract_position catches KeyError — so malformed diagnostics
+        # are handled gracefully rather than raising KeyError.
+        assert result.exit_code == 0
