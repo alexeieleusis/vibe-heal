@@ -50,15 +50,13 @@ class TestConvertOxlintToEslint:
     def test_all_message_keys_present(self) -> None:
         result = convert_oxlint_to_eslint({"diagnostics": [_make_diagnostic()]})
         msg = result[0]["messages"][0]
-        assert set(msg.keys()) == {"ruleId", "severity", "message", "line", "column", "endLine", "endColumn"}
+        assert set(msg.keys()) == {"ruleId", "severity", "message", "line", "column"}
 
-    def test_no_labels_falls_back_to_1_1_1_1(self) -> None:
+    def test_no_labels_falls_back_to_1_1(self) -> None:
         data = {"diagnostics": [_make_diagnostic(labels=[])]}
         msg = convert_oxlint_to_eslint(data)[0]["messages"][0]
         assert msg["line"] == 1
         assert msg["column"] == 1
-        assert msg["endLine"] == 1
-        assert msg["endColumn"] == 1
 
     def test_span_null_falls_back_to_1_1_1_1(self) -> None:
         data = {"diagnostics": [_make_diagnostic(labels=[{"span": None}])]}
@@ -66,11 +64,11 @@ class TestConvertOxlintToEslint:
         assert msg["line"] == 1
         assert msg["column"] == 1
 
-    def test_span_missing_key_falls_back_to_1_1_1_1(self) -> None:
+    def test_span_without_length_still_extracts_position(self) -> None:
         data = {"diagnostics": [_make_diagnostic(labels=[{"span": {"line": 5, "column": 2}}])]}
         msg = convert_oxlint_to_eslint(data)[0]["messages"][0]
-        assert msg["line"] == 1
-        assert msg["column"] == 1
+        assert msg["line"] == 5
+        assert msg["column"] == 3  # 2 + 1
 
     def test_rule_id_eslint_plugin_prefix_stripped(self) -> None:
         data = {"diagnostics": [_make_diagnostic(code="eslint-plugin-react-hooks(exhaustive-deps)")]}
@@ -137,21 +135,18 @@ class TestConvertOxlintToEslint:
         msg = convert_oxlint_to_eslint({"diagnostics": [diag]})[0]["messages"][0]
         assert msg["message"] == "the real message"
 
-    def test_endline_equals_line_and_endcolumn_formula(self) -> None:
-        # span column=4 (0-indexed) → column_out=5; length=11 → endColumn=16
+    def test_line_and_column_from_span(self) -> None:
+        # span column=4 (0-indexed) → column_out=5 (1-indexed for ESLint)
         data = {
             "diagnostics": [_make_diagnostic(labels=[{"span": {"offset": 0, "length": 11, "line": 38, "column": 4}}])]
         }
         msg = convert_oxlint_to_eslint(data)[0]["messages"][0]
         assert msg["line"] == 38
         assert msg["column"] == 5  # 4 + 1
-        assert msg["endLine"] == 38
-        assert msg["endColumn"] == 16  # 4 + 1 + 11
 
-    def test_zero_length_span_endcolumn_equals_column(self) -> None:
+    def test_column_zero_indexed_conversion(self) -> None:
         data = {
             "diagnostics": [_make_diagnostic(labels=[{"span": {"offset": 0, "length": 0, "line": 5, "column": 3}}])]
         }
         msg = convert_oxlint_to_eslint(data)[0]["messages"][0]
         assert msg["column"] == 4  # 3 + 1
-        assert msg["endColumn"] == 4  # column == endColumn when length=0

@@ -21,15 +21,14 @@ def _map_severity(severity: str) -> int:
     return 2 if severity == "error" else 1
 
 
-def _extract_position(diagnostic: dict[str, Any]) -> tuple[int, int, int, int]:
+def _extract_position(diagnostic: dict[str, Any]) -> tuple[int, int]:
     try:
         span = diagnostic["labels"][0]["span"]
         line: int = span["line"]
         col: int = span["column"] + 1  # oxlint 0-indexed → ESLint 1-indexed
-        end_col: int = col + span["length"]
-        return line, col, line, end_col
+        return line, col
     except (KeyError, TypeError, IndexError):
-        return 1, 1, 1, 1
+        return 1, 1
 
 
 def convert_oxlint_to_eslint(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -49,15 +48,16 @@ def convert_oxlint_to_eslint(data: dict[str, Any]) -> list[dict[str, Any]]:
         filename: str = diag["filename"]
         if filename not in files:
             files[filename] = []
-        line, col, end_line, end_col = _extract_position(diag)
+        line, col = _extract_position(diag)
+        # endLine/endColumn are omitted: span.length counts characters including
+        # newlines for multi-line spans, so col+length would exceed the line
+        # boundary. SonarQube's ESLint importer treats both fields as optional.
         files[filename].append({
             "ruleId": _transform_rule_id(diag.get("code", "")),
             "severity": _map_severity(diag.get("severity", "")),
             "message": diag["message"],
             "line": line,
             "column": col,
-            "endLine": end_line,
-            "endColumn": end_col,
         })
 
     result = []
