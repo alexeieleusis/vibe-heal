@@ -1,6 +1,7 @@
 """Command-line interface for vibe-heal."""
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
 from vibe_heal.config import ConfigurationError, VibeHealConfig
+from vibe_heal.converters.oxlint import convert_oxlint_to_eslint
 from vibe_heal.deduplication.orchestrator import (
     DedupeBranchOrchestrator,
     DedupeBranchResult,
@@ -953,6 +955,63 @@ def debug_issues(
         console.print(f"[red]Error: {e}[/red]")
         console.print_exception()
         sys.exit(1)
+
+
+@app.command()
+def convert_report(
+    input_file: str = typer.Argument(..., help="Path to the oxlint JSON report"),
+    output_file: str | None = typer.Argument(
+        None,
+        help="Output path (default: <stem>.eslint.json in same directory)",
+    ),
+) -> None:
+    """Convert an oxlint JSON report to ESLint format for SonarQube import."""
+    input_path = Path(input_file)
+
+    if not input_path.exists():
+        console.print(f"[red]Error: File not found: {input_file}[/red]")
+        sys.exit(1)
+
+    try:
+        data = json.loads(input_path.read_text())
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Error: Invalid JSON in {input_file}: {e}[/red]")
+        sys.exit(1)
+    except OSError as e:
+        console.print(f"[red]Error: Cannot read {input_file}: {e}[/red]")
+        sys.exit(1)
+
+    if not isinstance(data, dict):
+        console.print(f"[red]Error: Expected a JSON object, got {type(data).__name__}[/red]")
+        sys.exit(1)
+
+    if "diagnostics" not in data:
+        console.print(f"[red]Error: Missing 'diagnostics' key in {input_file}[/red]")
+        sys.exit(1)
+
+    if not isinstance(data["diagnostics"], list):
+        console.print(f"[red]Error: 'diagnostics' must be a list, got {type(data['diagnostics']).__name__}[/red]")
+        sys.exit(1)
+
+    output_path = (
+        Path(output_file) if output_file is not None else input_path.with_name(input_path.stem + ".eslint.json")
+    )
+
+    try:
+        eslint_data = convert_oxlint_to_eslint(data)
+    except KeyError as e:
+        console.print(f"[red]Error: Malformed diagnostic — missing field {e}[/red]")
+        sys.exit(1)
+
+    try:
+        output_path.write_text(json.dumps(eslint_data, indent=2))
+    except OSError as e:
+        console.print(f"[red]Error: Cannot write to {output_path}: {e}[/red]")
+        sys.exit(1)
+
+    n_diagnostics = sum(len(f["messages"]) for f in eslint_data)
+    n_files = len(eslint_data)
+    console.print(f"Converted {n_diagnostics} diagnostics across {n_files} files → {output_path}")
 
 
 if __name__ == "__main__":
