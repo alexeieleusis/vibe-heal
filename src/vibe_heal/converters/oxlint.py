@@ -45,7 +45,7 @@ def convert_oxlint_to_eslint(data: dict[str, Any]) -> list[dict[str, Any]]:
 
     files: dict[str, list[dict[str, Any]]] = {}
     for diag in diagnostics:
-        filename: str = diag["filename"]
+        filename: str = diag.get("filename", "")
         if filename not in files:
             files[filename] = []
         line, col = _extract_position(diag)
