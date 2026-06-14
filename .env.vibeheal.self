@@ -1,0 +1,105 @@
+# vibe-heal Configuration File
+# This file contains configuration for the vibe-heal tool
+# Copy this file and update with your actual values
+
+# ============================================================================
+# SonarQube Configuration (REQUIRED)
+# ============================================================================
+
+# SonarQube server URL (without trailing slash)
+SONARQUBE_URL=http://godel:9000
+
+# SonarQube project key
+SONARQUBE_PROJECT_KEY=vibe-heal
+
+# Authentication: Use EITHER token (preferred) OR username/password
+
+# Option 1: Token authentication (recommended)
+SONARQUBE_TOKEN=squ_e54741a60058694a6d7586243df69b8c571b1df1
+
+# Option 2: Basic authentication (alternative to token)
+# SONARQUBE_USERNAME=your-username
+# SONARQUBE_PASSWORD=your-password
+
+# ============================================================================
+# AI Tool Configuration (OPTIONAL)
+# ============================================================================
+
+# AI tool to use: claude-code or aider
+# If not specified, vibe-heal will auto-detect available tools
+# Priority: Claude Code first, then Aider
+AI_TOOL=opencode
+PRE_COMMIT_COMMAND="make check && make test"
+
+# ============================================================================
+# Aider-Specific Configuration (Only used when AI_TOOL=aider)
+# ============================================================================
+
+# Model to use with Aider
+# Examples:
+#   - For Ollama: ollama_chat/gemma3:27b, ollama_chat/llama3:70b
+#   - For OpenAI: gpt-4, gpt-3.5-turbo
+#   - For Anthropic: claude-3-opus-20240229
+AIDER_MODEL=ollama_chat/gemma3:27b
+
+# API key for your model provider
+# For Ollama running locally, this may not be required
+# For cloud providers (OpenAI, Anthropic), set your API key here
+# AIDER_API_KEY=your-api-key-here
+
+# API base URL for your model provider
+# For Ollama running locally:
+AIDER_API_BASE=http://127.0.0.1:11434
+
+# For other providers, set the appropriate base URL:
+# AIDER_API_BASE=https://api.openai.com/v1
+# AIDER_API_BASE=https://api.anthropic.com
+
+# ============================================================================
+# Context Enrichment (OPTIONAL - Enhances AI fix quality)
+# ============================================================================
+
+# Number of lines to show before/after the issue line for context
+# This helps the AI understand the surrounding code when fixing issues
+# Default: 5
+# CODE_CONTEXT_LINES=5
+
+# Include full rule description and rationale in AI prompts
+# When true, fetches detailed rule documentation from SonarQube and includes it
+# in the prompt sent to the AI, helping it understand WHY the rule exists
+# Default: true
+# INCLUDE_RULE_DESCRIPTION=true
+
+# ============================================================================
+# Usage Examples
+# ============================================================================
+
+# Example 1: Using Claude Code (auto-detected if installed)
+# Just configure SonarQube settings above, Claude Code will be auto-detected
+
+# Example 2: Using Aider with local Ollama
+# AI_TOOL=aider
+# AIDER_MODEL=ollama_chat/gemma3:27b
+# AIDER_API_BASE=http://127.0.0.1:11434
+
+# Example 3: Using Aider with OpenAI
+# AI_TOOL=aider
+# AIDER_MODEL=gpt-4
+# AIDER_API_KEY=sk-...
+# AIDER_API_BASE=https://api.openai.com/v1
+
+# ============================================================================
+# Commands
+# ============================================================================
+
+# View current configuration:
+#   vibe-heal config
+
+# Fix issues in a file (dry-run):
+#   vibe-heal fix path/to/file.py --dry-run
+
+# Fix issues in a file:
+#   vibe-heal fix path/to/file.py
+
+# Fix with limits:
+#   vibe-heal fix path/to/file.py --max-issues 5 --min-severity MAJOR
