@@ -55,7 +55,7 @@ def convert_oxlint_to_eslint(data: dict[str, Any]) -> list[dict[str, Any]]:
         files[filename].append({
             "ruleId": _transform_rule_id(diag.get("code", "")),
             "severity": _map_severity(diag.get("severity", "")),
-            "message": diag["message"],
+            "message": diag.get("message", ""),
             "line": line,
             "column": col,
         })
