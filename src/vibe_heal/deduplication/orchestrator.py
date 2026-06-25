@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools.base import AITool
@@ -19,6 +18,7 @@ from vibe_heal.deduplication.processor import (
 from vibe_heal.git import GitManager
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.models import FixSummary
+from vibe_heal.output import bold_cyan, console, cyan, dim, error, warn
 from vibe_heal.sonarqube.analysis_runner import AnalysisRunner
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager
@@ -38,7 +38,6 @@ class DeduplicationOrchestrator:
         self,
         config: VibeHealConfig,
         ai_tool: AITool,
-        console: Console | None = None,
         git_manager: GitManager | None = None,
     ) -> None:
         """Initialize deduplication orchestrator.
@@ -46,12 +45,10 @@ class DeduplicationOrchestrator:
         Args:
             config: Application configuration
             ai_tool: AI tool instance
-            console: Rich console for output (creates new if None)
             git_manager: Git manager instance (creates new if None)
         """
         self.config = config
         self.ai_tool = ai_tool
-        self.console = console or Console()
         self.git_manager = git_manager or GitManager(pre_commit_command=config.pre_commit_command)
 
     async def dedupe_file(
@@ -78,19 +75,16 @@ class DeduplicationOrchestrator:
         self._validate_preconditions(file_path, dry_run)
 
         # Step 2: Fetch duplications from SonarQube
-        self.console.print(f"\n[yellow]Fetching duplications for {file_path}...[/yellow]")
+        warn(f"\nFetching duplications for {file_path}...")
         try:
             async with DuplicationClient(self.config) as dup_client:
                 response = await dup_client.get_duplications_for_file(file_path)
         except ComponentNotFoundError:
-            self.console.print(
-                f"[yellow]File '{file_path}' not found in SonarQube project. "
-                f"It may not be included in the analysis sources.[/yellow]"
-            )
+            warn(f"File '{file_path}' not found in SonarQube project. It may not be included in the analysis sources.")
             return FixSummary(total_issues=0)
 
         if not response.duplications:
-            self.console.print("[green]No duplications found![/green]")
+            console.print("[green]No duplications found![/green]")
             return FixSummary(total_issues=0)
 
         # Step 3: Process duplications (filter and sort)
@@ -98,14 +92,14 @@ class DeduplicationOrchestrator:
         component_key = f"{self.config.sonarqube_project_key}:{file_path}"
         result = processor.process(response, component_key)
 
-        self.console.print(
-            f"[cyan]Found {result.total_groups} total duplication groups, "
+        cyan(
+            f"Found {result.total_groups} total duplication groups, "
             f"{result.processable_groups} in this file, "
-            f"processing {len(result.groups_to_fix)}[/cyan]\n"
+            f"processing {len(result.groups_to_fix)}\n"
         )
 
         if not result.groups_to_fix:
-            self.console.print("[yellow]No duplications to process[/yellow]")
+            console.print("[yellow]No duplications to process[/yellow]")
             return FixSummary(
                 total_issues=result.total_groups,
                 skipped=result.skipped_groups,
@@ -439,7 +433,7 @@ class DeduplicationOrchestrator:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=self.console,
+            console=console,
         ) as progress:
             for idx, group in enumerate(groups, 1):
                 target_block = group.get_target_block(target_ref)
@@ -481,7 +475,7 @@ class DeduplicationOrchestrator:
             summary: Fix summary
             dry_run: Whether in dry-run mode
         """
-        display_fix_summary(self.console, summary, dry_run, total_label="Total duplication groups")
+        display_fix_summary(summary, dry_run, total_label="Total duplication groups")
 
 
 class FileDedupResult(BaseModel):
@@ -536,7 +530,6 @@ class DedupeBranchOrchestrator:
         self.analysis_runner = AnalysisRunner(config, client)
         self.branch_analyzer = BranchAnalyzer(Path.cwd())
         self.git_manager = GitManager(Path.cwd(), pre_commit_command=config.pre_commit_command)
-        self.console = Console()
 
     async def dedupe_branch(
         self,
@@ -581,7 +574,7 @@ class DedupeBranchOrchestrator:
             temp_project = await self._create_temp_project()
 
             # Step 3: Run SonarQube analysis
-            self.console.print("\n[dim]Running SonarQube analysis...[/dim]")
+            console.print("\n[dim]Running SonarQube analysis...[/dim]")
             analysis_result = await self.analysis_runner.run_analysis(
                 project_key=temp_project.project_key,
                 project_name=temp_project.project_name,
@@ -589,7 +582,7 @@ class DedupeBranchOrchestrator:
             )
 
             if not analysis_result.success:
-                self.console.print(f"[red]Analysis failed: {analysis_result.error_message}[/red]")
+                error(f"Analysis failed: {analysis_result.error_message}")
                 return DedupeBranchResult(
                     success=False,
                     files_processed=[],
@@ -598,7 +591,7 @@ class DedupeBranchOrchestrator:
                     error_message=f"Analysis failed: {analysis_result.error_message}",
                 )
 
-            self.console.print(f"[dim]Analysis completed. Dashboard: {analysis_result.dashboard_url}[/dim]")
+            dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
 
             # Step 4: Process each file
             total_duplications_fixed = 0
@@ -655,7 +648,7 @@ class DedupeBranchOrchestrator:
         modified_files = self.branch_analyzer.get_modified_files(base_branch)
 
         if not modified_files:
-            self.console.print("[yellow]No modified files in branch[/yellow]")
+            console.print("[yellow]No modified files in branch[/yellow]")
             return []
 
         # Filter by patterns if provided
@@ -663,12 +656,12 @@ class DedupeBranchOrchestrator:
             modified_files = self._filter_files(modified_files, file_patterns)
 
         if not modified_files:
-            self.console.print("[yellow]No files match the specified patterns[/yellow]")
+            console.print("[yellow]No files match the specified patterns[/yellow]")
             return []
 
-        self.console.print(f"\n[cyan]Found {len(modified_files)} modified file(s) to process[/cyan]")
+        cyan(f"\nFound {len(modified_files)} modified file(s) to process")
         for f in modified_files:
-            self.console.print(f"  - {f}")
+            console.print(f"  - {f}")
 
         return modified_files
 
@@ -705,7 +698,6 @@ class DedupeBranchOrchestrator:
             base_key=self.config.sonarqube_project_key,
             branch_name=branch_name,
             user_email=user_email,
-            console=self.console,
             command_name="dedupe-branch",
         )
 
@@ -716,12 +708,12 @@ class DedupeBranchOrchestrator:
             temp_project: Project metadata to cleanup
         """
         try:
-            self.console.print("\n[dim]Cleaning up temporary project...[/dim]")
+            console.print("\n[dim]Cleaning up temporary project...[/dim]")
             await self.project_manager.delete_project(temp_project.project_key)
-            self.console.print("[dim]Temporary project deleted[/dim]")
+            console.print("[dim]Temporary project deleted[/dim]")
         except Exception as e:
             logger.warning(f"Failed to delete temporary project: {e}")
-            self.console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
+            warn(f"Warning: Failed to delete temporary project: {e}")
 
     async def _rerun_analysis(
         self,
@@ -737,7 +729,7 @@ class DedupeBranchOrchestrator:
             verbose: Enable verbose output
         """
         if verbose:
-            self.console.print("[dim]  Re-running SonarQube analysis...[/dim]")
+            console.print("[dim]  Re-running SonarQube analysis...[/dim]")
 
         analysis_result = await self.analysis_runner.run_analysis(
             project_key=project_key,
@@ -749,7 +741,7 @@ class DedupeBranchOrchestrator:
             logger.warning(f"Analysis failed at iteration {iteration}: {analysis_result.error_message}")
             # Continue anyway - might still have cached data
         elif verbose:
-            self.console.print("[dim]  Analysis completed[/dim]")
+            console.print("[dim]  Analysis completed[/dim]")
 
     async def _run_dedupe_iteration(
         self,
@@ -774,7 +766,7 @@ class DedupeBranchOrchestrator:
             Number of duplications fixed in this iteration
         """
         if verbose:
-            self.console.print(f"[dim]  Iteration {iteration + 1}/{max_iterations}[/dim]")
+            dim(f"  Iteration {iteration + 1}/{max_iterations}")
 
         # Re-run analysis to get fresh duplication data after fixes
         if iteration > 0:
@@ -789,7 +781,7 @@ class DedupeBranchOrchestrator:
 
         # If no duplications were fixed, print message
         if summary.fixed == 0 and verbose:
-            self.console.print("[dim]  No more duplications to fix[/dim]")
+            console.print("[dim]  No more duplications to fix[/dim]")
 
         return summary.fixed
 
@@ -811,7 +803,7 @@ class DedupeBranchOrchestrator:
         Returns:
             File deduplication result
         """
-        self.console.print(f"\n[bold cyan]Processing {file_path}[/bold cyan]")
+        bold_cyan(f"\nProcessing {file_path}")
 
         total_fixed = 0
 
@@ -826,7 +818,6 @@ class DedupeBranchOrchestrator:
             dedupe_orch = DeduplicationOrchestrator(
                 config=self.config,
                 ai_tool=self.ai_tool,
-                console=self.console,
                 git_manager=self.git_manager,
             )
 
