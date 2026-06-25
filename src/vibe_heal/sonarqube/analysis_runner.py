@@ -7,14 +7,13 @@ import shutil
 from pathlib import Path
 
 from pydantic import BaseModel
-from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
+from vibe_heal.output import console, dim, error, warn
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
 from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
 
-console = Console()
 logger = logging.getLogger(__name__)
 
 _AUTH_ERROR_RE = re.compile(r"401|403|unauthorized|authentication", re.IGNORECASE)
@@ -87,7 +86,7 @@ class AnalysisRunner:
         # Execute scanner
         with handler.patched(project_key, project_name):
             try:
-                console.print(f"[dim]    Executing: sonar-scanner (project: {project_key})[/dim]")
+                dim(f"    Executing: sonar-scanner (project: {project_key})")
                 result = await asyncio.create_subprocess_exec(
                     *command,
                     cwd=str(project_dir),
@@ -97,13 +96,13 @@ class AnalysisRunner:
 
                 console.print("[dim]    Waiting for scanner to complete...[/dim]")
                 stdout, stderr = await result.communicate()
-                console.print(f"[dim]    Scanner finished with exit code: {result.returncode}[/dim]")
+                dim(f"    Scanner finished with exit code: {result.returncode}")
 
                 if result.returncode != 0:
                     stdout_text = stdout.decode() if stdout else ""
                     stderr_text = stderr.decode() if stderr else ""
                     combined_error_output = "\n".join(output for output in (stderr_text, stdout_text) if output)
-                    console.print(f"[red]    Scanner error: {combined_error_output[:500]}[/red]")
+                    error(f"    Scanner error: {combined_error_output[:500]}")
                     error_msg = f"sonar-scanner failed with exit code {result.returncode}: {combined_error_output}"
                     if handler.exists and _AUTH_ERROR_RE.search(combined_error_output):
                         error_msg += _AUTH_HINT
@@ -127,7 +126,7 @@ class AnalysisRunner:
                         error_message="Could not extract task ID from scanner output",
                     )
 
-                console.print(f"[dim]    Task ID: {task_id}[/dim]")
+                dim(f"    Task ID: {task_id}")
 
                 # Wait for analysis to complete on server
                 console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
@@ -189,20 +188,20 @@ class AnalysisRunner:
 
                 # Only log status changes to reduce noise
                 if status != last_status:
-                    console.print(f"[dim]    Analysis status: {status}[/dim]")
+                    dim(f"    Analysis status: {status}")
                     last_status = status
 
                 if status == "SUCCESS":
                     return True
                 if status in ("FAILED", "CANCELED"):
-                    console.print(f"[red]    Analysis failed with status: {status}[/red]")
+                    error(f"    Analysis failed with status: {status}")
                     return False
 
                 # Status is PENDING or IN_PROGRESS, keep waiting
                 await asyncio.sleep(poll_interval)
 
             except SonarQubeAPIError as e:
-                console.print(f"[yellow]    Warning: API error while polling: {e}[/yellow]")
+                warn(f"    Warning: API error while polling: {e}")
                 # API error, keep trying
                 await asyncio.sleep(poll_interval)
 
