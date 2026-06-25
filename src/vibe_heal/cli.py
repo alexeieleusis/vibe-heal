@@ -7,9 +7,7 @@ import sys
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.logging import RichHandler
-from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from vibe_heal import __version__
@@ -24,6 +22,7 @@ from vibe_heal.deduplication.orchestrator import (
     DeduplicationOrchestrator,
 )
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.output import bold, bold_cyan, console, cyan, dim, error, info, success, warn
 from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
 from vibe_heal.review.models import ReviewIssue
 from vibe_heal.review.orchestrator import ReviewAnalysisResult
@@ -35,19 +34,6 @@ app = typer.Typer(
     help="AI-powered SonarQube issue remediation tool\n\nGitHub: https://github.com/alexeieleusis/vibe-heal",
     add_completion=False,
 )
-console = Console()
-
-
-def _print_error(msg: object) -> None:
-    console.print(f"[red]{rich_escape(str(msg))}[/red]")
-
-
-def _print_warning(msg: object) -> None:
-    console.print(f"[yellow]{rich_escape(str(msg))}[/yellow]")
-
-
-# Error messages
-NO_AI_TOOL_ERROR = "[red]No AI tool found. Please install Claude Code or Aider.[/red]"
 
 # Default values
 DEFAULT_BASE_BRANCH = "origin/main"
@@ -94,21 +80,21 @@ def initialize_ai_tool(config: VibeHealConfig) -> AITool:
     # Determine which AI tool to use
     if config.ai_tool:
         tool_type = config.ai_tool
-        console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
+        info(f"Using configured AI tool: {tool_type.display_name}")
     else:
         detected_tool = AIToolFactory.detect_available()
         if not detected_tool:
-            console.print(NO_AI_TOOL_ERROR)
+            error("No AI tool found. Please install Claude Code or Aider.")
             sys.exit(1)
         tool_type = detected_tool
-        console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
+        info(f"Auto-detected AI tool: {tool_type.display_name}")
 
     # Create AI tool instance
     ai_tool_instance = AIToolFactory.create(tool_type, config)
 
     # Validate AI tool is available
     if not ai_tool_instance.is_available():
-        _print_error(f"{tool_type.display_name} is not available")
+        error(f"{tool_type.display_name} is not available")
         sys.exit(1)
 
     return ai_tool_instance
@@ -182,10 +168,10 @@ def fix(
             sys.exit(1)
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -240,7 +226,6 @@ def dedupe(
         orchestrator = DeduplicationOrchestrator(
             config=config,
             ai_tool=ai_tool_instance,
-            console=console,
         )
 
         # Run deduplication
@@ -257,10 +242,10 @@ def dedupe(
             sys.exit(1)
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -280,7 +265,7 @@ def _display_branch_operation_header(
         max_iterations: Maximum iterations per file
         file_patterns: Optional file patterns to filter
     """
-    console.print(f"\n[bold cyan]{operation_name}[/bold cyan]")
+    bold_cyan(f"\n{operation_name}")
     console.print(f"  Base branch: {base_branch}")
     console.print(f"  Max iterations per file: {max_iterations}")
     if file_patterns:
@@ -296,21 +281,19 @@ def _display_cleanup_results(result: CleanupResult) -> None:
     """
     console.print("\n[bold]Cleanup Summary:[/bold]")
     console.print(f"  Files processed: {len(result.files_processed)}")
-    console.print(f"  [green]Total issues fixed: {result.total_issues_fixed}[/green]")
+    success(f"  Total issues fixed: {result.total_issues_fixed}")
 
     if result.files_processed:
         console.print("\n[bold]Per-File Results:[/bold]")
         for file_result in result.files_processed:
             status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
-            console.print(
-                f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.issues_fixed} issues fixed"
-            )
+            console.print(f"  {status} {file_result.file_path!s}: {file_result.issues_fixed} issues fixed")
             if file_result.error_message:
-                console.print(f"      [red]Error: {rich_escape(file_result.error_message)}[/red]")
+                error(f"      Error: {file_result.error_message}")
 
     if not result.success:
         if result.error_message:
-            console.print(f"\n[red]Cleanup failed: {rich_escape(result.error_message)}[/red]")
+            error(f"\nCleanup failed: {result.error_message}")
         sys.exit(1)
 
     console.print("\n[green]✨ Branch cleanup complete![/green]")
@@ -424,10 +407,10 @@ def cleanup(
         )
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -441,21 +424,19 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
     """
     console.print("\n[bold]Deduplication Summary:[/bold]")
     console.print(f"  Files processed: {len(result.files_processed)}")
-    console.print(f"  [green]Total duplications fixed: {result.total_duplications_fixed}[/green]")
+    success(f"  Total duplications fixed: {result.total_duplications_fixed}")
 
     if result.files_processed:
         console.print("\n[bold]Per-File Results:[/bold]")
         for file_result in result.files_processed:
             status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
-            console.print(
-                f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.duplications_fixed} duplications fixed"
-            )
+            console.print(f"  {status} {file_result.file_path!s}: {file_result.duplications_fixed} duplications fixed")
             if file_result.error_message:
-                console.print(f"      [red]Error: {rich_escape(file_result.error_message)}[/red]")
+                error(f"      Error: {file_result.error_message}")
 
     if not result.success:
         if result.error_message:
-            console.print(f"\n[red]Deduplication failed: {rich_escape(result.error_message)}[/red]")
+            error(f"\nDeduplication failed: {result.error_message}")
         sys.exit(1)
 
     console.print("\n[green]✨ Branch deduplication complete![/green]")
@@ -569,10 +550,10 @@ def dedupe_branch(
         )
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -634,10 +615,10 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
     files_checked = result.files_analyzed
 
     console.print("\n[bold]Review Summary:[/bold]")
-    console.print(f"  Branch: {rich_escape(result.branch)} (base: {rich_escape(result.base_branch)})")
+    console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
     console.print(f"  Files checked: {files_checked}")
-    console.print(f"  [green]Total issues: {total_issues}[/green]")
-    console.print(f"  [green]Duplication findings: {total_duplications}[/green]")
+    success(f"  Total issues: {total_issues}")
+    success(f"  Duplication findings: {total_duplications}")
 
     if result.files:
         _build_review_table(result)
@@ -645,7 +626,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
         console.print("\n[green]No issues found on changed lines.[/green]")
 
     if result.report_file:
-        console.print(f"\n[dim]Report saved to {rich_escape(str(result.report_file))}[/dim]")
+        dim(f"\nReport saved to {result.report_file}")
 
 
 async def _run_review(
@@ -678,7 +659,7 @@ async def _run_review(
         _display_review_results(result)
         if not result.success:
             if result.error_message:
-                _print_error(result.error_message)
+                error(result.error_message or "")
             sys.exit(1)
 
 
@@ -704,34 +685,32 @@ async def _run_review_post(
     github_client = GitHubReviewClient()
     report = load_report_from_path(report_file)
     if verbose:
-        console.print(
-            f"[dim]  Report: branch={rich_escape(report.branch)}, {report.total_issues} issue(s), {len(report.files)} file(s)[/dim]"
-        )
+        dim(f"  Report: branch={report.branch}, {report.total_issues} issue(s), {len(report.files)} file(s)")
 
     if pr_number is not None:
         pr = pr_number
         if verbose:
-            console.print(f"[dim]  Using explicit PR #{pr}[/dim]")
+            dim(f"  Using explicit PR #{pr}")
     else:
         pr = await github_client.detect_pr()
         if verbose:
-            console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
+            dim(f"  Auto-detected PR #{pr}")
 
     if dry_run:
         payload = github_client.build_payload(report)
         comments = payload["comments"]
-        console.print(f"[yellow][dry-run] Would post {len(comments)} inline comment(s) to PR #{pr}:[/yellow]")
-        console.print(f"[dim]Review body: {payload['body']}[/dim]")
+        warn(f"[dry-run] Would post {len(comments)} inline comment(s) to PR #{pr}:")
+        dim(f"Review body: {payload['body']}")
         for comment in comments:
-            console.print(f"\n  [dim]{comment['path']}:{comment['line']}[/dim]")
+            dim(f"\n  {comment['path']}:{comment['line']}")
             console.print(comment["body"])
         return
 
     await github_client.post_review(pr, report)
-    console.print(
-        f"[green]Posted {report.total_issues} issue(s) and "
+    success(
+        f"Posted {report.total_issues} issue(s) and "
         f"{report.total_duplications} duplication finding(s) "
-        f"as review comments on PR #{pr}.[/green]"
+        f"as review comments on PR #{pr}."
     )
 
 
@@ -764,9 +743,9 @@ def _review_post_mode(
                 _cfg = VibeHealConfig(env_file=env_file)
                 report_file = default_report_dir(_cfg.sonarqube_project_key, branch) / "review.json"
             except Exception:
-                console.print(
-                    "[red]Cannot determine default report path: no SonarQube config found. "
-                    "Pass --report-file to specify the report location.[/red]"
+                error(
+                    "Cannot determine default report path: no SonarQube config found. "
+                    "Pass --report-file to specify the report location."
                 )
                 sys.exit(1)
 
@@ -779,13 +758,13 @@ def _review_post_mode(
             )
         )
     except NoOpenPrError as e:
-        _print_warning(e)
+        warn(str(e))
         console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
     except FileNotFoundError as e:
-        _print_error(e)
+        error(str(e))
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -866,16 +845,16 @@ def review(
         )
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except FileNotFoundError as e:
-        _print_error(e)
+        error(str(e))
         sys.exit(1)
     except NoOpenPrError as e:
-        _print_warning(e)
+        warn(str(e))
         console.print("[dim]Report saved; use --post later when a PR is available.[/dim]")
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         if verbose:
             console.print_exception()
         sys.exit(1)
@@ -904,7 +883,7 @@ def config(
         console.print(f"  Code Context Lines: {cfg.code_context_lines}")
         console.print(f"  Include Rule Description: {cfg.include_rule_description}")
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
 
 
@@ -938,7 +917,7 @@ def debug_issues(
         async def _debug() -> None:
             async with SonarQubeClient(config) as client:
                 if file_path:
-                    _print_warning(f"Fetching issues for file: {file_path}")
+                    warn(f"Fetching issues for file: {file_path}")
                     console.print()
                     issues = await client.get_issues_for_file(file_path)
                 else:
@@ -946,10 +925,10 @@ def debug_issues(
                     # Fetch all project issues without file filter
                     issues = await client.get_issues(component=None, page_size=limit)
 
-                console.print(f"[bold]Found {len(issues)} issues[/bold]\n")
+                bold(f"Found {len(issues)} issues\n")
 
                 for idx, issue in enumerate(issues[:limit], 1):
-                    console.print(f"[cyan]Issue {idx}:[/cyan]")
+                    cyan(f"Issue {idx}:")
                     console.print(f"  Key: {issue.key}")
                     console.print(f"  Rule: {issue.rule}")
                     console.print(f"  Component: {issue.component}")
@@ -964,10 +943,10 @@ def debug_issues(
         asyncio.run(_debug())
 
     except ConfigurationError as e:
-        _print_error(f"Configuration error: {e}")
+        error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        _print_error(f"Error: {e}")
+        error(f"Error: {e}")
         console.print_exception()
         sys.exit(1)
 
@@ -984,28 +963,28 @@ def convert_report(
     input_path = Path(input_file)
 
     if not input_path.exists():
-        _print_error(f"Error: File not found: {input_file}")
+        error(f"Error: File not found: {input_file}")
         sys.exit(1)
 
     try:
         data = json.loads(input_path.read_text())
     except json.JSONDecodeError as e:
-        _print_error(f"Error: Invalid JSON in {input_file}: {e}")
+        error(f"Error: Invalid JSON in {input_file}: {e}")
         sys.exit(1)
     except OSError as e:
-        _print_error(f"Error: Cannot read {input_file}: {e}")
+        error(f"Error: Cannot read {input_file}: {e}")
         sys.exit(1)
 
     if not isinstance(data, dict):
-        _print_error(f"Error: Expected a JSON object, got {type(data).__name__}")
+        error(f"Error: Expected a JSON object, got {type(data).__name__}")
         sys.exit(1)
 
     if "diagnostics" not in data:
-        _print_error(f"Error: Missing 'diagnostics' key in {input_file}")
+        error(f"Error: Missing 'diagnostics' key in {input_file}")
         sys.exit(1)
 
     if not isinstance(data["diagnostics"], list):
-        _print_error(f"Error: 'diagnostics' must be a list, got {type(data['diagnostics']).__name__}")
+        error(f"Error: 'diagnostics' must be a list, got {type(data['diagnostics']).__name__}")
         sys.exit(1)
 
     output_path = (
@@ -1015,18 +994,18 @@ def convert_report(
     try:
         eslint_data = convert_oxlint_to_eslint(data)
     except KeyError as e:
-        _print_error(f"Error: Malformed diagnostic — missing field {e}")
+        error(f"Error: Malformed diagnostic — missing field {e}")
         sys.exit(1)
 
     try:
         output_path.write_text(json.dumps(eslint_data, indent=2))
     except OSError as e:
-        _print_error(f"Error: Cannot write to {output_path}: {e}")
+        error(f"Error: Cannot write to {output_path}: {e}")
         sys.exit(1)
 
     n_diagnostics = sum(len(f["messages"]) for f in eslint_data)
     n_files = len(eslint_data)
-    console.print(f"Converted {n_diagnostics} diagnostics across {n_files} files → {rich_escape(str(output_path))}")
+    console.print(f"Converted {n_diagnostics} diagnostics across {n_files} files → {output_path}")
 
 
 if __name__ == "__main__":
