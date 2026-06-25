@@ -1,7 +1,7 @@
 """Tests for ProjectManager class."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -484,9 +484,6 @@ class TestCreateTempProjectWithSettings:
     @pytest.mark.asyncio
     async def test_create_with_settings_success(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
         """Test successful creation with exclusion settings copy."""
-        from unittest.mock import MagicMock
-
-        mock_console = MagicMock()
         mock_client.create_project = AsyncMock()
         mock_client.get_project_settings = AsyncMock(
             return_value=[
@@ -499,7 +496,6 @@ class TestCreateTempProjectWithSettings:
             base_key="my_project",
             branch_name="feature/test",
             user_email="user@example.com",
-            console=mock_console,
         )
 
         assert metadata.project_key.startswith("my_project_user_example_com_feature_test_")
@@ -513,22 +509,16 @@ class TestCreateTempProjectWithSettings:
         self, project_manager: ProjectManager, mock_client: AsyncMock
     ) -> None:
         """Test that settings copy errors don't prevent project creation."""
-        from unittest.mock import MagicMock
-
-        mock_console = MagicMock()
         mock_client.create_project = AsyncMock()
         mock_client.get_project_settings = AsyncMock(
             side_effect=SonarQubeAPIError("Permission denied", status_code=403)
         )
 
-        metadata = await project_manager.create_temp_project_with_settings(
-            base_key="my_project",
-            branch_name="main",
-            user_email="user@example.com",
-            console=mock_console,
-        )
-
-        assert metadata is not None
-        mock_console.print.assert_any_call(
-            "[yellow]Warning: Could not copy exclusion settings: Permission denied[/yellow]"
-        )
+        with patch("vibe_heal.sonarqube.project_manager.warn") as mock_warn:
+            metadata = await project_manager.create_temp_project_with_settings(
+                base_key="my_project",
+                branch_name="main",
+                user_email="user@example.com",
+            )
+            assert metadata is not None
+            mock_warn.assert_any_call("Warning: Could not copy exclusion settings: Permission denied")
