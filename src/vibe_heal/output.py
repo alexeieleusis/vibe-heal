@@ -6,7 +6,7 @@ user data containing brackets (file paths, exception messages, scanner output)
 can never trigger a Rich MarkupError.
 
 Usage:
-    from vibe_heal.output import console, dim, success, warn, error, info, cyan, bold_cyan
+    from vibe_heal.output import console, dim, success, warn, error, info, cyan, bold, bold_cyan
 
 Do NOT call console.print(f"[markup]{dynamic}[/markup]") anywhere else in the
 codebase. Use these helpers instead — they handle escaping internally.
