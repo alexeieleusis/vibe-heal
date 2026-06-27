@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vibe_heal.review.github import GitHubReviewClient, GitHubReviewError
+from vibe_heal.review.github import _MAX_INLINE_COMMENTS, GitHubReviewClient, GitHubReviewError
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
 
 
@@ -569,3 +569,46 @@ class TestBuildPayloadCoverage:
         assert "| 5 |" in payload["body"]
         assert "| 10 |" in payload["body"]
         assert "Coverage on changed lines" in payload["body"]
+
+
+class TestBuildPayloadCap:
+    def _make_report_with_n_issues(self, n: int) -> ReviewResult:
+        return ReviewResult(
+            project_key="p",
+            branch="feat",
+            base_branch="origin/main",
+            files=[
+                FileReview(
+                    file_path=f"src/file_{i}.py",
+                    issues=[ReviewIssue(rule="python:S1", message=f"Issue {i}", line=i + 1, on_changed_line=True)],
+                )
+                for i in range(n)
+            ],
+        )
+
+    def test_comments_capped_at_max(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report_with_n_issues(_MAX_INLINE_COMMENTS + 10)
+        payload = client.build_payload(report)
+        assert len(payload["comments"]) == _MAX_INLINE_COMMENTS
+
+    def test_overflow_appears_in_body(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report_with_n_issues(_MAX_INLINE_COMMENTS + 5)
+        payload = client.build_payload(report)
+        assert "5 finding(s) over the" in payload["body"]
+        assert "capped" in payload["body"]
+
+    def test_summary_counts_overflow(self) -> None:
+        total = _MAX_INLINE_COMMENTS + 3
+        client = GitHubReviewClient()
+        report = self._make_report_with_n_issues(total)
+        payload = client.build_payload(report)
+        assert f"{total} finding(s)" in payload["body"]
+
+    def test_under_cap_posts_all_inline(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report_with_n_issues(5)
+        payload = client.build_payload(report)
+        assert len(payload["comments"]) == 5
+        assert "capped" not in payload["body"]

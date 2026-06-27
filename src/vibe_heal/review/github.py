@@ -8,6 +8,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from vibe_heal.ai_tools.utils import run_command
+from vibe_heal.output import warn
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
 from vibe_heal.review.reporter import format_coverage_table
 
@@ -20,6 +21,9 @@ class GitHubReviewError(Exception):
 
 class NoOpenPrError(GitHubReviewError):
     """Raised when there is no open PR for the current branch."""
+
+
+_MAX_INLINE_COMMENTS = 50
 
 
 class GitHubReviewClient:
@@ -113,12 +117,7 @@ class GitHubReviewClient:
                 "Inline review failed (%s) — falling back to top-level comment",
                 inline_err,
             )
-            from rich.console import Console as _Console
-
-            _Console(stderr=True).print(
-                f"[yellow]Warning: inline review rejected by GitHub ({inline_err}) — "
-                "posting as a top-level comment instead.[/yellow]"
-            )
+            warn(f"Warning: inline review rejected by GitHub ({inline_err}) — posting as a top-level comment instead.")
             fallback = self._build_fallback_payload(report)
             try:
                 await self._post_json(
@@ -142,11 +141,21 @@ class GitHubReviewClient:
         nearby_lines: list[str] = []
         for file_review in report.files:
             self._collect_file_comments(file_review, report.base_branch, comments, nearby_lines)
-        total_findings = len(comments) + len(nearby_lines)
+
+        total_before_cap = len(comments)
+        if total_before_cap > _MAX_INLINE_COMMENTS:
+            overflow: list[dict[str, Any]] = comments[_MAX_INLINE_COMMENTS:]
+            comments = comments[:_MAX_INLINE_COMMENTS]
+        else:
+            overflow = []
+
+        total_findings = total_before_cap + len(nearby_lines)
         if total_findings:
             breakdown = []
             if comments:
                 breakdown.append(f"{len(comments)} inline")
+            if overflow:
+                breakdown.append(f"{len(overflow)} capped")
             if nearby_lines:
                 breakdown.append(f"{len(nearby_lines)} near changed lines")
             summary = f"SonarQube: {total_findings} finding(s) ({', '.join(breakdown)})."
@@ -157,6 +166,12 @@ class GitHubReviewClient:
             body_parts.append(
                 "**Issues near changed lines** (outside diff — shown here instead of inline):\n"
                 + "\n".join(nearby_lines)
+            )
+        if overflow:
+            overflow_lines = [f"- **{c['path']}:{c['line']}** {c['body'].splitlines()[0]}" for c in overflow]
+            body_parts.append(
+                f"**{len(overflow)} finding(s) over the {_MAX_INLINE_COMMENTS}-comment inline limit**"
+                " (capped to avoid GitHub rate limits):\n" + "\n".join(overflow_lines)
             )
         files_with_coverage = [fr for fr in report.files if fr.coverage_pct is not None]
         if files_with_coverage:
