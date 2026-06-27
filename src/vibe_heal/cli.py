@@ -617,8 +617,8 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
     console.print("\n[bold]Review Summary:[/bold]")
     console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
     console.print(f"  Files checked: {files_checked}")
-    success(f"  Total issues: {total_issues}")
-    success(f"  Duplication findings: {total_duplications}")
+    console.print(f"  Total issues: {total_issues}")
+    console.print(f"  Duplication findings: {total_duplications}")
 
     if result.files:
         _build_review_table(result)

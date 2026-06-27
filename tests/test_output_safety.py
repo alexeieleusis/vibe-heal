@@ -18,15 +18,13 @@ def test_no_markup_fstring_outside_output() -> None:
     Pattern allowed: console.print(f"plain text {variable}")
     """
     src_dir = Path(__file__).parent.parent / "src" / "vibe_heal"
-    # Match f-strings passed to console.print that contain BOTH:
-    #   - a `[` (markup tag opener)
-    #   - a `{` (f-string interpolation)
-    # This catches the dangerous mixing of markup and dynamic content.
+    # Match f-strings passed to console.print that contain BOTH a `[` (markup
+    # tag opener) and a `{` (f-string interpolation), in either order.
+    # Lookaheads avoid requiring a specific left-to-right ordering.
     pattern = re.compile(
-        r"(?:self\.)?console\.print\("  # console.print( or self.console.print(
-        r"f[\"']"  # f" or f'
-        r"[^\"']*\["  # anything then [
-        r"[^\"']*\{"  # then { (interpolation)
+        r"(?:self\.)?console\.print\(f[\"']"
+        r"(?=[^\"']*\[)"  # lookahead: [ appears somewhere in the string
+        r"(?=[^\"']*\{)"  # lookahead: { appears somewhere in the string
     )
     violations: list[str] = []
     for py_file in sorted(src_dir.rglob("*.py")):

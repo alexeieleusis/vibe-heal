@@ -13,50 +13,50 @@ codebase. Use these helpers instead — they handle escaping internally.
 """
 
 from rich.console import Console
+from rich.markup import escape as _esc
 
 console = Console()
 
 
-def _esc(msg: str) -> str:
-    """Escape all opening brackets so Rich never interprets user data as markup."""
-    return msg.replace("[", "\\[")
+def _print(tag: str, msg: str) -> None:
+    console.print(f"[{tag}]{_esc(msg)}[/{tag}]")
 
 
 def dim(msg: str) -> None:
     """Print msg in muted/dim style. msg is auto-escaped."""
-    console.print(f"[dim]{_esc(msg)}[/dim]")
+    _print("dim", msg)
 
 
 def success(msg: str) -> None:
     """Print msg in green."""
-    console.print(f"[green]{_esc(msg)}[/green]")
+    _print("green", msg)
 
 
 def warn(msg: str) -> None:
     """Print msg in yellow."""
-    console.print(f"[yellow]{_esc(msg)}[/yellow]")
+    _print("yellow", msg)
 
 
 def error(msg: str) -> None:
     """Print msg in red."""
-    console.print(f"[red]{_esc(msg)}[/red]")
+    _print("red", msg)
 
 
 def info(msg: str) -> None:
     """Print msg in blue."""
-    console.print(f"[blue]{_esc(msg)}[/blue]")
+    _print("blue", msg)
 
 
 def cyan(msg: str) -> None:
     """Print msg in cyan."""
-    console.print(f"[cyan]{_esc(msg)}[/cyan]")
+    _print("cyan", msg)
 
 
 def bold(msg: str) -> None:
     """Print msg in bold."""
-    console.print(f"[bold]{_esc(msg)}[/bold]")
+    _print("bold", msg)
 
 
 def bold_cyan(msg: str) -> None:
     """Print msg in bold cyan."""
-    console.print(f"[bold cyan]{_esc(msg)}[/bold cyan]")
+    _print("bold cyan", msg)
