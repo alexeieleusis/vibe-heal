@@ -18,12 +18,18 @@ def display_fix_summary(
     """
     console.print("\n[bold]Summary:[/bold]")
     console.print(f"  {total_label}: {summary.total_issues}")
-    success(f"  Fixed: {summary.fixed}")
+    if summary.fixed:
+        success(f"  Fixed: {summary.fixed}")
+    else:
+        console.print(f"  Fixed: {summary.fixed}")
     if summary.failed:
         error(f"  Failed: {summary.failed}")
     else:
         console.print(f"  Failed: {summary.failed}")
-    warn(f"  Skipped: {summary.skipped}")
+    if summary.skipped:
+        warn(f"  Skipped: {summary.skipped}")
+    else:
+        console.print(f"  Skipped: {summary.skipped}")
 
     if summary.fixed > 0:
         console.print(f"  Success rate: {summary.success_rate:.1f}%")
