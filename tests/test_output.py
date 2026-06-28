@@ -23,6 +23,8 @@ def _mock_console():
         (error, "Failed: [/path/to/file]", "[red]Failed: \\[/path/to/file][/red]"),
         (info, "AI tool: [claude-code]", "[blue]AI tool: \\[claude-code][/blue]"),
         (bold_cyan, "Processing [file]", "[bold cyan]Processing \\[file][/bold cyan]"),
+        (cyan, "Status [red] alert", "[cyan]Status \\[red] alert[/cyan]"),
+        (bold, "Header [red] text", "[bold]Header \\[red] text[/bold]"),
     ],
 )
 def test_helper_escapes_markup_tags(_mock_console, fn, msg, expected):
