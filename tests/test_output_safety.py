@@ -14,15 +14,18 @@ def test_no_markup_fstring_outside_output() -> None:
     """Fail if any file (other than output.py) interpolates variables inside markup tags.
 
     Pattern caught: console.print(f"[style]{variable}[/style]")
+    Pattern caught: console.rule(f"[style]{variable}[/style]")
+    Pattern caught: console.log(f"[style]{variable}[/style]")
+    Pattern caught: console.out(f"[style]{variable}[/style]")
     Pattern allowed: console.print("[style]literal text[/style]")
     Pattern allowed: console.print(f"plain text {variable}")
     """
     src_dir = Path(__file__).parent.parent / "src" / "vibe_heal"
-    # Match f-strings passed to console.print that contain BOTH a `[` (markup
-    # tag opener) and a `{` (f-string interpolation), in either order.
-    # Lookaheads avoid requiring a specific left-to-right ordering.
+    # Match f-strings passed to any markup-interpolating Console method that
+    # contain BOTH a `[` (markup tag opener) and a `{` (f-string interpolation),
+    # in either order. Lookaheads avoid requiring a specific left-to-right ordering.
     pattern = re.compile(
-        r"(?:self\.)?console\.print\(f[\"']"
+        r"(?:self\.)?console\.(?:print|rule|log|out)\(f[\"']"
         r"(?=[^\"']*\[)"  # lookahead: [ appears somewhere in the string
         r"(?=[^\"']*\{)"  # lookahead: { appears somewhere in the string
     )
@@ -40,6 +43,6 @@ def test_no_markup_fstring_outside_output() -> None:
 
     assert not violations, (
         "Use helpers from vibe_heal.output (dim, error, warn, success, info, "
-        "cyan, bold_cyan) instead of console.print(f'[markup]{dynamic}[/markup]').\n"
+        "cyan, bold_cyan) instead of console.<method>(f'[markup]{dynamic}[/markup]').\n"
         "Violations:\n" + "\n".join(violations)
     )
