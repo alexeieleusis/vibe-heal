@@ -1,7 +1,7 @@
 """Shared utilities for vibe-heal."""
 
 from vibe_heal.models import FixSummary
-from vibe_heal.output import bold, console, error, success, warn
+from vibe_heal.output import bold, console, dim, error, success, warn
 
 
 def display_fix_summary(
@@ -16,7 +16,7 @@ def display_fix_summary(
         dry_run: Whether in dry-run mode
         total_label: Label for the total count line
     """
-    console.print("\n[bold]Summary:[/bold]")
+    bold("\nSummary:")
     console.print(f"  {total_label}: {summary.total_issues}")
     if summary.fixed:
         success(f"  Fixed: {summary.fixed}")
@@ -40,4 +40,4 @@ def display_fix_summary(
     if dry_run:
         warn("\nDry-run mode: no changes committed")
 
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    dim("\nGitHub: https://github.com/alexeieleusis/vibe-heal")
