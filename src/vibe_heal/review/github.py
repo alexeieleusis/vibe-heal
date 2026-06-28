@@ -24,6 +24,7 @@ class NoOpenPrError(GitHubReviewError):
 
 
 _MAX_INLINE_COMMENTS = 50
+_MAX_OVERFLOW_BODY_LINES = 100
 
 
 class GitHubReviewClient:
@@ -168,10 +169,13 @@ class GitHubReviewClient:
                 + "\n".join(nearby_lines)
             )
         if overflow:
-            overflow_lines = [f"- **{c['path']}:{c['line']}** {c['body'].splitlines()[0]}" for c in overflow]
+            visible = overflow[:_MAX_OVERFLOW_BODY_LINES]
+            overflow_lines = [f"- **{c['path']}:{c['line']}** {c['body'].splitlines()[0]}" for c in visible]
+            extra = len(overflow) - len(visible)
+            suffix = f"\n_...and {extra} more not shown._" if extra else ""
             body_parts.append(
                 f"**{len(overflow)} finding(s) over the {_MAX_INLINE_COMMENTS}-comment inline limit**"
-                " (capped to avoid GitHub rate limits):\n" + "\n".join(overflow_lines)
+                f" (capped to avoid GitHub rate limits):\n" + "\n".join(overflow_lines) + suffix
             )
         files_with_coverage = [fr for fr in report.files if fr.coverage_pct is not None]
         if files_with_coverage:
