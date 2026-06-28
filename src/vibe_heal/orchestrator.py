@@ -84,7 +84,7 @@ class VibeHealOrchestrator:
         self._validate_preconditions(file_path, dry_run)
 
         # Step 2: Fetch issues from SonarQube
-        warn(f"\nFetching issues for {file_path}...")
+        info(f"Fetching issues for {file_path}...")
         try:
             async with SonarQubeClient(self.config) as sonar_client:
                 issues = await sonar_client.get_issues_for_file(file_path)
