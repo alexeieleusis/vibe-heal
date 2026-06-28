@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.output import console, dim, error, warn
+from vibe_heal.output import dim, error, success, warn
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
 from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
@@ -94,7 +94,7 @@ class AnalysisRunner:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                console.print("[dim]    Waiting for scanner to complete...[/dim]")
+                dim("    Waiting for scanner to complete...")
                 stdout, stderr = await result.communicate()
                 dim(f"    Scanner finished with exit code: {result.returncode}")
 
@@ -113,12 +113,12 @@ class AnalysisRunner:
 
                 # Extract task ID from scanner output
                 scanner_output = stdout.decode()
-                console.print("[dim]    Extracting task ID from scanner output...[/dim]")
+                dim("    Extracting task ID from scanner output...")
                 task_id = self._extract_task_id(scanner_output)
 
                 if not task_id:
-                    console.print("[red]    Could not find task ID in scanner output[/red]")
-                    console.print("[dim]    See debug log for full scanner output[/dim]")
+                    error("    Could not find task ID in scanner output")
+                    dim("    See debug log for full scanner output")
                     # Log full scanner output to debug log for troubleshooting
                     logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
                     return AnalysisResult(
@@ -129,12 +129,12 @@ class AnalysisRunner:
                 dim(f"    Task ID: {task_id}")
 
                 # Wait for analysis to complete on server
-                console.print("[dim]    Waiting for server-side analysis to complete...[/dim]")
+                dim("    Waiting for server-side analysis to complete...")
                 try:
                     async with asyncio.timeout(300):
                         analysis_success = await self._wait_for_analysis(task_id)
                 except TimeoutError:
-                    console.print("[red]    Analysis timed out after 300 seconds[/red]")
+                    error("    Analysis timed out after 300 seconds")
                     return AnalysisResult(
                         success=False,
                         task_id=task_id,
@@ -142,14 +142,14 @@ class AnalysisRunner:
                     )
 
                 if not analysis_success:
-                    console.print("[red]    Analysis failed on server[/red]")
+                    error("    Analysis failed on server")
                     return AnalysisResult(
                         success=False,
                         task_id=task_id,
                         error_message="Analysis failed on server",
                     )
 
-                console.print("[green]    ✓ Server-side analysis completed successfully[/green]")
+                success("    ✓ Server-side analysis completed successfully")
 
                 # Build dashboard URL
                 dashboard_url = f"{self.config.sonarqube_url}/dashboard?id={project_key}"
