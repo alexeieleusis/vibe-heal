@@ -157,7 +157,7 @@ class ReviewOrchestrator:
             dim(f"Found {len(modified_files)} modified files")
 
             if not modified_files:
-                console.print("[green]No modified files to review.[/green]")
+                success("No modified files to review.")
                 self._write_report(result, report_file)
                 return result
 
@@ -168,7 +168,7 @@ class ReviewOrchestrator:
                 dim(f"After filtering: {len(modified_files)} files remain")
 
             if not modified_files:
-                console.print("[green]No files match the specified patterns.[/green]")
+                success("No files match the specified patterns.")
                 self._write_report(result, report_file)
                 return result
 
@@ -370,7 +370,7 @@ class ReviewOrchestrator:
             if failed_count:
                 warn(f"{failed_count} exclusion setting(s) failed to apply")
             if not copied and not inherited_count and not failed_count:
-                console.print("[dim]No exclusion settings configured on source project[/dim]")
+                dim("No exclusion settings configured on source project")
         except Exception as e:
             warn(f"Warning: Could not copy exclusion settings: {e}")
 
@@ -697,7 +697,7 @@ class ReviewOrchestrator:
             try:
                 dim(f"Deleting temporary project: {temp_project.project_key}")
                 await self.project_manager.delete_project(temp_project.project_key)
-                console.print("[green]Temporary project deleted.[/green]")
+                success("Temporary project deleted.")
             except Exception as e:
                 warn(f"Warning: Failed to delete temporary project: {e}")
 
