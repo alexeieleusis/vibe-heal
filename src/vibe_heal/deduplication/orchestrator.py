@@ -661,7 +661,7 @@ class DedupeBranchOrchestrator:
 
         cyan(f"\nFound {len(modified_files)} modified file(s) to process")
         for f in modified_files:
-            console.print(f"  - {f}")
+            dim(f"  - {f}")
 
         return modified_files
 
