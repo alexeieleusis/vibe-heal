@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 from rich.logging import RichHandler
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from vibe_heal import __version__
@@ -287,7 +288,9 @@ def _display_cleanup_results(result: CleanupResult) -> None:
         console.print("\n[bold]Per-File Results:[/bold]")
         for file_result in result.files_processed:
             status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
-            console.print(f"  {status} {file_result.file_path!s}: {file_result.issues_fixed} issues fixed")
+            console.print(
+                f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.issues_fixed} issues fixed"
+            )
             if file_result.error_message:
                 error(f"      Error: {file_result.error_message}")
 
@@ -430,7 +433,9 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
         console.print("\n[bold]Per-File Results:[/bold]")
         for file_result in result.files_processed:
             status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
-            console.print(f"  {status} {file_result.file_path!s}: {file_result.duplications_fixed} duplications fixed")
+            console.print(
+                f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.duplications_fixed} duplications fixed"
+            )
             if file_result.error_message:
                 error(f"      Error: {file_result.error_message}")
 
@@ -615,7 +620,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
     files_checked = result.files_analyzed
 
     console.print("\n[bold]Review Summary:[/bold]")
-    console.print(f"  Branch: {result.branch} (base: {result.base_branch})")
+    console.print(f"  Branch: {rich_escape(result.branch)} (base: {rich_escape(result.base_branch)})")
     console.print(f"  Files checked: {files_checked}")
     console.print(f"  Total issues: {total_issues}")
     console.print(f"  Duplication findings: {total_duplications}")
@@ -1005,7 +1010,7 @@ def convert_report(
 
     n_diagnostics = sum(len(f["messages"]) for f in eslint_data)
     n_files = len(eslint_data)
-    console.print(f"Converted {n_diagnostics} diagnostics across {n_files} files → {output_path}")
+    console.print(f"Converted {n_diagnostics} diagnostics across {n_files} files → {rich_escape(str(output_path))}")
 
 
 if __name__ == "__main__":
