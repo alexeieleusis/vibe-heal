@@ -38,6 +38,6 @@ def display_fix_summary(
         bold(f"\nCreated {len(summary.commits)} commit(s)")
 
     if dry_run:
-        console.print("\n[yellow]Dry-run mode: no changes committed[/yellow]")
+        warn("\nDry-run mode: no changes committed")
 
     console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
