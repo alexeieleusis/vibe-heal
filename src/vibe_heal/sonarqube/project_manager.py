@@ -218,7 +218,8 @@ class ProjectManager:
         Returns:
             Metadata for the created project
         """
-        console.print("\n[dim]Creating temporary SonarQube project...[/dim]")
+        console.print()
+        dim("Creating temporary SonarQube project...")
         temp_project = await self.create_temp_project(
             base_key=base_key,
             branch_name=branch_name,
@@ -239,7 +240,7 @@ class ProjectManager:
             if failed_count:
                 warn(f"Warning: Failed to apply {failed_count} exclusion setting(s)")
             if not copied and not inherited_count and not failed_count:
-                console.print("[dim]No exclusion settings configured on source project[/dim]")
+                dim("No exclusion settings configured on source project")
         except SonarQubeError as e:
             warn(f"Warning: Could not copy exclusion settings: {e}")
 
