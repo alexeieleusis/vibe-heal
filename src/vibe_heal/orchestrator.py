@@ -3,7 +3,6 @@
 import logging
 from pathlib import Path
 
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
@@ -13,6 +12,7 @@ from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
+from vibe_heal.output import console, cyan, info, success, warn
 from vibe_heal.processor import IssueProcessor
 from vibe_heal.sonarqube import ComponentNotFoundError, SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
@@ -33,7 +33,6 @@ class VibeHealOrchestrator:
             ai_tool: Optional pre-initialized AI tool. If not provided, will auto-detect.
         """
         self.config = config
-        self.console = Console()
         self.git_manager = GitManager(pre_commit_command=config.pre_commit_command)
         self.ai_tool = ai_tool if ai_tool is not None else self._initialize_ai_tool()
 
@@ -48,14 +47,14 @@ class VibeHealOrchestrator:
         """
         if self.config.ai_tool:
             tool_type: AIToolType = self.config.ai_tool
-            self.console.print(f"[blue]Using configured AI tool: {tool_type.display_name}[/blue]")
+            info(f"Using configured AI tool: {tool_type.display_name}")
         else:
             detected_tool = AIToolFactory.detect_available()
             if not detected_tool:
                 msg = "No AI tool found. Please install Claude Code or Aider."
                 raise RuntimeError(msg)
             tool_type = detected_tool
-            self.console.print(f"[blue]Auto-detected AI tool: {tool_type.display_name}[/blue]")
+            info(f"Auto-detected AI tool: {tool_type.display_name}")
 
         return AIToolFactory.create(tool_type, self.config)
 
@@ -85,19 +84,16 @@ class VibeHealOrchestrator:
         self._validate_preconditions(file_path, dry_run)
 
         # Step 2: Fetch issues from SonarQube
-        self.console.print(f"\n[yellow]Fetching issues for {file_path}...[/yellow]")
+        info(f"Fetching issues for {file_path}...")
         try:
             async with SonarQubeClient(self.config) as sonar_client:
                 issues = await sonar_client.get_issues_for_file(file_path)
         except ComponentNotFoundError:
-            self.console.print(
-                f"[yellow]File '{file_path}' not found in SonarQube project. "
-                f"It may not be included in the analysis sources.[/yellow]"
-            )
+            warn(f"File '{file_path}' not found in SonarQube project. It may not be included in the analysis sources.")
             return FixSummary(total_issues=0)
 
         if not issues:
-            self.console.print("[green]No issues found![/green]")
+            success("No issues found!")
             return FixSummary(total_issues=0)
 
         # Step 3: Process issues (filter and sort)
@@ -107,14 +103,14 @@ class VibeHealOrchestrator:
         )
         result = processor.process(issues)
 
-        self.console.print(
-            f"[cyan]Found {result.total_issues} total issues, "
+        cyan(
+            f"Found {result.total_issues} total issues, "
             f"{result.fixable_issues} fixable, "
-            f"processing {len(result.issues_to_fix)}[/cyan]\n"
+            f"processing {len(result.issues_to_fix)}\n"
         )
 
         if not result.has_issues:
-            self.console.print("[yellow]No fixable issues to process[/yellow]")
+            warn("No fixable issues to process")
             return FixSummary(
                 total_issues=result.total_issues,
                 skipped=result.skipped_issues,
@@ -354,7 +350,7 @@ class VibeHealOrchestrator:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=self.console,
+            console=console,
         ) as progress:
             for idx, issue in enumerate(issues, 1):
                 task = progress.add_task(
@@ -386,4 +382,4 @@ class VibeHealOrchestrator:
             summary: Fix summary
             dry_run: Whether in dry-run mode
         """
-        display_fix_summary(self.console, summary, dry_run)
+        display_fix_summary(summary, dry_run)

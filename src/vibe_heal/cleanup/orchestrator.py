@@ -4,19 +4,17 @@ import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel
-from rich.console import Console
 
 from vibe_heal.ai_tools.base import AITool
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.output import bold, dim, error, success, warn
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
-
-console = Console()
 
 
 class FileCleanupResult(BaseModel):
@@ -123,10 +121,10 @@ class CleanupOrchestrator:
             }
 
             for iteration in range(max_iterations):
-                console.print(f"\n[bold]Iteration {iteration + 1}/{max_iterations}[/bold]")
+                bold(f"\nIteration {iteration + 1}/{max_iterations}")
 
                 # Run full repo analysis
-                console.print("[dim]Running SonarQube analysis on full repository...[/dim]")
+                dim("Running SonarQube analysis on full repository...")
                 analysis_result = await self.analysis_runner.run_analysis(
                     project_key=temp_project.project_key,
                     project_name=temp_project.project_name,
@@ -134,7 +132,7 @@ class CleanupOrchestrator:
                 )
 
                 if not analysis_result.success:
-                    console.print(f"[red]Analysis failed: {analysis_result.error_message}[/red]")
+                    error(f"Analysis failed: {analysis_result.error_message}")
                     return CleanupResult(
                         success=False,
                         files_processed=list(file_results_map.values()),
@@ -143,7 +141,7 @@ class CleanupOrchestrator:
                         error_message=f"Analysis failed at iteration {iteration + 1}: {analysis_result.error_message}",
                     )
 
-                console.print(f"[dim]Analysis completed. Dashboard: {analysis_result.dashboard_url}[/dim]")
+                dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
 
                 # Check for fixable issues in modified files
                 total_fixable_issues, files_with_issues = await self._check_files_for_issues(
@@ -151,17 +149,17 @@ class CleanupOrchestrator:
                 )
 
                 if total_fixable_issues == 0:
-                    console.print("[green]✓ No fixable issues remaining![/green]")
+                    success("✓ No fixable issues remaining!")
                     break
 
-                console.print(f"[dim]Total fixable issues across all files: {total_fixable_issues}[/dim]")
+                dim(f"Total fixable issues across all files: {total_fixable_issues}")
 
                 # Fix all files with issues
                 await self._fix_files_with_issues(files_with_issues, file_results_map, temp_project, iteration)
 
                 # Wait before next iteration to let SonarQube process commits
                 if iteration < max_iterations - 1:
-                    console.print("[dim]Waiting for SonarQube to process changes...[/dim]")
+                    dim("Waiting for SonarQube to process changes...")
                     await asyncio.sleep(5)
 
             # Calculate results
@@ -202,23 +200,23 @@ class CleanupOrchestrator:
         Returns:
             List of filtered modified files
         """
-        console.print(f"[dim]Analyzing branch against {base_branch}...[/dim]")
+        dim(f"Analyzing branch against {base_branch}...")
         modified_files = self.branch_analyzer.get_modified_files(base_branch)
-        console.print(f"[dim]Found {len(modified_files)} modified files[/dim]")
+        dim(f"Found {len(modified_files)} modified files")
 
         if not modified_files:
             return []
 
         # Filter files if patterns provided
         if file_patterns:
-            console.print(f"[dim]Filtering files with patterns: {file_patterns}[/dim]")
+            dim(f"Filtering files with patterns: {file_patterns}")
             modified_files = self._filter_files(modified_files, file_patterns)
-            console.print(f"[dim]After filtering: {len(modified_files)} files remain[/dim]")
+            dim(f"After filtering: {len(modified_files)} files remain")
 
         if modified_files:
-            console.print("[dim]Files to process:[/dim]")
+            dim("Files to process:")
             for f in modified_files:
-                console.print(f"[dim]  - {f}[/dim]")
+                dim(f"  - {f}")
 
         return modified_files
 
@@ -235,7 +233,6 @@ class CleanupOrchestrator:
             base_key=self.config.sonarqube_project_key,
             branch_name=current_branch,
             user_email=user_email,
-            console=console,
             command_name="cleanup",
         )
 
@@ -270,15 +267,15 @@ class CleanupOrchestrator:
                     fixable_issues = [issue for issue in issues if issue.is_fixable]
 
                     if verbose and issues:
-                        console.print(f"[dim]  {file_path}: {len(issues)} total, {len(fixable_issues)} fixable[/dim]")
+                        dim(f"  {file_path}: {len(issues)} total, {len(fixable_issues)} fixable")
 
                     if fixable_issues:
                         files_with_issues.append(file_path)
                         total_fixable_issues += len(fixable_issues)
-                        console.print(f"[dim]  {file_path}: {len(fixable_issues)} fixable issues[/dim]")
+                        dim(f"  {file_path}: {len(fixable_issues)} fixable issues")
                 except ComponentNotFoundError:
                     if verbose:
-                        console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
+                        dim(f"  {file_path}: skipped (not in SonarQube analysis)")
 
             return total_fixable_issues, files_with_issues
 
@@ -309,7 +306,7 @@ class CleanupOrchestrator:
 
         try:
             for file_path in files_with_issues:
-                console.print(f"\n[dim]Fixing {file_path}...[/dim]")
+                dim(f"\nFixing {file_path}...")
 
                 # Get issues for this file
                 issues = await self.client.get_issues_for_file(str(file_path), resolved=False)
@@ -325,9 +322,7 @@ class CleanupOrchestrator:
                     dry_run=False,
                 )
 
-                console.print(
-                    f"[dim]  Fixed: {fix_summary.fixed}, Failed: {fix_summary.failed}, Skipped: {fix_summary.skipped}[/dim]"
-                )
+                dim(f"  Fixed: {fix_summary.fixed}, Failed: {fix_summary.failed}, Skipped: {fix_summary.skipped}")
 
                 # Update file results
                 current_result = file_results_map[file_path]
@@ -351,13 +346,11 @@ class CleanupOrchestrator:
         """
         if temp_project:
             try:
-                console.print(f"[dim]Deleting temporary project: {temp_project.project_key}[/dim]")
+                dim(f"Deleting temporary project: {temp_project.project_key}")
                 await self.project_manager.delete_project(temp_project.project_key)
-                console.print("[green]✓ Temporary project deleted[/green]")
+                success("✓ Temporary project deleted")
             except Exception as e:
-                # Log but don't fail the operation if cleanup fails
-                console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
-                _ = e  # Suppress unused variable warning
+                warn(f"Warning: Failed to delete temporary project: {e}")
 
     def _filter_files(
         self,

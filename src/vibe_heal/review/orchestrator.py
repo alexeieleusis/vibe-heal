@@ -4,13 +4,13 @@ import logging
 from pathlib import Path
 
 from pydantic import BaseModel, Field
-from rich.console import Console
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.deduplication.client import DuplicationClient
 from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
+from vibe_heal.output import console, dim, error, success, warn
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
 from vibe_heal.review.models import (
@@ -39,7 +39,6 @@ from vibe_heal.sonarqube.models import SonarQubeRule
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 class ReviewAnalysisResult(BaseModel):
@@ -153,23 +152,23 @@ class ReviewOrchestrator:
 
         try:
             # Step 1: Get modified files
-            console.print(f"[dim]Analyzing branch against {base_branch}...[/dim]")
+            dim(f"Analyzing branch against {base_branch}...")
             modified_files = self.branch_analyzer.get_modified_files(base_branch)
-            console.print(f"[dim]Found {len(modified_files)} modified files[/dim]")
+            dim(f"Found {len(modified_files)} modified files")
 
             if not modified_files:
-                console.print("[green]No modified files to review.[/green]")
+                success("No modified files to review.")
                 self._write_report(result, report_file)
                 return result
 
             # Step 2: Filter by patterns if specified
             if file_patterns:
-                console.print(f"[dim]Filtering files with patterns: {file_patterns}[/dim]")
+                dim(f"Filtering files with patterns: {file_patterns}")
                 modified_files = self._filter_files(modified_files, file_patterns)
-                console.print(f"[dim]After filtering: {len(modified_files)} files remain[/dim]")
+                dim(f"After filtering: {len(modified_files)} files remain")
 
             if not modified_files:
-                console.print("[green]No files match the specified patterns.[/green]")
+                success("No files match the specified patterns.")
                 self._write_report(result, report_file)
                 return result
 
@@ -196,7 +195,7 @@ class ReviewOrchestrator:
 
             if not analysis_result.success:
                 error_msg = analysis_result.error_message or "Analysis failed"
-                console.print(f"[red]Analysis failed: {error_msg}[/red]")
+                error(f"Analysis failed: {error_msg}")
                 return ReviewAnalysisResult(
                     project_key=self.config.sonarqube_project_key,
                     branch=result.branch,
@@ -248,15 +247,15 @@ class ReviewOrchestrator:
                         )
                     )
                 elif verbose:
-                    console.print(f"[dim]  {file_path}: no issues on changed lines[/dim]")
+                    dim(f"  {file_path}: no issues on changed lines")
 
             # Step 7: Write reports
             self._write_report(result, report_file)
 
-            console.print(
-                f"[green]Review complete: {result.total_issues} issue(s), "
+            success(
+                f"Review complete: {result.total_issues} issue(s), "
                 f"{result.total_duplications} duplication finding(s) "
-                f"across {len(result.files)} file(s).[/green]"
+                f"across {len(result.files)} file(s)."
             )
             return result
 
@@ -291,30 +290,27 @@ class ReviewOrchestrator:
             verbose: Enable verbose output.
         """
         # Step 1: Load report
-        console.print(f"[dim]Loading report from {report_file}...[/dim]")
+        dim(f"Loading report from {report_file}...")
         report = load_report_from_path(report_file)
         if verbose:
-            console.print(
-                f"[dim]  Report: branch={report.branch}, "
-                f"{report.total_issues} issue(s), {len(report.files)} file(s)[/dim]"
-            )
+            dim(f"  Report: branch={report.branch}, {report.total_issues} issue(s), {len(report.files)} file(s)")
 
         # Step 2: Detect PR number
         if pr_number is not None:
             pr = pr_number
             if verbose:
-                console.print(f"[dim]  Using explicit PR #{pr}[/dim]")
+                dim(f"  Using explicit PR #{pr}")
         else:
             pr = await self.github_client.detect_pr()
             if verbose:
-                console.print(f"[dim]  Auto-detected PR #{pr}[/dim]")
+                dim(f"  Auto-detected PR #{pr}")
 
         # Step 3: Post review
         await self.github_client.post_review(pr, report)
-        console.print(
-            f"[green]Posted {report.total_issues} issue(s) and "
+        success(
+            f"Posted {report.total_issues} issue(s) and "
             f"{report.total_duplications} duplication finding(s) "
-            f"as review comments on PR #{pr}.[/green]"
+            f"as review comments on PR #{pr}."
         )
 
     async def _enrich_issues_with_descriptions(self, issues: list[ReviewIssue]) -> None:
@@ -360,7 +356,7 @@ class ReviewOrchestrator:
             user_email=user_email,
             command_name="review",
         )
-        console.print(f"[dim]Created project: {temp_project.project_key}[/dim]")
+        dim(f"Created project: {temp_project.project_key}")
 
         try:
             copied, inherited_count, failed_count = await self.project_manager.copy_exclusion_settings(
@@ -368,15 +364,15 @@ class ReviewOrchestrator:
                 target_key=temp_project.project_key,
             )
             if copied:
-                console.print(f"[dim]Copied {len(copied)} exclusion setting(s): {', '.join(copied)}[/dim]")
+                dim(f"Copied {len(copied)} exclusion setting(s): {', '.join(copied)}")
             if inherited_count:
-                console.print(f"[dim]Skipped {inherited_count} inherited setting(s)[/dim]")
+                dim(f"Skipped {inherited_count} inherited setting(s)")
             if failed_count:
-                console.print(f"[yellow]{failed_count} exclusion setting(s) failed to apply[/yellow]")
+                warn(f"{failed_count} exclusion setting(s) failed to apply")
             if not copied and not inherited_count and not failed_count:
-                console.print("[dim]No exclusion settings configured on source project[/dim]")
+                dim("No exclusion settings configured on source project")
         except Exception as e:
-            console.print(f"[yellow]Warning: Could not copy exclusion settings: {e}[/yellow]")
+            warn(f"Warning: Could not copy exclusion settings: {e}")
 
         return temp_project
 
@@ -417,7 +413,7 @@ class ReviewOrchestrator:
             issues = await self.client.get_issues(component=f"{project_key}:{file_path_str}", resolved=False)
         except ComponentNotFoundError:
             if verbose:
-                console.print(f"[dim]  {file_path}: skipped (not in SonarQube analysis)[/dim]")
+                dim(f"  {file_path}: skipped (not in SonarQube analysis)")
             return [], diag
 
         diag.sonar_issue_count = len(issues)
@@ -425,14 +421,14 @@ class ReviewOrchestrator:
 
         if not changed_lines:
             if verbose:
-                console.print(f"[dim]  {file_path}: no changed lines in diff[/dim]")
+                dim(f"  {file_path}: no changed lines in diff")
             return [], diag
 
         strict_lines = strict_changed_lines_map.get(repo_relative) if strict_changed_lines_map else None
         filtered = IssueLineFilter.filter_issues(issues, changed_lines, strict_changed_lines=strict_lines)
 
         if verbose and filtered:
-            console.print(f"[dim]  {file_path}: {len(filtered)} issue(s) on changed lines[/dim]")
+            dim(f"  {file_path}: {len(filtered)} issue(s) on changed lines")
         return filtered, diag
 
     async def _get_active_duplications(
@@ -682,13 +678,13 @@ class ReviewOrchestrator:
         try:
             cov = await self.client.get_line_coverage(repo_relative, changed_lines_for_file, project_key=project_key)
         except Exception as exc:
-            console.print(f"[yellow]  {repo_relative}: coverage fetch failed: {exc}[/yellow]")
+            warn(f"  {repo_relative}: coverage fetch failed: {exc}")
             cov = None
         if cov is not None:
             covered_lines, instrumented_changed_lines = cov
             return round(covered_lines / instrumented_changed_lines * 100, 1), covered_lines, instrumented_changed_lines
         if verbose:
-            console.print(f"[dim]  {repo_relative}: no coverage data available[/dim]")
+            dim(f"  {repo_relative}: no coverage data available")
         return None, 0, 0
 
     async def _cleanup_temp_project(self, temp_project: TempProjectMetadata | None) -> None:
@@ -699,11 +695,11 @@ class ReviewOrchestrator:
         """
         if temp_project:
             try:
-                console.print(f"[dim]Deleting temporary project: {temp_project.project_key}[/dim]")
+                dim(f"Deleting temporary project: {temp_project.project_key}")
                 await self.project_manager.delete_project(temp_project.project_key)
-                console.print("[green]Temporary project deleted.[/green]")
+                success("Temporary project deleted.")
             except Exception as e:
-                console.print(f"[yellow]Warning: Failed to delete temporary project: {e}[/yellow]")
+                warn(f"Warning: Failed to delete temporary project: {e}")
 
     def _to_repo_relative(self, file_path: Path) -> str:
         """Convert a file path to repo-root-relative POSIX string.
@@ -775,4 +771,4 @@ class ReviewOrchestrator:
 
         write_report_to_file(review_result, report_file)
         md_path = report_file.parent / (report_file.stem + ".md")
-        console.print(f"[dim]Reports written to {report_file} and {md_path}[/dim]")
+        dim(f"Reports written to {report_file} and {md_path}")
