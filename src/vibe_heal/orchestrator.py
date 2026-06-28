@@ -12,7 +12,7 @@ from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.models import FixSummary
-from vibe_heal.output import console, cyan, info, warn
+from vibe_heal.output import console, cyan, info, success, warn
 from vibe_heal.processor import IssueProcessor
 from vibe_heal.sonarqube import ComponentNotFoundError, SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
@@ -93,7 +93,7 @@ class VibeHealOrchestrator:
             return FixSummary(total_issues=0)
 
         if not issues:
-            console.print("[green]No issues found![/green]")
+            success("No issues found!")
             return FixSummary(total_issues=0)
 
         # Step 3: Process issues (filter and sort)
@@ -110,7 +110,7 @@ class VibeHealOrchestrator:
         )
 
         if not result.has_issues:
-            console.print("[yellow]No fixable issues to process[/yellow]")
+            warn("No fixable issues to process")
             return FixSummary(
                 total_issues=result.total_issues,
                 skipped=result.skipped_issues,
