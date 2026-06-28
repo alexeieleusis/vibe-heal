@@ -10,7 +10,7 @@ from vibe_heal.config import VibeHealConfig
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
-from vibe_heal.output import bold, console, dim, error, warn
+from vibe_heal.output import bold, dim, error, success, warn
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
@@ -124,7 +124,7 @@ class CleanupOrchestrator:
                 bold(f"\nIteration {iteration + 1}/{max_iterations}")
 
                 # Run full repo analysis
-                console.print("[dim]Running SonarQube analysis on full repository...[/dim]")
+                dim("Running SonarQube analysis on full repository...")
                 analysis_result = await self.analysis_runner.run_analysis(
                     project_key=temp_project.project_key,
                     project_name=temp_project.project_name,
@@ -149,7 +149,7 @@ class CleanupOrchestrator:
                 )
 
                 if total_fixable_issues == 0:
-                    console.print("[green]✓ No fixable issues remaining![/green]")
+                    success("✓ No fixable issues remaining!")
                     break
 
                 dim(f"Total fixable issues across all files: {total_fixable_issues}")
@@ -159,7 +159,7 @@ class CleanupOrchestrator:
 
                 # Wait before next iteration to let SonarQube process commits
                 if iteration < max_iterations - 1:
-                    console.print("[dim]Waiting for SonarQube to process changes...[/dim]")
+                    dim("Waiting for SonarQube to process changes...")
                     await asyncio.sleep(5)
 
             # Calculate results
@@ -214,7 +214,7 @@ class CleanupOrchestrator:
             dim(f"After filtering: {len(modified_files)} files remain")
 
         if modified_files:
-            console.print("[dim]Files to process:[/dim]")
+            dim("Files to process:")
             for f in modified_files:
                 dim(f"  - {f}")
 
@@ -348,7 +348,7 @@ class CleanupOrchestrator:
             try:
                 dim(f"Deleting temporary project: {temp_project.project_key}")
                 await self.project_manager.delete_project(temp_project.project_key)
-                console.print("[green]✓ Temporary project deleted[/green]")
+                success("✓ Temporary project deleted")
             except Exception as e:
                 warn(f"Warning: Failed to delete temporary project: {e}")
 
