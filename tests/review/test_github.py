@@ -598,6 +598,7 @@ class TestBuildPayloadCap:
         payload = client.build_payload(report)
         assert "5 finding(s) over the" in payload["body"]
         assert "capped" in payload["body"]
+        assert "src/file_50.py" in payload["body"]  # overflow entries are actually rendered, not just the header
 
     def test_summary_counts_overflow(self) -> None:
         total = _MAX_INLINE_COMMENTS + 3
