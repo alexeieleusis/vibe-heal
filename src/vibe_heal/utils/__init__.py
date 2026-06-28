@@ -22,7 +22,10 @@ def display_fix_summary(
         success(f"  Fixed: {summary.fixed}")
     else:
         console.print(f"  Fixed: {summary.fixed}")
-    error(f"  Failed: {summary.failed}")
+    if summary.failed:
+        error(f"  Failed: {summary.failed}")
+    else:
+        console.print(f"  Failed: {summary.failed}")
     if summary.skipped:
         warn(f"  Skipped: {summary.skipped}")
     else:
