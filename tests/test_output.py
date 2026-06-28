@@ -39,10 +39,15 @@ def test_info_escapes_brackets(_mock_console):
     _mock_console.print.assert_called_once_with("[blue]AI tool: \\[claude-code][/blue]")
 
 
-def test_cyan_escapes_markup_brackets(_mock_console):
+def test_cyan_passes_through_non_markup_brackets(_mock_console):
     cyan("Found [3] items")
     # [3] is not a markup tag so rich.markup.escape leaves it alone
     _mock_console.print.assert_called_once_with("[cyan]Found [3] items[/cyan]")
+
+
+def test_cyan_escapes_markup_tag_tokens(_mock_console):
+    cyan("Status [red] alert")
+    _mock_console.print.assert_called_once_with("[cyan]Status \\[red] alert[/cyan]")
 
 
 def test_bold_cyan_escapes_brackets(_mock_console):
@@ -50,10 +55,15 @@ def test_bold_cyan_escapes_brackets(_mock_console):
     _mock_console.print.assert_called_once_with("[bold cyan]Processing \\[file][/bold cyan]")
 
 
-def test_bold_escapes_markup_brackets(_mock_console):
+def test_bold_passes_through_non_markup_brackets(_mock_console):
     bold("Header [1]")
     # [1] is not a markup tag so rich.markup.escape leaves it alone
     _mock_console.print.assert_called_once_with("[bold]Header [1][/bold]")
+
+
+def test_bold_escapes_markup_tag_tokens(_mock_console):
+    bold("Header [red] text")
+    _mock_console.print.assert_called_once_with("[bold]Header \\[red] text[/bold]")
 
 
 def test_plain_strings_pass_through(_mock_console):
