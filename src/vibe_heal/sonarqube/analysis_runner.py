@@ -57,6 +57,7 @@ class AnalysisRunner:
         project_name: str,
         project_dir: Path,
         sources: list[Path] | None = None,
+        max_retries: int = 2,
     ) -> AnalysisResult:
         """Run SonarQube analysis on project.
 
@@ -65,6 +66,7 @@ class AnalysisRunner:
             project_name: SonarQube project name
             project_dir: Root directory to analyze
             sources: Optional list of specific files/dirs to analyze (relative to project_dir)
+            max_retries: How many times to retry if server-side analysis fails (not for scanner errors)
 
         Returns:
             AnalysisResult with success status and details
@@ -72,7 +74,6 @@ class AnalysisRunner:
         Raises:
             SonarQubeAPIError: If scanner execution fails or analysis times out
         """
-        # Check scanner is available
         if not self.validate_scanner_available():
             return AnalysisResult(
                 success=False,
@@ -83,97 +84,95 @@ class AnalysisRunner:
         handler = SonarPropertiesHandler(project_dir, self.config)
         command = handler.build_command(project_key, project_name, sources)
 
-        # Execute scanner
+        result = AnalysisResult(success=False, error_message="No analysis attempt made")
         with handler.patched(project_key, project_name):
-            try:
-                dim(f"    Executing: sonar-scanner (project: {project_key})")
-                result = await asyncio.create_subprocess_exec(
-                    *command,
-                    cwd=str(project_dir),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-
-                dim("    Waiting for scanner to complete...")
-                stdout, stderr = await result.communicate()
-                dim(f"    Scanner finished with exit code: {result.returncode}")
-
-                if result.returncode != 0:
-                    stdout_text = stdout.decode() if stdout else ""
-                    stderr_text = stderr.decode() if stderr else ""
-                    combined_error_output = "\n".join(output for output in (stderr_text, stdout_text) if output)
-                    error(f"    Scanner error: {combined_error_output[:500]}")
-                    error_msg = f"sonar-scanner failed with exit code {result.returncode}: {combined_error_output}"
-                    if handler.exists and _AUTH_ERROR_RE.search(combined_error_output):
-                        error_msg += _AUTH_HINT
-                    return AnalysisResult(
-                        success=False,
-                        error_message=error_msg,
+            for attempt in range(max_retries + 1):
+                if attempt > 0:
+                    retry_delay = 10 * 2 ** (attempt - 1)
+                    warn(
+                        f"    Server-side analysis failed, retrying in {retry_delay}s"
+                        f" (attempt {attempt + 1} of {max_retries + 1})..."
                     )
-
-                # Extract task ID from scanner output
-                scanner_output = stdout.decode()
-                dim("    Extracting task ID from scanner output...")
-                task_id = self._extract_task_id(scanner_output)
-
-                if not task_id:
-                    error("    Could not find task ID in scanner output")
-                    dim("    See debug log for full scanner output")
-                    # Log full scanner output to debug log for troubleshooting
-                    logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
-                    return AnalysisResult(
-                        success=False,
-                        error_message="Could not extract task ID from scanner output",
-                    )
-
-                dim(f"    Task ID: {task_id}")
-
-                # Wait for analysis to complete on server
-                dim("    Waiting for server-side analysis to complete...")
+                    await asyncio.sleep(retry_delay)
                 try:
-                    async with asyncio.timeout(300):
-                        analysis_success = await self._wait_for_analysis(task_id)
-                except TimeoutError:
-                    error("    Analysis timed out after 300 seconds")
-                    return AnalysisResult(
-                        success=False,
-                        task_id=task_id,
-                        error_message="Analysis timed out after 300 seconds",
-                    )
+                    result = await self._run_scanner_attempt(command, project_key, project_dir, handler)
+                except Exception as e:
+                    return AnalysisResult(success=False, error_message=f"Failed to run analysis: {e}")
+                if result.success or not (result.error_message or "").startswith("Analysis failed on server"):
+                    return result
+        return result
 
-                if not analysis_success:
-                    error("    Analysis failed on server")
-                    return AnalysisResult(
-                        success=False,
-                        task_id=task_id,
-                        error_message="Analysis failed on server",
-                    )
+    async def _run_scanner_attempt(
+        self,
+        command: list[str],
+        project_key: str,
+        project_dir: Path,
+        handler: SonarPropertiesHandler,
+    ) -> AnalysisResult:
+        """Execute sonar-scanner once and wait for server-side completion."""
+        dim(f"    Executing: sonar-scanner (project: {project_key})")
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(project_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
 
-                success("    ✓ Server-side analysis completed successfully")
+        dim("    Waiting for scanner to complete...")
+        stdout, stderr = await proc.communicate()
+        dim(f"    Scanner finished with exit code: {proc.returncode}")
 
-                # Build dashboard URL
-                dashboard_url = f"{self.config.sonarqube_url}/dashboard?id={project_key}"
+        if proc.returncode != 0:
+            stdout_text = stdout.decode() if stdout else ""
+            stderr_text = stderr.decode() if stderr else ""
+            combined = "\n".join(o for o in (stderr_text, stdout_text) if o)
+            error(f"    Scanner error: {combined[:500]}")
+            error_msg = f"sonar-scanner failed with exit code {proc.returncode}: {combined}"
+            if handler.exists and _AUTH_ERROR_RE.search(combined):
+                error_msg += _AUTH_HINT
+            return AnalysisResult(success=False, error_message=error_msg)
 
-                return AnalysisResult(
-                    success=True,
-                    task_id=task_id,
-                    dashboard_url=dashboard_url,
-                )
+        scanner_output = stdout.decode()
+        dim("    Extracting task ID from scanner output...")
+        task_id = self._extract_task_id(scanner_output)
 
-            except Exception as e:
-                return AnalysisResult(
-                    success=False,
-                    error_message=f"Failed to run analysis: {e}",
-                )
+        if not task_id:
+            error("    Could not find task ID in scanner output")
+            dim("    See debug log for full scanner output")
+            logger.debug("Full scanner output when task ID extraction failed:\n%s", scanner_output)
+            return AnalysisResult(success=False, error_message="Could not extract task ID from scanner output")
 
-    async def _wait_for_analysis(self, task_id: str) -> bool:
+        dim(f"    Task ID: {task_id}")
+        dim("    Waiting for server-side analysis to complete...")
+        try:
+            async with asyncio.timeout(300):
+                analysis_success, server_error = await self._wait_for_analysis(task_id)
+        except TimeoutError:
+            error("    Analysis timed out after 300 seconds")
+            return AnalysisResult(success=False, task_id=task_id, error_message="Analysis timed out after 300 seconds")
+
+        if analysis_success:
+            success("    ✓ Server-side analysis completed successfully")
+            return AnalysisResult(
+                success=True,
+                task_id=task_id,
+                dashboard_url=f"{self.config.sonarqube_url}/dashboard?id={project_key}",
+            )
+
+        error_message = "Analysis failed on server"
+        if server_error:
+            error_message += f": {server_error}"
+        error(f"    {error_message}")
+        return AnalysisResult(success=False, task_id=task_id, error_message=error_message)
+
+    async def _wait_for_analysis(self, task_id: str) -> tuple[bool, str | None]:
         """Poll SonarQube for analysis completion.
 
         Args:
             task_id: Analysis task ID from scanner
 
         Returns:
-            True if analysis succeeded, False if failed or timed out
+            (True, None) if analysis succeeded; (False, errorMessage | None) if failed or canceled
         """
         poll_interval = 2  # seconds between polls
         last_status = None
@@ -192,10 +191,14 @@ class AnalysisRunner:
                     last_status = status
 
                 if status == "SUCCESS":
-                    return True
+                    return True, None
                 if status in ("FAILED", "CANCELED"):
-                    error(f"    Analysis failed with status: {status}")
-                    return False
+                    server_reason = task.get("errorMessage")
+                    msg = f"    Analysis failed with status: {status}"
+                    if server_reason:
+                        msg += f" — {server_reason}"
+                    error(msg)
+                    return False, server_reason
 
                 # Status is PENDING or IN_PROGRESS, keep waiting
                 await asyncio.sleep(poll_interval)

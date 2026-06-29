@@ -627,7 +627,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
 
     if result.files:
         _build_review_table(result)
-    elif total_issues == 0 and total_duplications == 0:
+    elif result.success and total_issues == 0 and total_duplications == 0:
         console.print("\n[green]No issues found on changed lines.[/green]")
 
     if result.report_file:
