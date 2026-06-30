@@ -1180,3 +1180,98 @@ class TestRunAnalysisCoverage:
             )
         assert len(result.files) == 1
         assert result.files[0].coverage_pct == 60.0
+
+
+class TestRunBaselineScan:
+    """Tests for ReviewOrchestrator.run_baseline_scan()."""
+
+    @pytest.fixture
+    def orchestrator(self, config: VibeHealConfig) -> ReviewOrchestrator:
+        """Create ReviewOrchestrator with a mocked client and mocked git dependencies."""
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        mock_client = AsyncMock()
+        return ReviewOrchestrator(config, mock_client, MagicMock(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_success_returns_dashboard_url(self, orchestrator: ReviewOrchestrator) -> None:
+        """On success, returns a BaselineScanResult with dashboard_url and no error."""
+        with patch.object(
+            orchestrator.analysis_runner,
+            "run_analysis",
+            new_callable=AsyncMock,
+            return_value=AnalysisResult(success=True, dashboard_url="https://sonar.test.com/dashboard?id=my-project"),
+        ) as mock_run_analysis:
+            result = await orchestrator.run_baseline_scan()
+
+        assert result.success is True
+        assert result.project_key == "my-project"
+        assert result.dashboard_url == "https://sonar.test.com/dashboard?id=my-project"
+        assert result.error_message is None
+        mock_run_analysis.assert_called_once_with(
+            project_key="my-project",
+            project_name="my-project",
+            project_dir=Path.cwd(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_analysis_failure_returns_error(self, orchestrator: ReviewOrchestrator) -> None:
+        """When analysis fails, returns a failed BaselineScanResult with the error message."""
+        with patch.object(
+            orchestrator.analysis_runner,
+            "run_analysis",
+            new_callable=AsyncMock,
+            return_value=AnalysisResult(success=False, error_message="Scanner not found"),
+        ):
+            result = await orchestrator.run_baseline_scan()
+
+        assert result.success is False
+        assert result.project_key == "my-project"
+        assert result.error_message == "Scanner not found"
+
+    @pytest.mark.asyncio
+    async def test_analysis_failure_with_no_message_uses_default(self, orchestrator: ReviewOrchestrator) -> None:
+        """When analysis fails with no error_message, a default message is used."""
+        with patch.object(
+            orchestrator.analysis_runner,
+            "run_analysis",
+            new_callable=AsyncMock,
+            return_value=AnalysisResult(success=False, error_message=None),
+        ):
+            result = await orchestrator.run_baseline_scan()
+
+        assert result.success is False
+        assert result.error_message == "Analysis failed"
+
+    @pytest.mark.asyncio
+    async def test_exception_is_caught_and_wrapped(self, orchestrator: ReviewOrchestrator) -> None:
+        """An unexpected exception is caught and wrapped into a failed result."""
+        with patch.object(
+            orchestrator.analysis_runner,
+            "run_analysis",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("network down"),
+        ):
+            result = await orchestrator.run_baseline_scan()
+
+        assert result.success is False
+        assert result.project_key == "my-project"
+        assert "network down" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_does_not_create_or_delete_temp_project(self, orchestrator: ReviewOrchestrator) -> None:
+        """run_baseline_scan never creates or deletes a temp project."""
+        with (
+            patch.object(
+                orchestrator.analysis_runner,
+                "run_analysis",
+                new_callable=AsyncMock,
+                return_value=AnalysisResult(success=True),
+            ),
+            patch.object(orchestrator.project_manager, "create_temp_project", new_callable=AsyncMock) as mock_create,
+            patch.object(orchestrator.project_manager, "delete_project", new_callable=AsyncMock) as mock_delete,
+        ):
+            await orchestrator.run_baseline_scan()
+
+        mock_create.assert_not_called()
+        mock_delete.assert_not_called()
