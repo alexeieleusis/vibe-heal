@@ -26,7 +26,7 @@ from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, bold_cyan, console, cyan, dim, error, info, success, warn
 from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
 from vibe_heal.review.models import ReviewIssue
-from vibe_heal.review.orchestrator import ReviewAnalysisResult
+from vibe_heal.review.orchestrator import BaselineScanResult, ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
 
@@ -775,6 +775,55 @@ def _review_post_mode(
         sys.exit(1)
 
 
+def _display_baseline_results(result: BaselineScanResult) -> None:
+    """Display baseline scan results.
+
+    Args:
+        result: BaselineScanResult from the orchestrator.
+    """
+    if result.success:
+        success(f"Baseline scan complete: project {rich_escape(result.project_key)} re-analyzed.")
+        if result.dashboard_url:
+            dim(f"Dashboard: {result.dashboard_url}")
+    else:
+        error(f"Baseline scan failed: {result.error_message}")
+
+
+async def _run_baseline(config: VibeHealConfig, verbose: bool) -> None:
+    """Run the baseline scan workflow.
+
+    Args:
+        config: Configuration object.
+        verbose: Enable verbose output.
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = ReviewOrchestrator(config, client)
+        result = await orchestrator.run_baseline_scan()
+        _display_baseline_results(result)
+        if not result.success:
+            sys.exit(1)
+
+
+def _review_baseline_mode(env_file: str | None, verbose: bool) -> None:
+    """Handle the --baseline branch of the review command.
+
+    Args:
+        env_file: Optional path to a custom env file (for config loading).
+        verbose: Enable verbose output.
+    """
+    try:
+        config = VibeHealConfig(env_file=env_file)
+        asyncio.run(_run_baseline(config=config, verbose=verbose))
+    except ConfigurationError as e:
+        error(f"Configuration error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        error(f"Error: {e}")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
 @app.command()
 def review(
     post: bool = typer.Option(
@@ -821,6 +870,11 @@ def review(
         help=VERBOSE_OUTPUT_HELP,
     ),
     coverage: bool = typer.Option(False, "--coverage", help="Report test coverage for changed lines."),
+    baseline: bool = typer.Option(
+        False,
+        "--baseline",
+        help="Run a full SonarQube scan against the real project to refresh its baseline (no diff, no report).",
+    ),
 ) -> None:
     """Analyze SonarQube issues on changed lines.
 
@@ -833,6 +887,10 @@ def review(
         _review_post_mode(
             report_file=report_file, pr_number=pr_number, env_file=env_file, verbose=verbose, dry_run=dry_run
         )
+        return
+
+    if baseline:
+        _review_baseline_mode(env_file=env_file, verbose=verbose)
         return
 
     try:
