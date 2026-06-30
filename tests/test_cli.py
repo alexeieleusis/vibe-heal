@@ -906,6 +906,73 @@ class TestReviewCommand:
         assert result.exit_code == 0
         assert "review" in result.stdout
 
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_review_baseline_success(
+        self,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review --baseline runs a baseline scan and exits 0 on success."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.project_key = "test-project"
+        mock_result.dashboard_url = "https://sonar.test.com/dashboard?id=test-project"
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_baseline_scan = AsyncMock(return_value=mock_result)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review", "--baseline"])
+
+        assert result.exit_code == 0
+        assert "Baseline scan complete" in result.stdout
+        mock_orchestrator.run_baseline_scan.assert_called_once()
+        mock_orchestrator.run_analysis.assert_not_called()
+
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.ReviewOrchestrator")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_review_baseline_failure_exits_nonzero(
+        self,
+        mock_config_class: MagicMock,
+        mock_orchestrator_class: MagicMock,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """Test review --baseline exits 1 and prints the error when the scan fails."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "test-project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.success = False
+        mock_result.project_key = "test-project"
+        mock_result.error_message = "Scanner not found"
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.run_baseline_scan = AsyncMock(return_value=mock_result)
+        mock_orchestrator_class.return_value = mock_orchestrator
+
+        result = runner.invoke(app, ["review", "--baseline"])
+
+        assert result.exit_code == 1
+        assert "Baseline scan failed" in result.stdout
+        assert "Scanner not found" in result.stdout
+
 
 class TestDisplayReviewResultsCoverage:
     def test_no_crash_with_coverage_data(self) -> None:
