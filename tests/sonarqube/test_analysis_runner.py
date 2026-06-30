@@ -99,9 +99,10 @@ class TestWaitForAnalysis:
         """Test when analysis succeeds on first poll."""
         mock_client._request.return_value = {"task": {"status": "SUCCESS"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id")
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
 
-        assert result is True
+        assert ok is True
+        assert reason is None
         mock_client._request.assert_called_once()
 
     @pytest.mark.asyncio
@@ -116,28 +117,43 @@ class TestWaitForAnalysis:
             {"task": {"status": "SUCCESS"}},
         ]
 
-        result = await analysis_runner._wait_for_analysis("test-task-id")
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
 
-        assert result is True
+        assert ok is True
+        assert reason is None
         assert mock_client._request.call_count == 3
 
     @pytest.mark.asyncio
     async def test_analysis_fails(self, analysis_runner: AnalysisRunner, mock_client: AsyncMock) -> None:
         """Test when analysis fails."""
+        mock_client._request.return_value = {"task": {"status": "FAILED", "errorMessage": "Out of memory"}}
+
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
+
+        assert ok is False
+        assert reason == "Out of memory"
+
+    @pytest.mark.asyncio
+    async def test_analysis_fails_no_error_message(
+        self, analysis_runner: AnalysisRunner, mock_client: AsyncMock
+    ) -> None:
+        """Test when analysis fails without an errorMessage from SonarQube."""
         mock_client._request.return_value = {"task": {"status": "FAILED"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id")
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
 
-        assert result is False
+        assert ok is False
+        assert reason is None
 
     @pytest.mark.asyncio
     async def test_analysis_canceled(self, analysis_runner: AnalysisRunner, mock_client: AsyncMock) -> None:
         """Test when analysis is canceled."""
         mock_client._request.return_value = {"task": {"status": "CANCELED"}}
 
-        result = await analysis_runner._wait_for_analysis("test-task-id")
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
 
-        assert result is False
+        assert ok is False
+        assert reason is None
 
     @pytest.mark.asyncio
     async def test_analysis_timeout(self, analysis_runner: AnalysisRunner, mock_client: AsyncMock) -> None:
@@ -161,9 +177,10 @@ class TestWaitForAnalysis:
             {"task": {"status": "SUCCESS"}},
         ]
 
-        result = await analysis_runner._wait_for_analysis("test-task-id")
+        ok, reason = await analysis_runner._wait_for_analysis("test-task-id")
 
-        assert result is True
+        assert ok is True
+        assert reason is None
         assert mock_client._request.call_count == 2
 
 
@@ -202,7 +219,7 @@ INFO: Analysis total time: 10.234 s
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_process),
-            patch.object(analysis_runner, "_wait_for_analysis", return_value=True),
+            patch.object(analysis_runner, "_wait_for_analysis", return_value=(True, None)),
         ):
             result = await analysis_runner.run_analysis(
                 project_key="test-key",
@@ -270,17 +287,82 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_process),
-            patch.object(analysis_runner, "_wait_for_analysis", return_value=False),
+            patch.object(analysis_runner, "_wait_for_analysis", return_value=(False, "Out of memory")),
         ):
             result = await analysis_runner.run_analysis(
                 project_key="test-key",
                 project_name="Test Project",
                 project_dir=tmp_path,
+                max_retries=0,
             )
 
         assert result.success is False
         assert result.task_id == "AY123"
         assert "failed on server" in result.error_message
+        assert "Out of memory" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_analysis_succeeds_after_retry(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        """Test that a transient server failure is retried and eventually succeeds."""
+        scanner_output = b"""
+INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=AY123
+"""
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.communicate = AsyncMock(return_value=(scanner_output, b""))
+
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_create,
+            patch.object(
+                analysis_runner,
+                "_wait_for_analysis",
+                side_effect=[(False, "Fail to extract report from database"), (True, None)],
+            ),
+            patch("asyncio.sleep"),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="test-key",
+                project_name="Test Project",
+                project_dir=tmp_path,
+                max_retries=1,
+            )
+
+        assert result.success is True
+        assert result.task_id == "AY123"
+        assert mock_create.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_analysis_exhausts_retries(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
+        """Test that persistent server failures return the last failure after all retries."""
+        scanner_output = b"""
+INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=AY123
+"""
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.communicate = AsyncMock(return_value=(scanner_output, b""))
+
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_create,
+            patch.object(
+                analysis_runner,
+                "_wait_for_analysis",
+                side_effect=[(False, "Fail to extract report from database")] * 3,
+            ),
+            patch("asyncio.sleep"),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="test-key",
+                project_name="Test Project",
+                project_dir=tmp_path,
+                max_retries=2,
+            )
+
+        assert result.success is False
+        assert "failed on server" in result.error_message
+        assert "Fail to extract report from database" in result.error_message
+        assert mock_create.call_count == 3
 
     @pytest.mark.asyncio
     async def test_analysis_timeout_on_server(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
@@ -296,9 +378,9 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
         mock_process.communicate = AsyncMock(return_value=(scanner_output, b""))
 
         # Mock _wait_for_analysis to sleep forever (simulating timeout)
-        async def wait_forever(task_id: str) -> bool:
+        async def wait_forever(task_id: str) -> tuple[bool, str | None]:
             await asyncio.sleep(1000)
-            return True
+            return True, None
 
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
@@ -364,6 +446,16 @@ class TestAnalysisResult:
         assert result.error_message == "Analysis failed"
         assert result.task_id is None
         assert result.dashboard_url is None
+
+    def test_retryable_defaults_to_false(self) -> None:
+        """Test that retryable is False by default so non-server failures are not retried."""
+        result = AnalysisResult(success=False, error_message="Some error")
+        assert result.retryable is False
+
+    def test_retryable_true_for_server_failure(self) -> None:
+        """Test that retryable can be set explicitly for server-side failures."""
+        result = AnalysisResult(success=False, retryable=True, error_message="Analysis failed on server")
+        assert result.retryable is True
 
 
 class TestAuthHint:
