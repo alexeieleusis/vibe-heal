@@ -313,7 +313,7 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
 
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
-            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_create,
             patch.object(
                 analysis_runner,
                 "_wait_for_analysis",
@@ -330,6 +330,7 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
 
         assert result.success is True
         assert result.task_id == "AY123"
+        assert mock_create.call_count == 2
 
     @pytest.mark.asyncio
     async def test_analysis_exhausts_retries(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
@@ -343,7 +344,7 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
 
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
-            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_create,
             patch.object(
                 analysis_runner,
                 "_wait_for_analysis",
@@ -361,6 +362,7 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
         assert result.success is False
         assert "failed on server" in result.error_message
         assert "Fail to extract report from database" in result.error_message
+        assert mock_create.call_count == 3
 
     @pytest.mark.asyncio
     async def test_analysis_timeout_on_server(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
