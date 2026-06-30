@@ -29,6 +29,7 @@ class AnalysisResult(BaseModel):
     """Result of a SonarQube analysis run."""
 
     success: bool
+    retryable: bool = False  # True only for transient server-side failures
     task_id: str | None = None
     dashboard_url: str | None = None
     error_message: str | None = None
@@ -98,7 +99,7 @@ class AnalysisRunner:
                     result = await self._run_scanner_attempt(command, project_key, project_dir, handler)
                 except Exception as e:
                     return AnalysisResult(success=False, error_message=f"Failed to run analysis: {e}")
-                if result.success or not (result.error_message or "").startswith("Analysis failed on server"):
+                if result.success or not result.retryable:
                     return result
         return result
 
@@ -163,7 +164,7 @@ class AnalysisRunner:
         if server_error:
             error_message += f": {server_error}"
         error(f"    {error_message}")
-        return AnalysisResult(success=False, task_id=task_id, error_message=error_message)
+        return AnalysisResult(success=False, retryable=True, task_id=task_id, error_message=error_message)
 
     async def _wait_for_analysis(self, task_id: str) -> tuple[bool, str | None]:
         """Poll SonarQube for analysis completion.

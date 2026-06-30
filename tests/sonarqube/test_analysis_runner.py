@@ -445,6 +445,16 @@ class TestAnalysisResult:
         assert result.task_id is None
         assert result.dashboard_url is None
 
+    def test_retryable_defaults_to_false(self) -> None:
+        """Test that retryable is False by default so non-server failures are not retried."""
+        result = AnalysisResult(success=False, error_message="Some error")
+        assert result.retryable is False
+
+    def test_retryable_true_for_server_failure(self) -> None:
+        """Test that retryable can be set explicitly for server-side failures."""
+        result = AnalysisResult(success=False, retryable=True, error_message="Analysis failed on server")
+        assert result.retryable is True
+
 
 class TestAuthHint:
     @pytest.mark.asyncio
