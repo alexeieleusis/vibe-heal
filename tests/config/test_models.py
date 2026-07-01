@@ -12,6 +12,11 @@ from vibe_heal.config import InvalidConfigurationError, VibeHealConfig
 class TestVibeHealConfig:
     """Tests for VibeHealConfig model."""
 
+    @pytest.fixture(autouse=True)
+    def _no_scanner_auth_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Prevent real machine-local scanner config from leaking into these tests."""
+        monkeypatch.setattr("vibe_heal.config.models.resolve_scanner_auth", lambda project_dir: None)
+
     def test_valid_config_with_token(self) -> None:
         """Test creating config with token authentication."""
         config = VibeHealConfig(
@@ -39,7 +44,7 @@ class TestVibeHealConfig:
         assert config.use_token_auth is False
 
     def test_invalid_missing_auth(self) -> None:
-        """Test that missing authentication raises error."""
+        """Test that missing authentication raises error when no scanner auth is discoverable either."""
         with pytest.raises(InvalidConfigurationError, match="Must provide either"):
             VibeHealConfig(
                 sonarqube_url="https://sonar.example.com",
@@ -47,7 +52,7 @@ class TestVibeHealConfig:
             )
 
     def test_invalid_only_username(self) -> None:
-        """Test that only username (without password) raises error."""
+        """Test that only username (without password) raises error when no scanner auth is discoverable either."""
         with pytest.raises(InvalidConfigurationError, match="Must provide either"):
             VibeHealConfig(
                 sonarqube_url="https://sonar.example.com",
@@ -56,13 +61,41 @@ class TestVibeHealConfig:
             )
 
     def test_invalid_only_password(self) -> None:
-        """Test that only password (without username) raises error."""
+        """Test that only password (without username) raises error when no scanner auth is discoverable either."""
         with pytest.raises(InvalidConfigurationError, match="Must provide either"):
             VibeHealConfig(
                 sonarqube_url="https://sonar.example.com",
                 sonarqube_password="pass",
                 sonarqube_project_key="my-project",
             )
+
+    def test_falls_back_to_scanner_token_when_unconfigured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a token discovered via scanner conventions satisfies auth."""
+        monkeypatch.setattr(
+            "vibe_heal.config.models.resolve_scanner_auth",
+            lambda project_dir: {"token": "discovered-token"},
+        )
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.example.com",
+            sonarqube_project_key="my-project",
+        )
+
+        assert config.sonarqube_token == "discovered-token"
+        assert config.use_token_auth is True
+
+    def test_scanner_fallback_not_used_when_token_already_provided(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an explicitly provided token is not overridden by scanner discovery."""
+        monkeypatch.setattr(
+            "vibe_heal.config.models.resolve_scanner_auth",
+            lambda project_dir: {"token": "discovered-token"},
+        )
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.example.com",
+            sonarqube_token="explicit-token",
+            sonarqube_project_key="my-project",
+        )
+
+        assert config.sonarqube_token == "explicit-token"
 
     def test_url_normalization_trailing_slash(self) -> None:
         """Test that trailing slash is removed from URL."""

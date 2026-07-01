@@ -13,6 +13,7 @@ from pydantic_settings import (
 
 from vibe_heal.ai_tools.base import AIToolType
 from vibe_heal.config.exceptions import InvalidConfigurationError
+from vibe_heal.config.scanner_discovery import resolve_scanner_auth
 
 
 class VibeHealConfig(BaseSettings):
@@ -190,6 +191,33 @@ class VibeHealConfig(BaseSettings):
             Normalized URL without trailing slash
         """
         return v.rstrip("/")
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_scanner_auth_fallback(cls, data: Any) -> Any:
+        """Fall back to sonar-scanner's own credential sources when auth is unset.
+
+        Only triggers when neither a token nor a full username+password pair was
+        found via vibe-heal's normal sources (init kwargs, env vars, .env file).
+
+        Args:
+            data: Merged settings values from all sources.
+
+        Returns:
+            Data, augmented with discovered auth if none was already configured.
+        """
+        if not isinstance(data, dict):
+            return data
+        has_token = data.get("sonarqube_token") is not None
+        has_basic = data.get("sonarqube_username") is not None and data.get("sonarqube_password") is not None
+        if has_token or has_basic:
+            return data
+        fallback = resolve_scanner_auth(Path.cwd())
+        if fallback is None:
+            return data
+        if "token" in fallback:
+            return {**data, "sonarqube_token": fallback["token"]}
+        return {**data, "sonarqube_username": fallback["login"], "sonarqube_password": fallback["password"]}
 
     @model_validator(mode="after")
     def validate_auth(self) -> Self:

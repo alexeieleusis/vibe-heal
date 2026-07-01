@@ -177,6 +177,10 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
 - AI tool auto-detection if not specified
 - Supports custom env file via `env_file` parameter in constructor
 - CLI commands accept `--env-file` option to override default config file
+- `scanner_discovery.resolve_scanner_auth()` - fallback auth source used by `VibeHealConfig` when SONARQUBE_TOKEN/USERNAME/PASSWORD aren't set via env vars or the env file
+  - Only triggers when no auth was found through vibe-heal's normal sources (`apply_scanner_auth_fallback` model validator, runs before `validate_auth`)
+  - Resolves the same way `sonar-scanner` itself would: `SONAR_TOKEN`/`SONAR_LOGIN`+`SONAR_PASSWORD` env vars, then the project's `sonar-project.properties`, then the scanner installation's global `sonar-scanner.properties`
+  - Locates the global properties file structurally (`$SONAR_SCANNER_HOME/conf/`, or relative to a resolved `which sonar-scanner` binary) rather than assuming a fixed path, since install layout varies by machine/packaging
 
 **`sonarqube/`**: Async HTTP client for SonarQube Web API
 
