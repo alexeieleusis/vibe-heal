@@ -68,6 +68,15 @@ class ReviewAnalysisResult(BaseModel):
         return sum(len(f.duplications) + len(f.resolved_duplications) for f in self.files)
 
 
+class BaselineScanResult(BaseModel):
+    """Result of a baseline scan operation."""
+
+    success: bool
+    project_key: str
+    dashboard_url: str | None = None
+    error_message: str | None = None
+
+
 class ReviewOrchestrator:
     """Orchestrates the review workflow: analyze changed lines for SonarQube issues.
 
@@ -270,6 +279,39 @@ class ReviewOrchestrator:
 
         finally:
             await self._cleanup_temp_project(temp_project)
+
+    async def run_baseline_scan(self) -> BaselineScanResult:
+        """Run a full SonarQube scan directly against the real project.
+
+        Refreshes the real project's SonarQube analysis (no temp project, no
+        diff, no per-file report) so later PR reviews have an up-to-date
+        baseline for duplicate-code comparisons.
+
+        Returns:
+            BaselineScanResult with success status and dashboard URL or error.
+        """
+        project_key = self.config.sonarqube_project_key
+        try:
+            dim(f"Running baseline SonarQube scan against {project_key}...")
+            analysis_result = await self.analysis_runner.run_analysis(
+                project_key=project_key,
+                project_name=project_key,
+                project_dir=Path.cwd(),
+            )
+            if not analysis_result.success:
+                error_msg = analysis_result.error_message or "Analysis failed"
+                return BaselineScanResult(success=False, project_key=project_key, error_message=error_msg)
+            return BaselineScanResult(
+                success=True,
+                project_key=project_key,
+                dashboard_url=analysis_result.dashboard_url,
+            )
+        except Exception as e:
+            return BaselineScanResult(
+                success=False,
+                project_key=project_key,
+                error_message=f"Baseline scan failed: {e}",
+            )
 
     async def run_post(
         self,
