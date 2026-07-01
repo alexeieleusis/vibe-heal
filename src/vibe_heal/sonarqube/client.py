@@ -1,12 +1,11 @@
 """SonarQube API client."""
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import ValidationError
 
-from vibe_heal.config import VibeHealConfig
 from vibe_heal.sonarqube.exceptions import (
     ComponentNotFoundError,
     SonarQubeAPIError,
@@ -22,13 +21,16 @@ from vibe_heal.sonarqube.models import (
     SourceLinesResponse,
 )
 
+if TYPE_CHECKING:
+    from vibe_heal.config import VibeHealConfig
+
 logger = logging.getLogger(__name__)
 
 
 class SonarQubeClient:
     """Client for interacting with SonarQube Web API."""
 
-    def __init__(self, config: VibeHealConfig) -> None:
+    def __init__(self, config: "VibeHealConfig") -> None:
         """Initialize the SonarQube client.
 
         Args:
