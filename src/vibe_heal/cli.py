@@ -782,7 +782,7 @@ def _display_baseline_results(result: BaselineScanResult) -> None:
         result: BaselineScanResult from the orchestrator.
     """
     if result.success:
-        success(f"Baseline scan complete: project {rich_escape(result.project_key)} re-analyzed.")
+        success(f"Baseline scan complete: project {result.project_key} re-analyzed.")
         if result.dashboard_url:
             dim(f"Dashboard: {result.dashboard_url}")
     else:
