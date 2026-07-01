@@ -30,6 +30,7 @@ AI-powered SonarQube issue remediation that automatically fixes your code qualit
 | `vibe-heal cleanup` | Fix all modified files in the current branch |
 | `vibe-heal dedupe-branch` | Remove duplications from all modified files in the current branch |
 | `vibe-heal review` | Report issues on changed lines; optionally post to GitHub PR |
+| `vibe-heal review --baseline` | Refresh the real SonarQube project's analysis (for CI baseline maintenance) |
 | `vibe-heal config` | Show current configuration |
 | `vibe-heal version` | Show version information |
 
