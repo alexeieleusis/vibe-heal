@@ -789,12 +789,11 @@ def _display_baseline_results(result: BaselineScanResult) -> None:
         error(f"Baseline scan failed: {result.error_message}")
 
 
-async def _run_baseline(config: VibeHealConfig, verbose: bool) -> None:
+async def _run_baseline(config: VibeHealConfig) -> None:
     """Run the baseline scan workflow.
 
     Args:
         config: Configuration object.
-        verbose: Enable verbose output.
     """
     async with SonarQubeClient(config) as client:
         orchestrator = ReviewOrchestrator(config, client)
@@ -813,7 +812,7 @@ def _review_baseline_mode(env_file: str | None, verbose: bool) -> None:
     """
     try:
         config = VibeHealConfig(env_file=env_file)
-        asyncio.run(_run_baseline(config=config, verbose=verbose))
+        asyncio.run(_run_baseline(config=config))
     except ConfigurationError as e:
         error(f"Configuration error: {e}")
         sys.exit(1)
