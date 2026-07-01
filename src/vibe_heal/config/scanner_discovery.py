@@ -1,8 +1,8 @@
-"""Discovers SonarQube auth from the same sources `sonar-scanner` itself would use.
+"""Discovers SonarQube auth and host URL from the same sources `sonar-scanner` itself would use.
 
-Machines that already run `sonar-scanner` directly often have credentials configured
-outside of vibe-heal's own `.env.vibeheal`/`.env` (scanner-convention env vars, a
-project's `sonar-project.properties`, or the scanner installation's global
+Machines that already run `sonar-scanner` directly often have credentials and a server
+URL configured outside of vibe-heal's own `.env.vibeheal`/`.env` (scanner-convention env
+vars, a project's `sonar-project.properties`, or the scanner installation's global
 `sonar-scanner.properties`). This lets `VibeHealConfig` reuse that configuration
 instead of requiring it to be duplicated.
 """
@@ -39,6 +39,29 @@ def resolve_scanner_auth(project_dir: Path) -> dict[str, str] | None:
     global_properties = _find_global_scanner_properties()
     if global_properties is not None:
         return _extract_auth(global_properties.read_text(encoding="utf-8"))
+    return None
+
+
+def resolve_scanner_host_url(project_dir: Path) -> str | None:
+    """Resolve the SonarQube host URL the way `sonar-scanner` would resolve it.
+
+    Checks, in order: SONAR_HOST_URL env var, the project's sonar-project.properties,
+    then the scanner installation's global sonar-scanner.properties. Returns the URL,
+    or None if none was found anywhere.
+    """
+    host_url = os.environ.get("SONAR_HOST_URL")
+    if host_url:
+        return host_url
+
+    project_properties = project_dir / PROPERTIES_FILENAME
+    if project_properties.is_file():
+        url = extract_property(project_properties.read_text(encoding="utf-8"), "sonar.host.url")
+        if url:
+            return url
+
+    global_properties = _find_global_scanner_properties()
+    if global_properties is not None:
+        return extract_property(global_properties.read_text(encoding="utf-8"), "sonar.host.url")
     return None
 
 

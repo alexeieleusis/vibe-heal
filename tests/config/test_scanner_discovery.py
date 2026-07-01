@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from vibe_heal.config.scanner_discovery import resolve_scanner_auth
+from vibe_heal.config.scanner_discovery import resolve_scanner_auth, resolve_scanner_host_url
 
 
 @pytest.fixture(autouse=True)
 def _clear_scanner_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("SONAR_TOKEN", "SONAR_LOGIN", "SONAR_PASSWORD", "SONAR_SCANNER_HOME"):
+    for var in ("SONAR_TOKEN", "SONAR_LOGIN", "SONAR_PASSWORD", "SONAR_SCANNER_HOME", "SONAR_HOST_URL"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -126,3 +126,52 @@ class TestResolveScannerAuth:
         (project_dir / "sonar-project.properties").write_text("sonar.token=proj-token\n")
 
         assert resolve_scanner_auth(project_dir) == {"token": "proj-token"}
+
+
+class TestResolveScannerHostUrl:
+    """Tests for resolve_scanner_host_url."""
+
+    def test_returns_none_when_nothing_configured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No env var, no properties files, no scanner install: nothing found."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+
+        assert resolve_scanner_host_url(tmp_path) is None
+
+    def test_env_var_takes_priority(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SONAR_HOST_URL env var is used when set."""
+        monkeypatch.setenv("SONAR_HOST_URL", "https://env.example.com")
+
+        assert resolve_scanner_host_url(tmp_path) == "https://env.example.com"
+
+    def test_project_properties_host_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """sonar.host.url in the project's sonar-project.properties is used."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        (tmp_path / "sonar-project.properties").write_text("sonar.host.url=https://proj.example.com\n")
+
+        assert resolve_scanner_host_url(tmp_path) == "https://proj.example.com"
+
+    def test_global_properties_host_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """sonar.host.url in the scanner installation's global sonar-scanner.properties is used."""
+        scanner_home = tmp_path / "scanner"
+        conf_dir = scanner_home / "conf"
+        conf_dir.mkdir(parents=True)
+        (conf_dir / "sonar-scanner.properties").write_text("sonar.host.url=https://global.example.com\n")
+        monkeypatch.setenv("SONAR_SCANNER_HOME", str(scanner_home))
+
+        assert resolve_scanner_host_url(tmp_path / "project") == "https://global.example.com"
+
+    def test_project_properties_take_priority_over_global(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A project-level sonar-project.properties wins over the global scanner config."""
+        scanner_home = tmp_path / "scanner"
+        conf_dir = scanner_home / "conf"
+        conf_dir.mkdir(parents=True)
+        (conf_dir / "sonar-scanner.properties").write_text("sonar.host.url=https://global.example.com\n")
+        monkeypatch.setenv("SONAR_SCANNER_HOME", str(scanner_home))
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "sonar-project.properties").write_text("sonar.host.url=https://proj.example.com\n")
+
+        assert resolve_scanner_host_url(project_dir) == "https://proj.example.com"

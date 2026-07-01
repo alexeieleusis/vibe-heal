@@ -16,6 +16,7 @@ class TestVibeHealConfig:
     def _no_scanner_auth_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Prevent real machine-local scanner config from leaking into these tests."""
         monkeypatch.setattr("vibe_heal.config.models.resolve_scanner_auth", lambda project_dir: None)
+        monkeypatch.setattr("vibe_heal.config.models.resolve_scanner_host_url", lambda project_dir: None)
 
     def test_valid_config_with_token(self) -> None:
         """Test creating config with token authentication."""
@@ -96,6 +97,33 @@ class TestVibeHealConfig:
         )
 
         assert config.sonarqube_token == "explicit-token"
+
+    def test_falls_back_to_scanner_host_url_when_unconfigured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a host URL discovered via scanner conventions is used."""
+        monkeypatch.setattr(
+            "vibe_heal.config.models.resolve_scanner_host_url",
+            lambda project_dir: "https://discovered.example.com",
+        )
+        config = VibeHealConfig(
+            sonarqube_token="test-token",
+            sonarqube_project_key="my-project",
+        )
+
+        assert config.sonarqube_url == "https://discovered.example.com"
+
+    def test_scanner_url_fallback_not_used_when_url_already_provided(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an explicitly provided URL is not overridden by scanner discovery."""
+        monkeypatch.setattr(
+            "vibe_heal.config.models.resolve_scanner_host_url",
+            lambda project_dir: "https://discovered.example.com",
+        )
+        config = VibeHealConfig(
+            sonarqube_url="https://explicit.example.com",
+            sonarqube_token="test-token",
+            sonarqube_project_key="my-project",
+        )
+
+        assert config.sonarqube_url == "https://explicit.example.com"
 
     def test_url_normalization_trailing_slash(self) -> None:
         """Test that trailing slash is removed from URL."""

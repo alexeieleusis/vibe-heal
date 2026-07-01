@@ -13,7 +13,7 @@ from pydantic_settings import (
 
 from vibe_heal.ai_tools.base import AIToolType
 from vibe_heal.config.exceptions import InvalidConfigurationError
-from vibe_heal.config.scanner_discovery import resolve_scanner_auth
+from vibe_heal.config.scanner_discovery import resolve_scanner_auth, resolve_scanner_host_url
 
 
 class VibeHealConfig(BaseSettings):
@@ -191,6 +191,30 @@ class VibeHealConfig(BaseSettings):
             Normalized URL without trailing slash
         """
         return v.rstrip("/")
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_scanner_url_fallback(cls, data: Any) -> Any:
+        """Fall back to sonar-scanner's own host URL sources when unset.
+
+        Mirrors `apply_scanner_auth_fallback`, but for the SonarQube server URL:
+        only triggers when `sonarqube_url` wasn't already provided via vibe-heal's
+        normal sources (init kwargs, env vars, .env file).
+
+        Args:
+            data: Merged settings values from all sources.
+
+        Returns:
+            Data, augmented with a discovered host URL if none was already configured.
+        """
+        if not isinstance(data, dict):
+            return data
+        if data.get("sonarqube_url") is not None:
+            return data
+        url = resolve_scanner_host_url(Path.cwd())
+        if url is None:
+            return data
+        return {**data, "sonarqube_url": url}
 
     @model_validator(mode="before")
     @classmethod
