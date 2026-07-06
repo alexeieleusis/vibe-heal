@@ -48,7 +48,7 @@ dev = [
     "mkdocstrings[python]>=1.0.4",
     "pytest-mock>=3.15.1",
     "pytest-asyncio>=1.4.0",
-    "responses>=0.26.1",
+    "responses>=0.26.2",
     "respx>=0.23.1",
     "types-aiofiles>=25.1.0.20260518",
 ]
