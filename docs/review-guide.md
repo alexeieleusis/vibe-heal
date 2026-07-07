@@ -4,10 +4,11 @@
 
 The `vibe-heal review` command analyzes SonarQube issues **scoped to the lines you actually changed** in your branch. It is a read-only companion to `cleanup`: instead of fixing issues it reports them, and can post the findings as inline GitHub PR review comments.
 
-The workflow has two phases:
+The workflow has two phases, plus a third standalone mode for CI baseline maintenance:
 
 1. **Analyze** (`vibe-heal review`) — create a temporary SonarQube project, run `sonar-scanner`, filter issues to changed lines, and save a `review.json` + `review.md` report.
 2. **Post** (`vibe-heal review --post`) — load the saved report and post inline comments to an open GitHub PR via the `gh` CLI.
+3. **Baseline** (`vibe-heal review --baseline`) — scan the real SonarQube project directly (no temp project, no diff, no report) to refresh its analysis. See [Baseline Mode](#baseline-mode).
 
 ## When to Use
 
@@ -85,6 +86,15 @@ vibe-heal review --coverage
 vibe-heal review --report-file /tmp/my-review.json
 ```
 
+### Refresh SonarQube's baseline (CI only)
+
+```bash
+# Run this on a checkout of main to refresh the real project's SonarQube analysis
+vibe-heal review --baseline
+```
+
+See [Baseline Mode](#baseline-mode) for when and why to use this.
+
 ### Post findings to GitHub PR
 
 ```bash
@@ -114,6 +124,7 @@ vibe-heal review --post --report-file /tmp/my-review.json
 | `--post` | off | Post saved report to GitHub PR instead of analyzing |
 | `--dry-run` | off | With `--post`: preview comments without API calls |
 | `--pr` | auto | With `--post`: explicit GitHub PR number |
+| `--baseline` | off | Scan the real SonarQube project directly to refresh its baseline (no diff, no report). Ignores `--pr`, `--pattern`, `--coverage`, and `--base-branch` if combined. |
 
 ## How It Works
 
@@ -242,6 +253,69 @@ The review command reports two types of duplication findings:
 **Active duplications** — code in your changed lines that SonarQube still considers duplicated. The comment shows the other locations where the same block exists.
 
 **Resolved duplications** — code that was duplicated on the base branch and intersects your changed lines, but is no longer flagged as duplicated in your branch. This typically means you refactored one copy of a duplicated block without updating the others. The comment warns you to check the remaining copies.
+
+## Baseline Mode
+
+`vibe-heal review --baseline` refreshes the real SonarQube project's analysis directly — it exists for CI harnesses that need SonarQube's baseline for `main` to stay current between PR review cycles, so later PR reviews get accurate duplicate-code comparisons (see [Duplication Findings](#duplication-findings): the "resolved duplications" check queries the real project's most recent analysis, not a temp project).
+
+### Why it's a separate mode
+
+The normal `review` analyze phase (see [How It Works](#how-it-works)) always scans a **temporary, disposable SonarQube project** and deletes it afterward — it never re-analyzes the real project. If `review` is run on a checkout of `main` with no diff against the base branch, it short-circuits with "No modified files to review" and no scan runs at all, so the real project's SonarQube analysis goes stale.
+
+`--baseline` bypasses all of that: no diff is computed, no temporary project is created, and no report is written. It runs `sonar-scanner` directly against `config.sonarqube_project_key` — the same thing a normal CI build of `main` would do.
+
+`--baseline` is **explicit-only**. It does not trigger automatically when a diff happens to be empty, because that would risk overwriting the real project's SonarQube baseline with a developer's local working-tree state during ordinary interactive use (e.g. running `vibe-heal review` on a feature branch with no committed diff yet, but uncommitted local edits).
+
+### Usage
+
+```bash
+# On a clean checkout of main
+git checkout main && git pull
+
+vibe-heal review --baseline
+```
+
+`--baseline` ignores `--pr`, `--pattern`, `--coverage`, and `--base-branch` if they're passed alongside it — none of that diff/filtering machinery applies. Exit code is `0` on a successful scan, non-zero on failure (scanner not found, analysis error, etc.), so a CI harness can gate on it.
+
+### Output
+
+```
+Baseline scan complete: project my-project re-analyzed.
+Dashboard: https://sonar.example.com/dashboard?id=my-project
+```
+
+### CI example
+
+```yaml
+name: Refresh SonarQube baseline
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sonar-scanner
+        run: |
+          wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
+          unzip -q sonar-scanner-cli-6.2.1.4610-linux-x64.zip
+          sudo mv sonar-scanner-6.2.1.4610-linux-x64 /opt/sonar-scanner
+          sudo ln -s /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner
+      - name: Install vibe-heal
+        run: pip install vibe-heal
+      - name: Create config
+        run: |
+          cat > .env.vibeheal <<EOF
+          SONARQUBE_URL=${{ secrets.SONARQUBE_URL }}
+          SONARQUBE_TOKEN=${{ secrets.SONARQUBE_TOKEN }}
+          SONARQUBE_PROJECT_KEY=${{ secrets.SONARQUBE_PROJECT_KEY }}
+          EOF
+      - name: Refresh SonarQube baseline
+        run: vibe-heal review --baseline
+```
 
 ## Examples
 

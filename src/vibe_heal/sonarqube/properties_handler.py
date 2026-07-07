@@ -6,8 +6,10 @@ import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from vibe_heal.config import VibeHealConfig
+if TYPE_CHECKING:
+    from vibe_heal.config import VibeHealConfig
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ _HOST_URL_RE = re.compile(r"^\s*sonar\.host\.url\s*=\s*.+", re.IGNORECASE)
 class SonarPropertiesHandler:
     """Detects sonar-project.properties, builds scanner commands, and patches the file for temp projects."""
 
-    def __init__(self, project_dir: Path, config: VibeHealConfig) -> None:
+    def __init__(self, project_dir: Path, config: "VibeHealConfig") -> None:
         self.project_dir = project_dir
         self.config = config
         self.properties_file = project_dir / PROPERTIES_FILENAME
@@ -102,23 +104,13 @@ class SonarPropertiesHandler:
                     return True
         return False
 
-    def _extract_property(self, content: str, key: str) -> str | None:
-        pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*)", re.IGNORECASE)
-        for line in content.splitlines():
-            if line.lstrip().startswith("#"):
-                continue
-            m = pattern.match(line)
-            if m:
-                return m.group(1).strip()
-        return None
-
     @contextmanager
     def patched(self, project_key: str, project_name: str) -> Generator[None, None, None]:
         if not self.exists:
             yield
             return
         original_content = self.properties_file.read_text(encoding="utf-8")
-        existing_key = self._extract_property(original_content, "sonar.projectKey")
+        existing_key = extract_property(original_content, "sonar.projectKey")
         if existing_key == project_key:
             yield
             return
@@ -135,6 +127,18 @@ class SonarPropertiesHandler:
                     self.properties_file,
                     _redact_auth_properties(original_content),
                 )
+
+
+def extract_property(content: str, key: str) -> str | None:
+    """Extract the value of a `key=value` property from sonar-project.properties content."""
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*)", re.IGNORECASE)
+    for line in content.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        m = pattern.match(line)
+        if m:
+            return m.group(1).strip()
+    return None
 
 
 def _redact_auth_properties(content: str) -> str:
