@@ -81,6 +81,39 @@ class GitHubReviewClient:
         data: dict[str, object] = json.loads(result.stdout)
         return cast(int, data["number"])
 
+    async def detect_pr_base_branch(self) -> str | None:
+        """Detect the base branch of the open PR for the current branch.
+
+        Returns None when gh is not installed, the call fails, there is no
+        open PR for the current branch, or the response is malformed.
+        Unlike detect_pr(), this method never raises — callers should treat
+        None as "fall back to whatever default base branch they already use."
+        This asymmetry is deliberate: detect_pr() is used when posting,
+        where "no PR" is genuinely actionable; base-branch detection is a
+        best-effort enhancement that must silently degrade.
+        """
+        try:
+            await self.validate_installed()
+        except OSError:
+            return None
+
+        try:
+            async with asyncio.timeout(30):
+                result = await run_command(["gh", "pr", "view", "--json", "baseRefName"])
+        except Exception:
+            return None
+
+        if not result.success:
+            return None
+
+        try:
+            data: dict[str, object] = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+
+        base_ref = data.get("baseRefName")
+        return cast(str, base_ref) if isinstance(base_ref, str) else None
+
     async def post_review(self, pr_number: int, report: ReviewResult) -> None:
         """Post a review with inline comments on a GitHub PR.
 
