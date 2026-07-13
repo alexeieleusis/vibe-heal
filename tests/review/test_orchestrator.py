@@ -137,6 +137,72 @@ class TestReviewOrchestratorInit:
         assert orchestrator.github_client is not None
 
 
+class TestResolveBaseBranch:
+    """Tests for ReviewOrchestrator._resolve_base_branch()."""
+
+    @pytest.fixture
+    def orchestrator(self, config: VibeHealConfig):
+        """Create ReviewOrchestrator with mocked git dependencies."""
+        from vibe_heal.review.orchestrator import ReviewOrchestrator
+
+        mock_client = AsyncMock()
+        mock_analyzer = MagicMock()
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
+
+    @pytest.mark.asyncio
+    async def test_explicit_base_branch_skips_detection(self, orchestrator) -> None:
+        """An explicit base_branch is returned as-is; gh is never called."""
+        with patch.object(
+            orchestrator.github_client,
+            "detect_pr_base_branch",
+            new_callable=AsyncMock,
+        ) as mock_detect:
+            result = await orchestrator._resolve_base_branch("origin/develop", verbose=False)
+
+        assert result == "origin/develop"
+        mock_detect.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_detects_when_omitted(self, orchestrator) -> None:
+        """When base_branch is None, the detected PR base is used with an origin/ prefix."""
+        with patch.object(
+            orchestrator.github_client,
+            "detect_pr_base_branch",
+            new_callable=AsyncMock,
+            return_value="feature/lower-in-stack",
+        ):
+            result = await orchestrator._resolve_base_branch(None, verbose=False)
+
+        assert result == "origin/feature/lower-in-stack"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_default_when_no_pr_found(self, orchestrator) -> None:
+        """When detection returns None (no PR / gh unavailable), fall back to origin/main."""
+        with patch.object(
+            orchestrator.github_client,
+            "detect_pr_base_branch",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await orchestrator._resolve_base_branch(None, verbose=False)
+
+        assert result == "origin/main"
+
+    @pytest.mark.asyncio
+    async def test_detected_main_resolves_like_fallback(self, orchestrator) -> None:
+        """A direct (non-stacked) PR targeting main resolves to the same value as the fallback."""
+        with patch.object(
+            orchestrator.github_client,
+            "detect_pr_base_branch",
+            new_callable=AsyncMock,
+            return_value="main",
+        ):
+            result = await orchestrator._resolve_base_branch(None, verbose=False)
+
+        assert result == "origin/main"
+
+
 class TestRunAnalysis:
     """Tests for ReviewOrchestrator.run_analysis()."""
 
