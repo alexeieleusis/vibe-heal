@@ -107,8 +107,11 @@ class GitHubReviewClient:
             return None
 
         try:
-            data: dict[str, object] = json.loads(result.stdout)
+            data = json.loads(result.stdout)
         except json.JSONDecodeError:
+            return None
+
+        if not isinstance(data, dict):
             return None
 
         base_ref = data.get("baseRefName")

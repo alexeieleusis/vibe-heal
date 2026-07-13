@@ -191,6 +191,21 @@ class TestDetectPrBaseBranch:
         result = await client.detect_pr_base_branch()
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_returns_none_when_json_is_not_an_object(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh returns valid but non-object JSON."""
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=True, stdout="null")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
 
 class TestPostReview:
     """Tests for post_review."""
