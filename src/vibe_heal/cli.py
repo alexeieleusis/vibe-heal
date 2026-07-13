@@ -26,7 +26,7 @@ from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, bold_cyan, console, cyan, dim, error, info, success, warn
 from vibe_heal.review import NoOpenPrError, ReviewOrchestrator
 from vibe_heal.review.models import ReviewIssue
-from vibe_heal.review.orchestrator import BaselineScanResult, ReviewAnalysisResult
+from vibe_heal.review.orchestrator import DEFAULT_BASE_BRANCH, BaselineScanResult, ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
 
@@ -35,9 +35,6 @@ app = typer.Typer(
     help="AI-powered SonarQube issue remediation tool\n\nGitHub: https://github.com/alexeieleusis/vibe-heal",
     add_completion=False,
 )
-
-# Default values
-DEFAULT_BASE_BRANCH = "origin/main"
 
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"

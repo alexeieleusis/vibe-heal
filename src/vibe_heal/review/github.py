@@ -7,7 +7,7 @@ import re
 from typing import Any, cast
 from urllib.parse import urlparse
 
-from vibe_heal.ai_tools.utils import run_command
+from vibe_heal.ai_tools.utils import CommandResult, run_command
 from vibe_heal.output import warn
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
 from vibe_heal.review.reporter import format_coverage_table
@@ -49,6 +49,11 @@ class GitHubReviewClient:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg)
 
+    async def _view_pr_field(self, field: str) -> CommandResult:
+        """Run `gh pr view --json <field>` for the current branch's PR."""
+        async with asyncio.timeout(30):
+            return await run_command(["gh", "pr", "view", "--json", field])
+
     async def detect_pr(self, pr_number: int | None = None) -> int:
         """Get the PR number for review posting.
 
@@ -67,10 +72,7 @@ class GitHubReviewClient:
             return pr_number
         await self.validate_installed()
 
-        async with asyncio.timeout(30):
-            result = await run_command(
-                ["gh", "pr", "view", "--json", "number"],
-            )
+        result = await self._view_pr_field("number")
         if not result.success:
             stderr = result.stderr.strip()
             if "no pull requests found" in stderr.lower():
@@ -93,13 +95,7 @@ class GitHubReviewClient:
         best-effort enhancement that must silently degrade.
         """
         try:
-            await self.validate_installed()
-        except OSError:
-            return None
-
-        try:
-            async with asyncio.timeout(30):
-                result = await run_command(["gh", "pr", "view", "--json", "baseRefName"])
+            result = await self._view_pr_field("baseRefName")
         except Exception:
             return None
 

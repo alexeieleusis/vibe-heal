@@ -40,9 +40,6 @@ from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetad
 
 logger = logging.getLogger(__name__)
 
-# Intentionally separate from cli.py's DEFAULT_BASE_BRANCH: this one is the
-# review command's own fallback when PR base-branch auto-detection finds
-# nothing, and is not shared with cleanup/dedupe-branch.
 DEFAULT_BASE_BRANCH = "origin/main"
 
 
@@ -140,7 +137,8 @@ class ReviewOrchestrator:
             return DEFAULT_BASE_BRANCH
 
         resolved = f"origin/{detected}"
-        dim(f"Auto-detected PR base branch: {resolved}")
+        if verbose:
+            dim(f"Auto-detected PR base branch: {resolved}")
         return resolved
 
     async def run_analysis(
