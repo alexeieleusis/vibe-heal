@@ -636,7 +636,7 @@ def _display_review_results(result: ReviewAnalysisResult) -> None:
 
 async def _run_review(
     config: VibeHealConfig,
-    base_branch: str,
+    base_branch: str | None,
     file_patterns: list[str] | None,
     report_file: Path | None,
     verbose: bool,
@@ -646,7 +646,7 @@ async def _run_review(
 
     Args:
         config: Configuration object.
-        base_branch: Base branch to compare against.
+        base_branch: Base branch to compare against. None auto-detects via the PR's actual base branch.
         file_patterns: Optional file patterns to filter.
         report_file: Optional path override for the report; None uses the default.
         verbose: Enable verbose output.
@@ -840,11 +840,15 @@ def review(
         "--pr",
         help="GitHub PR number (override auto-detection)",
     ),
-    base_branch: str = typer.Option(
-        DEFAULT_BASE_BRANCH,
+    base_branch: str | None = typer.Option(
+        None,
         "--base-branch",
         "-b",
-        help=BASE_BRANCH_HELP,
+        help=(
+            "Base branch to compare against. If omitted, auto-detects the "
+            "current PR's actual base branch via gh, falling back to "
+            "origin/main when no open PR is found."
+        ),
     ),
     file_patterns: list[str] | None = typer.Option(
         None,

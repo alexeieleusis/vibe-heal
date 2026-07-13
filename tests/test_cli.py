@@ -729,7 +729,7 @@ class TestReviewCommand:
         assert "Total issues: 3" in result.stdout
         mock_orchestrator.run_analysis.assert_called_once()
         call_kwargs = mock_orchestrator.run_analysis.call_args.kwargs
-        assert call_kwargs["base_branch"] == "origin/main"
+        assert call_kwargs["base_branch"] is None
         assert call_kwargs["file_patterns"] is None
 
     @patch("vibe_heal.cli.SonarQubeClient")
