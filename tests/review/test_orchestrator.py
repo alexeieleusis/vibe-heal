@@ -267,6 +267,36 @@ class TestRunAnalysis:
         mock_run.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_base_branch_none_resolves_via_github_client(
+        self,
+        orchestrator,
+        tmp_path: Path,
+    ) -> None:
+        """When base_branch is None, run_analysis resolves it via GitHubReviewClient
+        before doing anything else, and the resolved value ends up on the result."""
+        with (
+            patch.object(
+                orchestrator.branch_analyzer,
+                "get_modified_files",
+                return_value=[],
+            ),
+            patch.object(
+                orchestrator.github_client,
+                "detect_pr_base_branch",
+                new_callable=AsyncMock,
+                return_value="feature/lower-in-stack",
+            ) as mock_detect,
+        ):
+            result = await orchestrator.run_analysis(
+                base_branch=None,
+                report_file=tmp_path / "review.json",
+            )
+
+        mock_detect.assert_called_once()
+        assert result.base_branch == "origin/feature/lower-in-stack"
+        assert result.success is True
+
+    @pytest.mark.asyncio
     async def test_analysis_failure_returns_error(
         self,
         orchestrator,

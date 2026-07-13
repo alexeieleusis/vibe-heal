@@ -70,7 +70,7 @@ For the temporary SonarQube project created during `review`, vibe-heal patches `
 ### Analyze changed lines
 
 ```bash
-# Review all modified files vs origin/main
+# Auto-detects the current PR's base branch via gh (falls back to origin/main if no open PR is found)
 vibe-heal review
 
 # Compare against a different base branch
@@ -115,7 +115,7 @@ vibe-heal review --post --report-file /tmp/my-review.json
 
 | Flag | Default | Description |
 |---|---|---|
-| `--base-branch` / `-b` | `origin/main` | Base branch to compare against |
+| `--base-branch` / `-b` | auto-detect via `gh`, else `origin/main` | Base branch to compare against. When omitted, auto-detects the current branch's open PR base via `gh pr view` and diffs against `origin/<that>`; falls back to `origin/main` if no open PR is found (or `gh` is unavailable). Passing an explicit value skips detection. |
 | `--pattern` / `-p` | (all files) | Glob pattern to filter files (repeatable) |
 | `--report-file` | auto | Override report output path |
 | `--env-file` | `.env.vibeheal` | Path to custom config file |
@@ -125,6 +125,14 @@ vibe-heal review --post --report-file /tmp/my-review.json
 | `--dry-run` | off | With `--post`: preview comments without API calls |
 | `--pr` | auto | With `--post`: explicit GitHub PR number |
 | `--baseline` | off | Scan the real SonarQube project directly to refresh its baseline (no diff, no report). Ignores `--pr`, `--pattern`, `--coverage`, and `--base-branch` if combined. |
+
+### Stacked PRs
+
+If your branch's PR targets another branch instead of `main` (a "stacked" PR), `review` diffs against that real base automatically — no flag needed. This avoids re-reporting issues that belong to the branch below yours in the stack, which would otherwise show up twice (once on each branch's review) and increase the odds of merge conflicts as both branches "fix" the same lines independently.
+
+This requires an open PR (so `gh pr view` can report its base) and a local `origin/<base>` remote-tracking ref — if the base branch hasn't been fetched locally, the diff will fail with a "branch not found" error rather than silently falling back to `origin/main`. Run `git fetch origin <base-branch>` first if you hit this.
+
+Pass `--base-branch` explicitly to skip auto-detection entirely (e.g. in CI, or before a PR exists).
 
 ## How It Works
 
