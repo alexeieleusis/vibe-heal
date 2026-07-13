@@ -134,12 +134,25 @@ class TestDetectPrBaseBranch:
         assert result == "main"
 
     @pytest.mark.asyncio
+    async def test_returns_none_when_gh_pr_view_fails(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh pr view fails."""
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=False),
+        )
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_gh_not_installed(self, mocker) -> None:
         """detect_pr_base_branch returns None (never raises) when gh is missing."""
         mocker.patch(
             "vibe_heal.review.github.run_command",
             new_callable=AsyncMock,
-            return_value=mocker.MagicMock(success=False),
+            side_effect=FileNotFoundError("gh not found"),
         )
 
         client = GitHubReviewClient()
