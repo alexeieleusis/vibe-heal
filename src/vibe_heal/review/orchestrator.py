@@ -40,6 +40,8 @@ from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetad
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BASE_BRANCH = "origin/main"
+
 
 class ReviewAnalysisResult(BaseModel):
     """Result of a review analysis operation."""
@@ -114,9 +116,34 @@ class ReviewOrchestrator:
         self.github_client = GitHubReviewClient()
         self._rule_cache: dict[str, SonarQubeRule | None] = {}
 
+    async def _resolve_base_branch(self, base_branch: str | None, verbose: bool) -> str:
+        """Resolve the base branch to diff against.
+
+        Returns base_branch unchanged if the caller passed one explicitly
+        (no gh call is made in that case — explicit intent always wins).
+        Otherwise, attempts to auto-detect the real PR base via
+        GitHubReviewClient.detect_pr_base_branch(), prefixed with "origin/"
+        to match this codebase's remote-ref convention. Falls back to
+        DEFAULT_BASE_BRANCH when no open PR is found (or gh is unavailable),
+        preserving the pre-existing behavior for that case.
+        """
+        if base_branch is not None:
+            return base_branch
+
+        detected = await self.github_client.detect_pr_base_branch()
+        if detected is None:
+            if verbose:
+                dim(f"No open PR found; using default base branch: {DEFAULT_BASE_BRANCH}")
+            return DEFAULT_BASE_BRANCH
+
+        resolved = f"origin/{detected}"
+        if verbose:
+            dim(f"Auto-detected PR base branch: {resolved}")
+        return resolved
+
     async def run_analysis(
         self,
-        base_branch: str = "origin/main",
+        base_branch: str | None = None,
         file_patterns: list[str] | None = None,
         report_file: Path | None = None,
         verbose: bool = False,
@@ -135,7 +162,10 @@ class ReviewOrchestrator:
         8. Delete temp project in finally block
 
         Args:
-            base_branch: Base branch to compare against.
+            base_branch: Base branch to compare against. When None (the
+                default), auto-detects the current branch's open PR base via
+                gh and diffs against that; falls back to "origin/main" if no
+                PR is found. Passing an explicit value skips detection.
             file_patterns: Optional list of glob patterns to filter files.
             report_file: Optional path to write the report JSON to.
                 If provided, the parent directory is used for report output.
@@ -149,6 +179,7 @@ class ReviewOrchestrator:
             ReviewAnalysisResult with success status and review data.
         """
         temp_project: TempProjectMetadata | None = None
+        base_branch = await self._resolve_base_branch(base_branch, verbose)
         branch = self.branch_analyzer.get_current_branch()
         if report_file is None:
             report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"

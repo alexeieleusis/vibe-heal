@@ -7,7 +7,7 @@ import re
 from typing import Any, cast
 from urllib.parse import urlparse
 
-from vibe_heal.ai_tools.utils import run_command
+from vibe_heal.ai_tools.utils import CommandResult, run_command
 from vibe_heal.output import warn
 from vibe_heal.review.models import FileReview, ReviewIssue, ReviewResult
 from vibe_heal.review.reporter import format_coverage_table
@@ -49,6 +49,11 @@ class GitHubReviewClient:
             msg = "gh CLI is not installed or not in PATH. Install it from https://cli.github.com/"
             raise OSError(msg)
 
+    async def _view_pr_field(self, field: str) -> CommandResult:
+        """Run `gh pr view --json <field>` for the current branch's PR."""
+        async with asyncio.timeout(30):
+            return await run_command(["gh", "pr", "view", "--json", field])
+
     async def detect_pr(self, pr_number: int | None = None) -> int:
         """Get the PR number for review posting.
 
@@ -67,10 +72,7 @@ class GitHubReviewClient:
             return pr_number
         await self.validate_installed()
 
-        async with asyncio.timeout(30):
-            result = await run_command(
-                ["gh", "pr", "view", "--json", "number"],
-            )
+        result = await self._view_pr_field("number")
         if not result.success:
             stderr = result.stderr.strip()
             if "no pull requests found" in stderr.lower():
@@ -80,6 +82,36 @@ class GitHubReviewClient:
 
         data: dict[str, object] = json.loads(result.stdout)
         return cast(int, data["number"])
+
+    async def detect_pr_base_branch(self) -> str | None:
+        """Detect the base branch of the open PR for the current branch.
+
+        Returns None when gh is not installed, the call fails, there is no
+        open PR for the current branch, or the response is malformed.
+        Unlike detect_pr(), this method never raises — callers should treat
+        None as "fall back to whatever default base branch they already use."
+        This asymmetry is deliberate: detect_pr() is used when posting,
+        where "no PR" is genuinely actionable; base-branch detection is a
+        best-effort enhancement that must silently degrade.
+        """
+        try:
+            result = await self._view_pr_field("baseRefName")
+        except Exception:
+            return None
+
+        if not result.success:
+            return None
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        base_ref = data.get("baseRefName")
+        return cast(str, base_ref) if isinstance(base_ref, str) else None
 
     async def post_review(self, pr_number: int, report: ReviewResult) -> None:
         """Post a review with inline comments on a GitHub PR.

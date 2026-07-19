@@ -98,6 +98,128 @@ class TestDetectPr:
             await client.detect_pr()
 
 
+class TestDetectPrBaseBranch:
+    """Tests for detect_pr_base_branch."""
+
+    @pytest.mark.asyncio
+    async def test_returns_base_ref_when_gh_succeeds(self, mocker) -> None:
+        """detect_pr_base_branch returns the baseRefName from gh pr view."""
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(
+                success=True,
+                stdout='{"baseRefName": "feature/lower-in-stack"}',
+            ),
+        )
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result == "feature/lower-in-stack"
+
+    @pytest.mark.asyncio
+    async def test_returns_main_when_pr_targets_main(self, mocker) -> None:
+        """Non-stacked PRs (base is main) resolve the same as any other base."""
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(
+                success=True,
+                stdout='{"baseRefName": "main"}',
+            ),
+        )
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result == "main"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_gh_pr_view_fails(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh pr view fails."""
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            return_value=mocker.MagicMock(success=False),
+        )
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_gh_not_installed(self, mocker) -> None:
+        """detect_pr_base_branch returns None (never raises) when gh is missing."""
+        mocker.patch(
+            "vibe_heal.review.github.run_command",
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError("gh not found"),
+        )
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_open_pr(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh pr view fails (no PR)."""
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=False, stderr="no pull requests found")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_malformed_json(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh returns unparseable JSON."""
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=True, stdout="not json")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_base_ref_name_missing(self, mocker) -> None:
+        """detect_pr_base_branch returns None when the JSON has no baseRefName key."""
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=True, stdout="{}")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_json_is_not_an_object(self, mocker) -> None:
+        """detect_pr_base_branch returns None when gh returns valid but non-object JSON."""
+
+        async def _run(cmd, **kwargs):
+            if "--version" in cmd:
+                return mocker.MagicMock(success=True, stdout="gh version 2.52.0")
+            return mocker.MagicMock(success=True, stdout="null")
+
+        mocker.patch("vibe_heal.review.github.run_command", side_effect=_run)
+
+        client = GitHubReviewClient()
+        result = await client.detect_pr_base_branch()
+        assert result is None
+
+
 class TestPostReview:
     """Tests for post_review."""
 
