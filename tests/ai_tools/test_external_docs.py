@@ -14,6 +14,8 @@ from vibe_heal.ai_tools.external_docs import (
     extract_urls,
     fetch_external_rule_docs,
     fetch_url_content,
+    fetch_vibe_types_knowledge_docs,
+    is_vibe_types_doc_url,
 )
 
 
@@ -302,3 +304,53 @@ class TestFetchExternalRuleDocs:
             docs = await fetch_external_rule_docs(f"See {url} for details.")
 
         assert docs == ["# local doc content"]
+
+
+class TestIsVibeTypesDocUrl:
+    def test_main_raw_form(self) -> None:
+        assert is_vibe_types_doc_url("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md")
+
+    def test_refs_heads_main_raw_form(self) -> None:
+        assert is_vibe_types_doc_url("https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/T01.md")
+
+    def test_blob_form(self) -> None:
+        assert is_vibe_types_doc_url("https://github.com/jpablo/vibe-types/blob/main/T01.md")
+
+    def test_sha_pinned_form(self) -> None:
+        assert is_vibe_types_doc_url(
+            "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        )
+
+    def test_unrelated_url_is_false(self) -> None:
+        assert not is_vibe_types_doc_url("https://example.com/rule.md")
+
+
+class TestFetchVibeTypesKnowledgeDocs:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetches_only_vibe_types_url_from_mixed_message(self) -> None:
+        respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md").mock(
+            return_value=httpx.Response(200, text="# T01 knowledge")
+        )
+        message = (
+            "See https://example.com/unrelated.md and "
+            "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md for guidance."
+        )
+        docs = await fetch_vibe_types_knowledge_docs(message)
+        assert docs == ["# T01 knowledge"]
+
+    @pytest.mark.asyncio
+    async def test_no_vibe_types_url_returns_empty_list(self) -> None:
+        docs = await fetch_vibe_types_knowledge_docs("Fix this. See https://example.com/rule.md")
+        assert docs == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_skips_url_that_fails_to_fetch(self) -> None:
+        respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/missing.md").mock(
+            return_value=httpx.Response(404)
+        )
+        docs = await fetch_vibe_types_knowledge_docs(
+            "See https://raw.githubusercontent.com/jpablo/vibe-types/main/missing.md"
+        )
+        assert docs == []

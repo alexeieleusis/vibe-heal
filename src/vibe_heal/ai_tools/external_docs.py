@@ -152,3 +152,19 @@ async def fetch_external_rule_docs(message: str) -> list[str]:
         if content is not None:
             docs.append(content)
     return docs
+
+
+def is_vibe_types_doc_url(url: str) -> bool:
+    """Return True if url points at a vibe-types knowledge file (blob/main/SHA-pinned raw form)."""
+    return _extract_rel_path(url) is not None or bool(_SHA_PINNED_RAW_RE.match(url))
+
+
+async def fetch_vibe_types_knowledge_docs(message: str) -> list[str]:
+    """Extract vibe-types knowledge-file URLs from an issue message and return fetched content for each."""
+    urls = [u for u in extract_urls(message) if is_vibe_types_doc_url(u)]
+    docs = []
+    for url in urls:
+        content = await fetch_url_content(url)
+        if content is not None:
+            docs.append(content)
+    return docs
