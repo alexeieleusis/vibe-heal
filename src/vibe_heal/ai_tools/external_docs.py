@@ -123,13 +123,14 @@ async def fetch_url_content(url: str) -> str | None:
     if fetch_url.startswith(_BLOB_PREFIX):
         fetch_url = _RAW_PREFIXES[0] + fetch_url[len(_BLOB_PREFIX) :]
 
-    content = None
-    if _is_safe_url(fetch_url):
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            content = await _stream_capped(fetch_url, client)
-    else:
+    if not _is_safe_url(fetch_url):
         logger.debug("Blocked SSRF-risk URL: %s", fetch_url)
+        return None
 
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        content = await _stream_capped(fetch_url, client)
+
+    # Only retry on an actual fetch failure, one level deep: "main" never matches the SHA regex.
     if content is None:
         sha_match = _SHA_PINNED_RAW_RE.match(url)
         if sha_match:
