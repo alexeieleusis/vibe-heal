@@ -354,3 +354,17 @@ class TestFetchVibeTypesKnowledgeDocs:
             "See https://raw.githubusercontent.com/jpablo/vibe-types/main/missing.md"
         )
         assert docs == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_duplicate_url_is_fetched_once(self) -> None:
+        route = respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md").mock(
+            return_value=httpx.Response(200, text="# T01 knowledge")
+        )
+        message = (
+            "See https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md and again "
+            "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md for guidance."
+        )
+        docs = await fetch_vibe_types_knowledge_docs(message)
+        assert docs == ["# T01 knowledge"]
+        assert route.call_count == 1

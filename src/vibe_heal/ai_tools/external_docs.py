@@ -141,17 +141,19 @@ async def fetch_url_content(url: str) -> str | None:
     return content
 
 
-async def fetch_external_rule_docs(message: str) -> list[str]:
-    """Extract URLs from an issue message and return fetched content for each."""
-    urls = extract_urls(message)
-    if not urls:
-        return []
+async def _fetch_docs_for_urls(urls: list[str]) -> list[str]:
+    """Fetch each url's content, collecting non-None results in order."""
     docs = []
     for url in urls:
         content = await fetch_url_content(url)
         if content is not None:
             docs.append(content)
     return docs
+
+
+async def fetch_external_rule_docs(message: str) -> list[str]:
+    """Extract URLs from an issue message and return fetched content for each."""
+    return await _fetch_docs_for_urls(extract_urls(message))
 
 
 def is_vibe_types_doc_url(url: str) -> bool:
@@ -161,10 +163,5 @@ def is_vibe_types_doc_url(url: str) -> bool:
 
 async def fetch_vibe_types_knowledge_docs(message: str) -> list[str]:
     """Extract vibe-types knowledge-file URLs from an issue message and return fetched content for each."""
-    urls = [u for u in extract_urls(message) if is_vibe_types_doc_url(u)]
-    docs = []
-    for url in urls:
-        content = await fetch_url_content(url)
-        if content is not None:
-            docs.append(content)
-    return docs
+    urls = list(dict.fromkeys(u for u in extract_urls(message) if is_vibe_types_doc_url(u)))
+    return await _fetch_docs_for_urls(urls)
