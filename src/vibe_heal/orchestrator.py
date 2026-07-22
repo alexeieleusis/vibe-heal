@@ -185,6 +185,10 @@ class VibeHealOrchestrator:
     ) -> tuple[SonarQubeRule | None, list[str] | None]:
         """Fetch rule details or fallback external docs for an issue.
 
+        On success, also probes the issue message for vibe-types knowledge-file URLs and
+        includes any found docs alongside the rule. A failure fetching those knowledge docs
+        never affects the returned rule.
+
         Args:
             issue: Issue to fetch rule details for
 
@@ -205,10 +209,11 @@ class VibeHealOrchestrator:
             logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
             return None, None
 
+        # Independent of the rule lookup above: a docs-fetch failure must never discard the already-fetched rule.
         try:
             knowledge_docs = await fetch_vibe_types_knowledge_docs(issue.message)
         except Exception as e:
-            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.key}: {e}")
+            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.rule}: {e}")
             knowledge_docs = None
         return rule, knowledge_docs if knowledge_docs else None
 
