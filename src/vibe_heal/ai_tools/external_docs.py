@@ -42,6 +42,7 @@ _RAW_PREFIXES = (
     "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/",
     "https://raw.githubusercontent.com/jpablo/vibe-types/main/",
 )
+_SHA_PINNED_RAW_RE = re.compile(r"^https://raw\.githubusercontent\.com/jpablo/vibe-types/([0-9a-fA-F]{7,40})/(.+)$")
 
 
 def _extract_rel_path(url: str) -> str | None:
@@ -116,14 +117,27 @@ async def fetch_url_content(url: str) -> str | None:
                 logger.debug("Failed to read local vibe-types file %s: %s", local, e)
         else:
             logger.debug("Local vibe-types path not found: %s (submodule not initialized?)", local)
+
     # blob URLs return HTML over HTTP — always convert to raw before fetching
-    if url.startswith(_BLOB_PREFIX):
-        url = _RAW_PREFIXES[0] + url[len(_BLOB_PREFIX) :]
-    if not _is_safe_url(url):
-        logger.debug("Blocked SSRF-risk URL: %s", url)
-        return None
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        return await _stream_capped(url, client)
+    fetch_url = url
+    if fetch_url.startswith(_BLOB_PREFIX):
+        fetch_url = _RAW_PREFIXES[0] + fetch_url[len(_BLOB_PREFIX) :]
+
+    content = None
+    if _is_safe_url(fetch_url):
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            content = await _stream_capped(fetch_url, client)
+    else:
+        logger.debug("Blocked SSRF-risk URL: %s", fetch_url)
+
+    if content is None:
+        sha_match = _SHA_PINNED_RAW_RE.match(url)
+        if sha_match:
+            fallback_url = _RAW_PREFIXES[1] + sha_match.group(2)
+            logger.debug("SHA-pinned fetch failed for %s; falling back to %s", url, fallback_url)
+            return await fetch_url_content(fallback_url)
+
+    return content
 
 
 async def fetch_external_rule_docs(message: str) -> list[str]:

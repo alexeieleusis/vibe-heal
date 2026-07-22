@@ -207,6 +207,64 @@ class TestFetchUrlContent:
         assert content is not None
         assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
 
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_fetches_directly_without_fallback(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(200, text="# T01 pinned content"))
+        content = await fetch_url_content(sha_url)
+        assert content == "# T01 pinned content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_main_on_404(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
+        content = await fetch_url_content(sha_url)
+        assert content == "# T01 main content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_main_on_network_error(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
+        content = await fetch_url_content(sha_url)
+        assert content == "# T01 main content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_and_main_both_fail_returns_none(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        respx.get(main_url).mock(return_value=httpx.Response(404))
+        content = await fetch_url_content(sha_url)
+        assert content is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_local_submodule_when_main_fetch_not_needed(
+        self, tmp_path: Path
+    ) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        local_file = tmp_path / "T01.md"
+        local_file.write_text("# T01 local content")
+
+        def fake_local_path(url: str) -> Path | None:
+            if url == "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md":
+                return local_file
+            return None
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", side_effect=fake_local_path):
+            content = await fetch_url_content(sha_url)
+
+        assert content == "# T01 local content"
+
 
 class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
