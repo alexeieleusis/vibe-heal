@@ -159,9 +159,16 @@ async def _fetch_docs_for_urls(urls: list[str]) -> list[str]:
     return docs
 
 
-async def fetch_external_rule_docs(message: str) -> list[str]:
-    """Extract URLs from an issue message and return fetched content for each."""
-    return await _fetch_docs_for_urls(extract_urls(message))
+async def fetch_external_rule_docs(message: str, *, exclude_vibe_types: bool = False) -> list[str]:
+    """Extract URLs from an issue message and return fetched content for each.
+
+    When exclude_vibe_types is True, vibe-types knowledge-file URLs are skipped, since the
+    caller already fetched them separately via fetch_vibe_types_knowledge_docs.
+    """
+    urls = extract_urls(message)
+    if exclude_vibe_types:
+        urls = [u for u in urls if not is_vibe_types_doc_url(u)]
+    return await _fetch_docs_for_urls(urls)
 
 
 def is_vibe_types_doc_url(url: str) -> bool:

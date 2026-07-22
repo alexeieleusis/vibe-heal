@@ -335,6 +335,53 @@ class TestOrchestratorFixFile:
         assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# External rule doc"]
 
     @pytest.mark.asyncio
+    async def test_fix_file_rule_not_found_reuses_vibe_types_docs(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """When the rule isn't found but the concurrent vibe-types knowledge-doc fetch already
+        succeeded, those docs are reused and merged with non-vibe-types docs instead of being
+        discarded and re-fetched from scratch."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [sample_issue]
+        mock_client.get_rule_details.side_effect = SonarQubeRuleNotFoundError("rule not found")
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mocker.patch(
+            "vibe_heal.orchestrator.fetch_vibe_types_knowledge_docs",
+            return_value=["# T01 knowledge"],
+        )
+        mock_fetch_external = mocker.patch(
+            "vibe_heal.orchestrator.fetch_external_rule_docs",
+            return_value=["# Other doc"],
+        )
+
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        assert summary.total_issues == 1
+        assert summary.fixed == 1
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# T01 knowledge", "# Other doc"]
+        mock_fetch_external.assert_called_once_with(sample_issue.message, exclude_vibe_types=True)
+
+    @pytest.mark.asyncio
     async def test_fix_file_rule_found_fetches_vibe_types_knowledge_docs(
         self,
         mock_config: VibeHealConfig,

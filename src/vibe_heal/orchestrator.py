@@ -209,7 +209,11 @@ class VibeHealOrchestrator:
 
         if isinstance(rule_outcome, SonarQubeRuleNotFoundError):
             logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
-            docs = await fetch_external_rule_docs(issue.message)
+            if isinstance(knowledge_outcome, BaseException):
+                docs = await fetch_external_rule_docs(issue.message)
+            else:
+                other_docs = await fetch_external_rule_docs(issue.message, exclude_vibe_types=True)
+                docs = [*knowledge_outcome, *other_docs]
             return None, docs if docs else None
         if isinstance(rule_outcome, BaseException):
             logger.warning(f"Failed to fetch rule details for {issue.rule}: {rule_outcome}")
