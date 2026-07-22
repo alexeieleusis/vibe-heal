@@ -7,7 +7,7 @@ from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
 from vibe_heal.ai_tools.base import AITool, AIToolType
-from vibe_heal.ai_tools.external_docs import fetch_external_rule_docs
+from vibe_heal.ai_tools.external_docs import fetch_external_rule_docs, fetch_vibe_types_knowledge_docs
 from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
@@ -197,7 +197,6 @@ class VibeHealOrchestrator:
         try:
             async with SonarQubeClient(self.config) as sonar_client:
                 rule = await sonar_client.get_rule_details(issue.rule)
-                return rule, None
         except SonarQubeRuleNotFoundError:
             logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
             docs = await fetch_external_rule_docs(issue.message)
@@ -205,6 +204,13 @@ class VibeHealOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
             return None, None
+
+        try:
+            knowledge_docs = await fetch_vibe_types_knowledge_docs(issue.message)
+        except Exception as e:
+            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.key}: {e}")
+            knowledge_docs = None
+        return rule, knowledge_docs if knowledge_docs else None
 
     def _extract_code_context(
         self,
