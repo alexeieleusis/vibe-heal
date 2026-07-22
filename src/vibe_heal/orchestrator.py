@@ -1,5 +1,6 @@
 """Main workflow orchestration for vibe-heal."""
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
 
 from vibe_heal.ai_tools import AIToolFactory
 from vibe_heal.ai_tools.base import AITool, AIToolType
-from vibe_heal.ai_tools.external_docs import fetch_external_rule_docs
+from vibe_heal.ai_tools.external_docs import fetch_external_rule_docs, fetch_vibe_types_knowledge_docs
 from vibe_heal.ai_tools.models import FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
@@ -185,26 +186,44 @@ class VibeHealOrchestrator:
     ) -> tuple[SonarQubeRule | None, list[str] | None]:
         """Fetch rule details or fallback external docs for an issue.
 
+        Runs the vibe-types knowledge-doc lookup concurrently with the rule lookup, since the
+        two are independent. On success those docs are attached alongside the rule; a failure
+        fetching them never discards an already-fetched rule.
+
         Args:
             issue: Issue to fetch rule details for
 
         Returns:
-            Tuple of (rule, external_docs)
+            Tuple of (rule, docs)
         """
         if not self.config.include_rule_description:
             return None, None
 
-        try:
+        async def _get_rule() -> SonarQubeRule:
             async with SonarQubeClient(self.config) as sonar_client:
-                rule = await sonar_client.get_rule_details(issue.rule)
-                return rule, None
-        except SonarQubeRuleNotFoundError:
+                return await sonar_client.get_rule_details(issue.rule)
+
+        rule_outcome, knowledge_outcome = await asyncio.gather(
+            _get_rule(), fetch_vibe_types_knowledge_docs(issue.message), return_exceptions=True
+        )
+
+        if isinstance(rule_outcome, SonarQubeRuleNotFoundError):
             logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
-            docs = await fetch_external_rule_docs(issue.message)
+            if isinstance(knowledge_outcome, BaseException):
+                docs = await fetch_external_rule_docs(issue.message)
+            else:
+                other_docs = await fetch_external_rule_docs(issue.message, exclude_vibe_types=True)
+                docs = [*knowledge_outcome, *other_docs]
             return None, docs if docs else None
-        except Exception as e:
-            logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
+        if isinstance(rule_outcome, BaseException):
+            logger.warning(f"Failed to fetch rule details for {issue.rule}: {rule_outcome}")
             return None, None
+
+        if isinstance(knowledge_outcome, BaseException):
+            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.rule}: {knowledge_outcome}")
+            return rule_outcome, None
+
+        return rule_outcome, knowledge_outcome if knowledge_outcome else None
 
     def _extract_code_context(
         self,

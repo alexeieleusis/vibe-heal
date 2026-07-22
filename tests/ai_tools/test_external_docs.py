@@ -14,6 +14,8 @@ from vibe_heal.ai_tools.external_docs import (
     extract_urls,
     fetch_external_rule_docs,
     fetch_url_content,
+    fetch_vibe_types_knowledge_docs,
+    is_vibe_types_doc_url,
 )
 
 
@@ -207,6 +209,67 @@ class TestFetchUrlContent:
         assert content is not None
         assert len(content.encode("utf-8")) <= _MAX_DOC_BYTES
 
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_fetches_directly_without_fallback(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(200, text="# T01 pinned content"))
+        content = await fetch_url_content(sha_url)
+        assert content == "# T01 pinned content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_main_on_404(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
+        assert content == "# T01 main content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_main_on_network_error(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
+        assert content == "# T01 main content"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_and_main_both_fail_returns_none(self) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        respx.get(main_url).mock(return_value=httpx.Response(404))
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
+        assert content is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_sha_pinned_url_falls_back_to_local_submodule_when_main_fetch_not_needed(
+        self, tmp_path: Path
+    ) -> None:
+        sha_url = "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        respx.get(sha_url).mock(return_value=httpx.Response(404))
+        local_file = tmp_path / "T01.md"
+        local_file.write_text("# T01 local content")
+
+        def fake_local_path(url: str) -> Path | None:
+            if url == "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md":
+                return local_file
+            return None
+
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", side_effect=fake_local_path):
+            content = await fetch_url_content(sha_url)
+
+        assert content == "# T01 local content"
+
 
 class TestFetchExternalRuleDocs:
     @pytest.mark.asyncio
@@ -244,3 +307,67 @@ class TestFetchExternalRuleDocs:
             docs = await fetch_external_rule_docs(f"See {url} for details.")
 
         assert docs == ["# local doc content"]
+
+
+class TestIsVibeTypesDocUrl:
+    def test_main_raw_form(self) -> None:
+        assert is_vibe_types_doc_url("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md")
+
+    def test_refs_heads_main_raw_form(self) -> None:
+        assert is_vibe_types_doc_url("https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/T01.md")
+
+    def test_blob_form(self) -> None:
+        assert is_vibe_types_doc_url("https://github.com/jpablo/vibe-types/blob/main/T01.md")
+
+    def test_sha_pinned_form(self) -> None:
+        assert is_vibe_types_doc_url(
+            "https://raw.githubusercontent.com/jpablo/vibe-types/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/T01.md"
+        )
+
+    def test_unrelated_url_is_false(self) -> None:
+        assert not is_vibe_types_doc_url("https://example.com/rule.md")
+
+
+class TestFetchVibeTypesKnowledgeDocs:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetches_only_vibe_types_url_from_mixed_message(self) -> None:
+        respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md").mock(
+            return_value=httpx.Response(200, text="# T01 knowledge")
+        )
+        message = (
+            "See https://example.com/unrelated.md and "
+            "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md for guidance."
+        )
+        docs = await fetch_vibe_types_knowledge_docs(message)
+        assert docs == ["# T01 knowledge"]
+
+    @pytest.mark.asyncio
+    async def test_no_vibe_types_url_returns_empty_list(self) -> None:
+        docs = await fetch_vibe_types_knowledge_docs("Fix this. See https://example.com/rule.md")
+        assert docs == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_skips_url_that_fails_to_fetch(self) -> None:
+        respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/missing.md").mock(
+            return_value=httpx.Response(404)
+        )
+        docs = await fetch_vibe_types_knowledge_docs(
+            "See https://raw.githubusercontent.com/jpablo/vibe-types/main/missing.md"
+        )
+        assert docs == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_duplicate_url_is_fetched_once(self) -> None:
+        route = respx.get("https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md").mock(
+            return_value=httpx.Response(200, text="# T01 knowledge")
+        )
+        message = (
+            "See https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md and again "
+            "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md for guidance."
+        )
+        docs = await fetch_vibe_types_knowledge_docs(message)
+        assert docs == ["# T01 knowledge"]
+        assert route.call_count == 1

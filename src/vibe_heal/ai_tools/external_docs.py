@@ -42,6 +42,7 @@ _RAW_PREFIXES = (
     "https://raw.githubusercontent.com/jpablo/vibe-types/refs/heads/main/",
     "https://raw.githubusercontent.com/jpablo/vibe-types/main/",
 )
+_SHA_PINNED_RAW_RE = re.compile(r"^https://raw\.githubusercontent\.com/jpablo/vibe-types/([0-9a-fA-F]{7,40})/(.+)$")
 
 
 def _extract_rel_path(url: str) -> str | None:
@@ -104,8 +105,8 @@ async def _stream_capped(url: str, client: httpx.AsyncClient) -> str | None:
     return b"".join(chunks)[:_MAX_DOC_BYTES].decode("utf-8", errors="replace")
 
 
-async def fetch_url_content(url: str) -> str | None:
-    """Fetch the text content of a URL, returning None on any error or SSRF-blocked host."""
+async def _fetch_one(url: str) -> str | None:
+    """Fetch a single URL's content via the local submodule fast path or HTTP, no fallback."""
     local = _vibe_types_local_path(url)
     if local is not None:
         if local.exists():
@@ -116,24 +117,66 @@ async def fetch_url_content(url: str) -> str | None:
                 logger.debug("Failed to read local vibe-types file %s: %s", local, e)
         else:
             logger.debug("Local vibe-types path not found: %s (submodule not initialized?)", local)
+
     # blob URLs return HTML over HTTP — always convert to raw before fetching
-    if url.startswith(_BLOB_PREFIX):
-        url = _RAW_PREFIXES[0] + url[len(_BLOB_PREFIX) :]
-    if not _is_safe_url(url):
-        logger.debug("Blocked SSRF-risk URL: %s", url)
+    fetch_url = url
+    if fetch_url.startswith(_BLOB_PREFIX):
+        fetch_url = _RAW_PREFIXES[0] + fetch_url[len(_BLOB_PREFIX) :]
+
+    if not _is_safe_url(fetch_url):
+        logger.debug("Blocked SSRF-risk URL: %s", fetch_url)
         return None
+
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        return await _stream_capped(url, client)
+        return await _stream_capped(fetch_url, client)
 
 
-async def fetch_external_rule_docs(message: str) -> list[str]:
-    """Extract URLs from an issue message and return fetched content for each."""
-    urls = extract_urls(message)
-    if not urls:
-        return []
+async def fetch_url_content(url: str) -> str | None:
+    """Fetch the text content of a URL, returning None on any error or SSRF-blocked host.
+
+    SHA-pinned vibe-types raw URLs fall back to the "main" branch form if the pinned fetch fails.
+    """
+    candidates = [url]
+    sha_match = _SHA_PINNED_RAW_RE.match(url)
+    if sha_match:
+        candidates.append(_RAW_PREFIXES[1] + sha_match.group(2))
+
+    for candidate in candidates:
+        content = await _fetch_one(candidate)
+        if content is not None:
+            return content
+
+    return None
+
+
+async def _fetch_docs_for_urls(urls: list[str]) -> list[str]:
+    """Fetch each url's content, collecting non-None results in order."""
     docs = []
     for url in urls:
         content = await fetch_url_content(url)
         if content is not None:
             docs.append(content)
     return docs
+
+
+async def fetch_external_rule_docs(message: str, *, exclude_vibe_types: bool = False) -> list[str]:
+    """Extract URLs from an issue message and return fetched content for each.
+
+    When exclude_vibe_types is True, vibe-types knowledge-file URLs are skipped, since the
+    caller already fetched them separately via fetch_vibe_types_knowledge_docs.
+    """
+    urls = extract_urls(message)
+    if exclude_vibe_types:
+        urls = [u for u in urls if not is_vibe_types_doc_url(u)]
+    return await _fetch_docs_for_urls(urls)
+
+
+def is_vibe_types_doc_url(url: str) -> bool:
+    """Return True if url points at a vibe-types knowledge file (blob/main/SHA-pinned raw form)."""
+    return _extract_rel_path(url) is not None or bool(_SHA_PINNED_RAW_RE.match(url))
+
+
+async def fetch_vibe_types_knowledge_docs(message: str) -> list[str]:
+    """Extract vibe-types knowledge-file URLs from an issue message and return fetched content for each."""
+    urls = list(dict.fromkeys(u for u in extract_urls(message) if is_vibe_types_doc_url(u)))
+    return await _fetch_docs_for_urls(urls)

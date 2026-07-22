@@ -11,7 +11,7 @@ from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
-from vibe_heal.sonarqube.models import SonarQubeIssue
+from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 
 
 @pytest.fixture
@@ -333,3 +333,159 @@ class TestOrchestratorFixFile:
         assert summary.total_issues == 1
         assert summary.fixed == 1
         assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# External rule doc"]
+
+    @pytest.mark.asyncio
+    async def test_fix_file_rule_not_found_reuses_vibe_types_docs(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """When the rule isn't found but the concurrent vibe-types knowledge-doc fetch already
+        succeeded, those docs are reused and merged with non-vibe-types docs instead of being
+        discarded and re-fetched from scratch."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [sample_issue]
+        mock_client.get_rule_details.side_effect = SonarQubeRuleNotFoundError("rule not found")
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mocker.patch(
+            "vibe_heal.orchestrator.fetch_vibe_types_knowledge_docs",
+            return_value=["# T01 knowledge"],
+        )
+        mock_fetch_external = mocker.patch(
+            "vibe_heal.orchestrator.fetch_external_rule_docs",
+            return_value=["# Other doc"],
+        )
+
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        assert summary.total_issues == 1
+        assert summary.fixed == 1
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# T01 knowledge", "# Other doc"]
+        mock_fetch_external.assert_called_once_with(sample_issue.message, exclude_vibe_types=True)
+
+    @pytest.mark.asyncio
+    async def test_fix_file_rule_found_fetches_vibe_types_knowledge_docs(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """When get_rule_details succeeds, vibe-types knowledge docs from the issue message
+        URLs are still fetched and forwarded to fix_issue."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        mock_rule = MagicMock(spec=SonarQubeRule)
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [sample_issue]
+        mock_client.get_rule_details.return_value = mock_rule
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mocker.patch(
+            "vibe_heal.orchestrator.fetch_vibe_types_knowledge_docs",
+            return_value=["# T01 knowledge"],
+        )
+
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        assert summary.total_issues == 1
+        assert summary.fixed == 1
+        assert mock_fix_issue.call_args.kwargs.get("rule") is mock_rule
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") == ["# T01 knowledge"]
+
+    @pytest.mark.asyncio
+    async def test_fix_file_rule_found_no_vibe_types_docs(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """When get_rule_details succeeds and no vibe-types URL is in the message,
+        external_docs stays None (unchanged existing behavior)."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        mock_rule = MagicMock(spec=SonarQubeRule)
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [sample_issue]
+        mock_client.get_rule_details.return_value = mock_rule
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mocker.patch("vibe_heal.orchestrator.fetch_vibe_types_knowledge_docs", return_value=[])
+
+        mock_fix_issue = mocker.patch.object(
+            ClaudeCodeTool,
+            "fix_issue",
+            return_value=FixResult(success=True, files_modified=["test.py"]),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        assert mock_fix_issue.call_args.kwargs.get("external_docs") is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_rule_details_docs_fetch_error_still_returns_rule(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+    ) -> None:
+        """A docs-fetch exception on the rule-found path must not discard the already-fetched
+        rule — it must not be caught by the get_rule_details try/except."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+
+        mock_rule = MagicMock(spec=SonarQubeRule)
+        mock_client = AsyncMock()
+        mock_client.get_rule_details.return_value = mock_rule
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+        mocker.patch(
+            "vibe_heal.orchestrator.fetch_vibe_types_knowledge_docs",
+            side_effect=RuntimeError("boom"),
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+
+        rule, docs = await orchestrator._fetch_rule_details(sample_issue)
+
+        assert rule is mock_rule
+        assert docs is None
