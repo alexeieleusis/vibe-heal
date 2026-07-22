@@ -1,5 +1,6 @@
 """Main workflow orchestration for vibe-heal."""
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -185,37 +186,40 @@ class VibeHealOrchestrator:
     ) -> tuple[SonarQubeRule | None, list[str] | None]:
         """Fetch rule details or fallback external docs for an issue.
 
-        On success, also probes the issue message for vibe-types knowledge-file URLs and
-        includes any found docs alongside the rule. A failure fetching those knowledge docs
-        never affects the returned rule.
+        Runs the vibe-types knowledge-doc lookup concurrently with the rule lookup, since the
+        two are independent. On success those docs are attached alongside the rule; a failure
+        fetching them never discards an already-fetched rule.
 
         Args:
             issue: Issue to fetch rule details for
 
         Returns:
-            Tuple of (rule, external_docs)
+            Tuple of (rule, docs)
         """
         if not self.config.include_rule_description:
             return None, None
 
-        try:
+        async def _get_rule() -> SonarQubeRule:
             async with SonarQubeClient(self.config) as sonar_client:
-                rule = await sonar_client.get_rule_details(issue.rule)
-        except SonarQubeRuleNotFoundError:
+                return await sonar_client.get_rule_details(issue.rule)
+
+        rule_outcome, knowledge_outcome = await asyncio.gather(
+            _get_rule(), fetch_vibe_types_knowledge_docs(issue.message), return_exceptions=True
+        )
+
+        if isinstance(rule_outcome, SonarQubeRuleNotFoundError):
             logger.debug("Rule %s not found in SonarQube; fetching docs from issue message URLs", issue.rule)
             docs = await fetch_external_rule_docs(issue.message)
             return None, docs if docs else None
-        except Exception as e:
-            logger.warning(f"Failed to fetch rule details for {issue.rule}: {e}")
+        if isinstance(rule_outcome, BaseException):
+            logger.warning(f"Failed to fetch rule details for {issue.rule}: {rule_outcome}")
             return None, None
 
-        # Independent of the rule lookup above: a docs-fetch failure must never discard the already-fetched rule.
-        try:
-            knowledge_docs = await fetch_vibe_types_knowledge_docs(issue.message)
-        except Exception as e:
-            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.rule}: {e}")
-            knowledge_docs = None
-        return rule, knowledge_docs if knowledge_docs else None
+        if isinstance(knowledge_outcome, BaseException):
+            logger.warning(f"Failed to fetch vibe-types knowledge docs for issue {issue.rule}: {knowledge_outcome}")
+            return rule_outcome, None
+
+        return rule_outcome, knowledge_outcome if knowledge_outcome else None
 
     def _extract_code_context(
         self,

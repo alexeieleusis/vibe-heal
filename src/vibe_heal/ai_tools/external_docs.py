@@ -105,8 +105,8 @@ async def _stream_capped(url: str, client: httpx.AsyncClient) -> str | None:
     return b"".join(chunks)[:_MAX_DOC_BYTES].decode("utf-8", errors="replace")
 
 
-async def fetch_url_content(url: str) -> str | None:
-    """Fetch the text content of a URL, returning None on any error or SSRF-blocked host."""
+async def _fetch_one(url: str) -> str | None:
+    """Fetch a single URL's content via the local submodule fast path or HTTP, no fallback."""
     local = _vibe_types_local_path(url)
     if local is not None:
         if local.exists():
@@ -128,17 +128,25 @@ async def fetch_url_content(url: str) -> str | None:
         return None
 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        content = await _stream_capped(fetch_url, client)
+        return await _stream_capped(fetch_url, client)
 
-    # Only retry on an actual fetch failure, one level deep: "main" never matches the SHA regex.
-    if content is None:
-        sha_match = _SHA_PINNED_RAW_RE.match(url)
-        if sha_match:
-            fallback_url = _RAW_PREFIXES[1] + sha_match.group(2)
-            logger.debug("SHA-pinned fetch failed for %s; falling back to %s", url, fallback_url)
-            return await fetch_url_content(fallback_url)
 
-    return content
+async def fetch_url_content(url: str) -> str | None:
+    """Fetch the text content of a URL, returning None on any error or SSRF-blocked host.
+
+    SHA-pinned vibe-types raw URLs fall back to the "main" branch form if the pinned fetch fails.
+    """
+    candidates = [url]
+    sha_match = _SHA_PINNED_RAW_RE.match(url)
+    if sha_match:
+        candidates.append(_RAW_PREFIXES[1] + sha_match.group(2))
+
+    for candidate in candidates:
+        content = await _fetch_one(candidate)
+        if content is not None:
+            return content
+
+    return None
 
 
 async def _fetch_docs_for_urls(urls: list[str]) -> list[str]:
