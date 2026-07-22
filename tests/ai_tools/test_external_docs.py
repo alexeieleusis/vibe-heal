@@ -224,7 +224,8 @@ class TestFetchUrlContent:
         main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
         respx.get(sha_url).mock(return_value=httpx.Response(404))
         respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
-        content = await fetch_url_content(sha_url)
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
         assert content == "# T01 main content"
 
     @pytest.mark.asyncio
@@ -234,7 +235,8 @@ class TestFetchUrlContent:
         main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
         respx.get(sha_url).mock(side_effect=httpx.ConnectError("refused"))
         respx.get(main_url).mock(return_value=httpx.Response(200, text="# T01 main content"))
-        content = await fetch_url_content(sha_url)
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
         assert content == "# T01 main content"
 
     @pytest.mark.asyncio
@@ -244,7 +246,8 @@ class TestFetchUrlContent:
         main_url = "https://raw.githubusercontent.com/jpablo/vibe-types/main/T01.md"
         respx.get(sha_url).mock(return_value=httpx.Response(404))
         respx.get(main_url).mock(return_value=httpx.Response(404))
-        content = await fetch_url_content(sha_url)
+        with patch("vibe_heal.ai_tools.external_docs._vibe_types_local_path", return_value=None):
+            content = await fetch_url_content(sha_url)
         assert content is None
 
     @pytest.mark.asyncio
