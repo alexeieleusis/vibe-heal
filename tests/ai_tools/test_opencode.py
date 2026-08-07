@@ -185,8 +185,10 @@ class TestOpenCodeTool:
         mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that command is constructed correctly."""
+        monkeypatch.chdir(tmp_path)
         mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
 
         test_file = tmp_path / "test.py"
@@ -221,8 +223,10 @@ class TestOpenCodeTool:
         mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that the temporary prompt file is cleaned up after execution."""
+        monkeypatch.chdir(tmp_path)
         mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
 
         test_file = tmp_path / "test.py"
@@ -257,8 +261,10 @@ class TestOpenCodeTool:
         mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that the temporary prompt file is cleaned up even when the command fails."""
+        monkeypatch.chdir(tmp_path)
         mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
 
         test_file = tmp_path / "test.py"
