@@ -74,8 +74,12 @@ async def write_prompt_file(prompt: str, *, suffix: str = ".txt") -> Path:
     fd, path_str = tempfile.mkstemp(suffix=suffix, dir=Path.cwd())
     os.close(fd)
     path = Path(path_str)
-    async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
-        await f.write(prompt)
+    try:
+        async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
+            await f.write(prompt)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return path
 
 

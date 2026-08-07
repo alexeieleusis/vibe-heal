@@ -1,6 +1,7 @@
 """Tests for AI tool utilities."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -45,6 +46,19 @@ class TestWritePromptFile:
         path = await write_prompt_file("prompt", suffix=".md")
 
         assert path.suffix == ".md"
+
+    @pytest.mark.asyncio
+    async def test_unlinks_file_on_write_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that the temp file is removed if writing the prompt fails."""
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("vibe_heal.ai_tools.utils.aiofiles.open", side_effect=OSError("disk full")),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            await write_prompt_file("prompt")
+
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestBuildFilePrompt:
