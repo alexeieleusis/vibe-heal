@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_heal.ai_tools.utils import build_file_prompt, write_prompt_file
+from vibe_heal.ai_tools.utils import build_file_prompt, temp_prompt_file, write_prompt_file
 
 
 class TestWritePromptFile:
@@ -59,6 +59,43 @@ class TestWritePromptFile:
             await write_prompt_file("prompt")
 
         assert list(tmp_path.iterdir()) == []
+
+
+class TestTempPromptFile:
+    """Tests for temp_prompt_file."""
+
+    @pytest.mark.asyncio
+    async def test_file_exists_and_readable_during_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that the file exists and is readable inside the context block."""
+        monkeypatch.chdir(tmp_path)
+
+        async with temp_prompt_file("do the thing") as path:
+            assert path.exists()
+            assert path.read_text(encoding="utf-8") == "do the thing"
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_after_normal_exit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that the file is deleted after the context block exits normally."""
+        monkeypatch.chdir(tmp_path)
+
+        async with temp_prompt_file("prompt") as path:
+            pass
+
+        assert not path.exists()
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_on_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that the file is deleted even when the body raises."""
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(RuntimeError):
+            async with temp_prompt_file("prompt") as path:
+                assert path.exists()
+                raise RuntimeError("boom")
+
+        assert not path.exists()
 
 
 class TestBuildFilePrompt:
