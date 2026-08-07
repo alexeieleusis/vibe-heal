@@ -252,6 +252,43 @@ class TestOpenCodeTool:
         assert not temp_file_path.exists()  # Should be deleted
 
     @pytest.mark.asyncio
+    async def test_temp_file_cleanup_on_command_failure(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+    ) -> None:
+        """Test that the temporary prompt file is cleaned up even when the command fails."""
+        mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
+
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        created_temp_files = []
+        original_mkstemp = tempfile.mkstemp
+
+        def track_mkstemp(*args, **kwargs):
+            fd, temp_path = original_mkstemp(*args, **kwargs)
+            created_temp_files.append(temp_path)
+            return fd, temp_path
+
+        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"", b"Error: Command failed")
+        mock_process.returncode = 1
+
+        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+
+        tool = OpenCodeTool()
+        result = await tool.fix_issue(sample_issue, str(test_file))
+
+        assert result.success is False
+        assert len(created_temp_files) == 1
+        temp_file_path = Path(created_temp_files[0])
+        assert not temp_file_path.exists()  # Should still be deleted on failure
+
+    @pytest.mark.asyncio
     async def test_fix_issue_command_includes_model(
         self,
         mocker: MockerFixture,
