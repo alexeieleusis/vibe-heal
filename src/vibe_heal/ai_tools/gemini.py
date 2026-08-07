@@ -2,17 +2,13 @@
 
 import asyncio
 import json
-import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-import aiofiles
-
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
-from vibe_heal.ai_tools.utils import run_command
+from vibe_heal.ai_tools.utils import build_file_prompt, run_command, temp_prompt_file
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
@@ -149,24 +145,12 @@ class GeminiCliTool(AITool):
         Returns:
             FixResult with outcome
         """
-        # Create a temporary file for the detailed instructions.
-        # We create it in the current working directory to ensure it's accessible by `gemini`,
-        # as there might be issues with system-level temporary directories.
-        temp_file_path: Path | None = None
-        try:
-            # Create temp file with the prompt asynchronously
-            fd, temp_file_str = tempfile.mkstemp(suffix=".txt", text=True, dir=Path.cwd())
-            os.close(fd)  # Close the file descriptor immediately
-            temp_file_path = Path(temp_file_str)
-
-            async with aiofiles.open(temp_file_path, mode="w", encoding="utf-8") as tf:
-                await tf.write(prompt)
-
+        # Create a temporary file for the detailed instructions
+        async with temp_prompt_file(prompt) as temp_file_path:
             # Build command with JSON output for structured parsing
-            # Pass a simple prompt that references the temp file using its name (relative path)
             cmd = [
                 "gemini",
-                f'Please implement the changes specified in "{temp_file_path.name}"',
+                build_file_prompt(temp_file_path),
                 "--output-format",
                 "json",
                 "--approval-mode",
@@ -190,11 +174,6 @@ class GeminiCliTool(AITool):
                     error_message=f"Gemini failed with exit code {command_result.exit_code}: {command_result.stderr}",
                     ai_response=command_result.stdout,
                 )
-
-        finally:
-            # Clean up temporary file
-            if temp_file_path and temp_file_path.exists():
-                temp_file_path.unlink()
 
     def _parse_modified_files(self, json_output: str, file_path: str) -> list[str]:
         """Parse JSON output to extract modified files.
