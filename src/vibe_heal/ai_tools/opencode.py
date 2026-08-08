@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
-from vibe_heal.ai_tools.utils import run_command
+from vibe_heal.ai_tools.utils import build_file_prompt, run_command, temp_prompt_file
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
@@ -144,22 +144,23 @@ class OpenCodeTool(AITool):
         Returns:
             FixResult with outcome
         """
-        cmd = ["opencode", "run", prompt]
+        async with temp_prompt_file(prompt) as temp_file_path:
+            cmd = ["opencode", "run", build_file_prompt(temp_file_path)]
 
-        if self.model:
-            cmd.extend(["-m", self.model])
+            if self.model:
+                cmd.extend(["-m", self.model])
 
-        async with asyncio.timeout(self.timeout):
-            result = await run_command(cmd)
+            async with asyncio.timeout(self.timeout):
+                result = await run_command(cmd)
 
-        if result.success:
+            if result.success:
+                return FixResult(
+                    success=True,
+                    files_modified=[file_path],
+                    ai_response=result.stdout,
+                )
             return FixResult(
-                success=True,
-                files_modified=[file_path],
+                success=False,
+                error_message=f"OpenCode failed with exit code {result.exit_code}: {result.stderr}",
                 ai_response=result.stdout,
             )
-        return FixResult(
-            success=False,
-            error_message=f"OpenCode failed with exit code {result.exit_code}: {result.stderr}",
-            ai_response=result.stdout,
-        )

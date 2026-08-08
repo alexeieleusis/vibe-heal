@@ -1,6 +1,7 @@
 """Tests for Aider AI tool."""
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -238,6 +239,40 @@ class TestAiderTool:
         message_file_idx = args.index("--message-file")
         assert message_file_idx < len(args) - 1
         assert args[message_file_idx + 1].endswith(".txt")
+
+    @pytest.mark.asyncio
+    async def test_message_file_created_in_cwd(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+    ) -> None:
+        """Test that the prompt temp file is created in cwd, not the system temp dir."""
+        mocker.patch("shutil.which", return_value="/usr/local/bin/aider")
+
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        mkstemp_calls = []
+        original_mkstemp = tempfile.mkstemp
+
+        def track_mkstemp(*args, **kwargs):
+            mkstemp_calls.append(kwargs)
+            return original_mkstemp(*args, **kwargs)
+
+        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"Fixed", b"")
+        mock_process.returncode = 0
+
+        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+
+        tool = AiderTool()
+        await tool.fix_issue(sample_issue, str(test_file))
+
+        assert len(mkstemp_calls) == 1
+        assert mkstemp_calls[0].get("dir") == Path.cwd()
 
     def test_custom_timeout(self) -> None:
         """Test that custom timeout is accepted."""

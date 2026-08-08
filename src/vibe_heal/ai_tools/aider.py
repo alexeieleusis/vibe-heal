@@ -3,14 +3,12 @@
 import asyncio
 import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import aiofiles
-
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.models import FixResult
+from vibe_heal.ai_tools.utils import temp_prompt_file
 
 if TYPE_CHECKING:
     from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule, SourceLine
@@ -163,14 +161,7 @@ class AiderTool(AITool):
             FixResult with outcome
         """
         # Create a temporary file for the message
-        temp_file = None
-        try:
-            # Create temp file with the prompt
-            fd, temp_file = tempfile.mkstemp(suffix=".txt", text=True)
-            os.close(fd)  # Close the file descriptor immediately
-            async with aiofiles.open(temp_file, mode="w") as f:
-                await f.write(prompt)
-
+        async with temp_prompt_file(prompt) as temp_file_path:
             # Build command
             # --yes: Auto-confirm changes
             # --no-git: Don't auto-commit (we handle commits ourselves)
@@ -180,7 +171,7 @@ class AiderTool(AITool):
                 "--yes",
                 "--no-git",
                 "--message-file",
-                temp_file,
+                str(temp_file_path),
                 file_path,
             ]
 
@@ -236,8 +227,3 @@ class AiderTool(AITool):
                 process.kill()
                 await process.wait()
                 raise
-
-        finally:
-            # Clean up temporary file
-            if temp_file and Path(temp_file).exists():
-                Path(temp_file).unlink()

@@ -241,7 +241,8 @@ class TestClaudeCodeTool:
 
         # Verify prompt references a temp file
         prompt_arg = args[2]  # The prompt is the 3rd argument after "claude" and "--print"
-        assert "Please implement the changes specified in" in prompt_arg
+        assert "Read" in prompt_arg
+        assert "follow the instructions" in prompt_arg
         assert ".txt" in prompt_arg
 
     @pytest.mark.asyncio

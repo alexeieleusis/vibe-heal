@@ -1,6 +1,7 @@
 """Tests for OpenCode AI tool."""
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -184,8 +185,10 @@ class TestOpenCodeTool:
         mocker: MockerFixture,
         sample_issue: SonarQubeIssue,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that command is constructed correctly."""
+        monkeypatch.chdir(tmp_path)
         mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
 
         test_file = tmp_path / "test.py"
@@ -207,6 +210,89 @@ class TestOpenCodeTool:
         assert args[0] == "opencode"
         assert args[1] == "run"
         assert len(args) >= 3  # opencode run <prompt>
+
+        # Verify prompt references a temp file rather than embedding it directly
+        prompt_arg = args[2]
+        assert "Read" in prompt_arg
+        assert "follow the instructions" in prompt_arg
+        assert ".txt" in prompt_arg
+
+    @pytest.mark.asyncio
+    async def test_temp_file_cleanup(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that the temporary prompt file is cleaned up after execution."""
+        monkeypatch.chdir(tmp_path)
+        mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
+
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        created_temp_files = []
+        original_mkstemp = tempfile.mkstemp
+
+        def track_mkstemp(*args, **kwargs):
+            fd, temp_path = original_mkstemp(*args, **kwargs)
+            created_temp_files.append(temp_path)
+            return fd, temp_path
+
+        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"Fixed", b"")
+        mock_process.returncode = 0
+
+        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+
+        tool = OpenCodeTool()
+        await tool.fix_issue(sample_issue, str(test_file))
+
+        assert len(created_temp_files) == 1
+        temp_file_path = Path(created_temp_files[0])
+        assert not temp_file_path.exists()  # Should be deleted
+
+    @pytest.mark.asyncio
+    async def test_temp_file_cleanup_on_command_failure(
+        self,
+        mocker: MockerFixture,
+        sample_issue: SonarQubeIssue,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that the temporary prompt file is cleaned up even when the command fails."""
+        monkeypatch.chdir(tmp_path)
+        mocker.patch("shutil.which", return_value="/usr/local/bin/opencode")
+
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        created_temp_files = []
+        original_mkstemp = tempfile.mkstemp
+
+        def track_mkstemp(*args, **kwargs):
+            fd, temp_path = original_mkstemp(*args, **kwargs)
+            created_temp_files.append(temp_path)
+            return fd, temp_path
+
+        mocker.patch("tempfile.mkstemp", side_effect=track_mkstemp)
+
+        mock_process = mocker.AsyncMock()
+        mock_process.communicate.return_value = (b"", b"Error: Command failed")
+        mock_process.returncode = 1
+
+        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+
+        tool = OpenCodeTool()
+        result = await tool.fix_issue(sample_issue, str(test_file))
+
+        assert result.success is False
+        assert len(created_temp_files) == 1
+        temp_file_path = Path(created_temp_files[0])
+        assert not temp_file_path.exists()  # Should still be deleted on failure
 
     @pytest.mark.asyncio
     async def test_fix_issue_command_includes_model(

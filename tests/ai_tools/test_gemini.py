@@ -125,7 +125,7 @@ class TestGeminiCliTool:
             b"",
         )
         mock_process.returncode = 0
-        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+        mock_create_subprocess = mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
 
         with patch.object(gemini_tool, "is_available", return_value=True):
             result = await gemini_tool.fix_issue(mock_issue, str(file_path))
@@ -133,6 +133,13 @@ class TestGeminiCliTool:
             assert result.success
             assert result.files_modified == ["src/main.py"]
             assert "tool_code" in result.ai_response
+
+        # Verify prompt references a temp file rather than embedding it directly
+        args, _ = mock_create_subprocess.call_args
+        prompt_arg = args[1]
+        assert "Read" in prompt_arg
+        assert "follow the instructions" in prompt_arg
+        assert ".txt" in prompt_arg
 
     @pytest.mark.asyncio
     async def test_fix_issue_failure(
