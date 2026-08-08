@@ -22,6 +22,7 @@ from vibe_heal.review.models import (
     ReviewIssue,
     ReviewResult,
 )
+from vibe_heal.review.project_label import resolve_project_label
 from vibe_heal.review.reporter import (
     default_report_dir,
     load_report_from_path,
@@ -48,6 +49,7 @@ class ReviewAnalysisResult(BaseModel):
 
     success: bool = True
     project_key: str = ""
+    project_label: str = ""
     branch: str = ""
     base_branch: str = ""
     files: list[FileReview] = Field(default_factory=list)
@@ -181,10 +183,12 @@ class ReviewOrchestrator:
         temp_project: TempProjectMetadata | None = None
         base_branch = await self._resolve_base_branch(base_branch, verbose)
         branch = self.branch_analyzer.get_current_branch()
+        project_label = resolve_project_label(Path.cwd(), self.branch_analyzer.repo)
         if report_file is None:
             report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"
         result = ReviewAnalysisResult(
             project_key=self.config.sonarqube_project_key,
+            project_label=project_label,
             branch=branch,
             base_branch=base_branch,
             report_file=report_file,
@@ -832,6 +836,7 @@ class ReviewOrchestrator:
 
         review_result = ReviewResult(
             project_key=result.project_key,
+            project_label=result.project_label,
             branch=result.branch,
             base_branch=result.base_branch,
             files=result.files,
