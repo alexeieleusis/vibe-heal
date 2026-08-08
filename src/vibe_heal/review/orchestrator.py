@@ -183,18 +183,18 @@ class ReviewOrchestrator:
         temp_project: TempProjectMetadata | None = None
         base_branch = await self._resolve_base_branch(base_branch, verbose)
         branch = self.branch_analyzer.get_current_branch()
-        project_label = resolve_project_label(Path.cwd(), self.branch_analyzer.repo)
         if report_file is None:
             report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"
         result = ReviewAnalysisResult(
             project_key=self.config.sonarqube_project_key,
-            project_label=project_label,
             branch=branch,
             base_branch=base_branch,
             report_file=report_file,
         )
 
         try:
+            result.project_label = resolve_project_label(Path.cwd(), self.branch_analyzer.repo)
+
             # Step 1: Get modified files
             dim(f"Analyzing branch against {base_branch}...")
             modified_files = self.branch_analyzer.get_modified_files(base_branch)
