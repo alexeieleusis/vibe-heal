@@ -172,6 +172,15 @@ class ReviewResult(BaseModel):
     model_config = {"extra": "ignore"}
 
     project_key: str = Field(description="SonarQube project key")
+    project_label: str = Field(
+        default="",
+        description=(
+            "Human-readable label identifying which project/subdirectory this review covers "
+            "(sonar-project.properties name/key, path from repo root, or directory name). "
+            "Used to disambiguate PR comments when a repo runs multiple analyses from "
+            "different subdirectories."
+        ),
+    )
     branch: str = Field(description="Current branch name")
     base_branch: str = Field(description="Base branch for comparison (e.g., 'origin/main')")
     generated_at: datetime = Field(

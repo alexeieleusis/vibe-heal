@@ -693,6 +693,44 @@ class TestBuildPayloadCoverage:
         assert "Coverage on changed lines" in payload["body"]
 
 
+class TestBuildPayloadProjectLabel:
+    def _make_report(self, project_label: str = "", files: list[FileReview] | None = None) -> ReviewResult:
+        return ReviewResult(
+            project_key="p",
+            project_label=project_label,
+            branch="feature/x",
+            base_branch="origin/main",
+            files=files or [],
+        )
+
+    def test_label_included_in_no_findings_summary(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(project_label="services/api")
+        payload = client.build_payload(report)
+        assert "SonarQube [services/api]: no findings on or near changed lines." in payload["body"]
+
+    def test_label_included_in_findings_summary(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(
+            project_label="services/api",
+            files=[
+                FileReview(
+                    file_path="src/f.py",
+                    issues=[ReviewIssue(rule="python:S1481", message="Remove unused variable", line=10)],
+                )
+            ],
+        )
+        payload = client.build_payload(report)
+        assert "SonarQube [services/api]: 1 finding(s)" in payload["body"]
+
+    def test_no_brackets_when_label_absent(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(project_label="")
+        payload = client.build_payload(report)
+        assert "SonarQube: no findings on or near changed lines." in payload["body"]
+        assert "[" not in payload["body"].splitlines()[0]
+
+
 class TestBuildPayloadCap:
     def _make_report_with_n_issues(self, n: int) -> ReviewResult:
         return ReviewResult(

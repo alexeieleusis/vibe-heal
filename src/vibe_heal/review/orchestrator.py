@@ -22,6 +22,7 @@ from vibe_heal.review.models import (
     ReviewIssue,
     ReviewResult,
 )
+from vibe_heal.review.project_label import resolve_project_label
 from vibe_heal.review.reporter import (
     default_report_dir,
     load_report_from_path,
@@ -48,6 +49,7 @@ class ReviewAnalysisResult(BaseModel):
 
     success: bool = True
     project_key: str = ""
+    project_label: str = ""
     branch: str = ""
     base_branch: str = ""
     files: list[FileReview] = Field(default_factory=list)
@@ -191,6 +193,8 @@ class ReviewOrchestrator:
         )
 
         try:
+            result.project_label = resolve_project_label(Path.cwd(), self.branch_analyzer.repo)
+
             # Step 1: Get modified files
             dim(f"Analyzing branch against {base_branch}...")
             modified_files = self.branch_analyzer.get_modified_files(base_branch)
@@ -832,6 +836,7 @@ class ReviewOrchestrator:
 
         review_result = ReviewResult(
             project_key=result.project_key,
+            project_label=result.project_label,
             branch=result.branch,
             base_branch=result.base_branch,
             files=result.files,

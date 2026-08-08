@@ -183,6 +183,7 @@ class GitHubReviewClient:
             overflow = []
 
         total_findings = total_before_cap + len(nearby_lines)
+        label_suffix = f" [{report.project_label}]" if report.project_label else ""
         if total_findings:
             breakdown = []
             if comments:
@@ -191,9 +192,9 @@ class GitHubReviewClient:
                 breakdown.append(f"{len(overflow)} capped")
             if nearby_lines:
                 breakdown.append(f"{len(nearby_lines)} near changed lines")
-            summary = f"SonarQube: {total_findings} finding(s) ({', '.join(breakdown)})."
+            summary = f"SonarQube{label_suffix}: {total_findings} finding(s) ({', '.join(breakdown)})."
         else:
-            summary = "SonarQube: no findings on or near changed lines."
+            summary = f"SonarQube{label_suffix}: no findings on or near changed lines."
         body_parts = [summary]
         if nearby_lines:
             body_parts.append(

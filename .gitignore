@@ -216,3 +216,4 @@ __marimo__/
 
 # Git worktrees used for isolated feature implementation
 .worktrees/
+.harness.local.toml
