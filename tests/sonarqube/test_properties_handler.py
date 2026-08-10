@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from vibe_heal.config import VibeHealConfig
-from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler, _patch_content, _redact_auth_properties
+from vibe_heal.sonarqube.properties_handler import (
+    SonarPropertiesHandler,
+    _patch_content,
+    _recover_true_original,
+    _redact_auth_properties,
+)
 
 
 @pytest.fixture
@@ -268,6 +273,61 @@ class TestPatchContent:
         assert "sonar.sources=." in result
 
 
+class TestRecoverTrueOriginal:
+    def test_returns_content_unchanged_when_no_recovery_header(self) -> None:
+        clean = "sonar.projectKey=fe\nsonar.projectName=Oscilar Frontend\nsonar.sources=src\n"
+        assert _recover_true_original(clean) == clean
+
+    def test_recovers_original_behind_single_dangling_patch(self) -> None:
+        dangling = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# sonar.projectKey=fe\n"
+            "# sonar.projectName=Oscilar Frontend\n"
+            "sonar.projectKey=temp-key\n"
+            "sonar.projectName=Temp Name\n"
+            "sonar.sources=src\n"
+        )
+        assert _recover_true_original(dangling) == (
+            "sonar.projectKey=fe\nsonar.projectName=Oscilar Frontend\nsonar.sources=src\n"
+        )
+
+    def test_recovers_original_behind_repeatedly_stacked_dangling_patches(self) -> None:
+        """Regression test for the exact corruption observed in production: three
+        stacked recovery headers (three interrupted runs in a row) with only the
+        topmost commented pair holding the real original."""
+        stacked = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# sonar.projectKey=fe\n"
+            "# sonar.projectName=Oscilar Frontend\n"
+            "sonar.projectKey=fe_alexei_oscilar_com_dependabot_npm_and_yarn_npm_minor_patch_dad4541c73_260720-0544\n"
+            "sonar.projectName=fe review alexei dependabot-npm_and_yarn-npm-minor-patch-dad4541c73\n"
+            "sonar.sources=src\n"
+            "sonar.tests=tests\n"
+        )
+        assert _recover_true_original(stacked) == (
+            "sonar.projectKey=fe\nsonar.projectName=Oscilar Frontend\nsonar.sources=src\nsonar.tests=tests\n"
+        )
+
+    def test_drops_active_pair_entirely_when_no_original_ever_existed(self) -> None:
+        """If the properties file never had an active projectKey/projectName before
+        the first patch, there's nothing to recover -- the whole dangling block
+        (header + stale active pair) should simply be dropped."""
+        dangling = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "sonar.projectKey=temp-key\n"
+            "sonar.projectName=Temp Name\n"
+            "sonar.sources=src\n"
+        )
+        assert _recover_true_original(dangling) == "sonar.sources=src\n"
+
+
 class TestPatched:
     def test_patches_file_during_with_block(self, tmp_path: Path, config: VibeHealConfig) -> None:
         props = tmp_path / "sonar-project.properties"
@@ -308,6 +368,53 @@ class TestPatched:
         handler = SonarPropertiesHandler(tmp_path, config)
         with handler.patched("same-key", "Same Name"):
             assert props.read_text() == original  # file untouched
+
+    def test_recovers_true_original_when_file_left_mid_patch(self, tmp_path: Path, config: VibeHealConfig) -> None:
+        """A prior run was killed before its own restore ran, leaving a dangling
+        recovery header + a stale temp key/name on disk. The next patched()
+        call must recover the real original rather than treat that stale
+        state as ground truth to restore back to later."""
+        dangling = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# sonar.projectKey=fe\n"
+            "# sonar.projectName=Oscilar Frontend\n"
+            "sonar.projectKey=stale-other-pr-key\n"
+            "sonar.projectName=stale-other-pr-name\n"
+            "sonar.sources=src\n"
+        )
+        props = tmp_path / "sonar-project.properties"
+        props.write_text(dangling)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("temp-key", "Temp Name"):
+            content = props.read_text()
+            assert "sonar.projectKey=temp-key" in content
+            assert "# sonar.projectKey=fe" in content  # recovered original, not the stale one
+            assert "stale-other-pr-key" not in content
+
+        # Restores to the recovered original, not the dangling stale state.
+        assert props.read_text() == "sonar.projectKey=fe\nsonar.projectName=Oscilar Frontend\nsonar.sources=src\n"
+
+    def test_recovers_immediately_even_when_new_key_matches_recovered_key(
+        self, tmp_path: Path, config: VibeHealConfig
+    ) -> None:
+        """If the recovered original key happens to equal the key being requested
+        (e.g. a baseline scan against the real project key), patched() short-circuits
+        without patching -- but the dangling stale state must still be healed on
+        disk immediately, since nothing else will write the recovered content."""
+        dangling = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# sonar.projectKey=fe\n"
+            "# sonar.projectName=Oscilar Frontend\n"
+            "sonar.projectKey=stale-other-pr-key\n"
+            "sonar.projectName=stale-other-pr-name\n"
+        )
+        props = tmp_path / "sonar-project.properties"
+        props.write_text(dangling)
+        handler = SonarPropertiesHandler(tmp_path, config)
+        with handler.patched("fe", "fe"):
+            assert props.read_text() == "sonar.projectKey=fe\nsonar.projectName=Oscilar Frontend\n"
 
 
 class TestRedactAuthProperties:

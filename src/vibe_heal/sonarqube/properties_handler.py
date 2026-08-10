@@ -22,6 +22,7 @@ _AUTH_REDACT_RE = re.compile(r"^\s*[#!]?\s*sonar\.(token|login|password)\s*=\s*.
 _AUTH_ENV_VARS = ("SONAR_TOKEN", "SONARQUBE_TOKEN", "SONAR_LOGIN")
 _HOST_URL_ENV_VARS = ("SONAR_HOST_URL", "SONARQUBE_HOST_URL")
 _HOST_URL_RE = re.compile(r"^\s*sonar\.host\.url\s*=\s*.+", re.IGNORECASE)
+_RECOVERY_HEADER_MARKER = "vibe-heal: temporary analysis project"
 
 
 class SonarPropertiesHandler:
@@ -109,7 +110,15 @@ class SonarPropertiesHandler:
         if not self.exists:
             yield
             return
-        original_content = self.properties_file.read_text(encoding="utf-8")
+        disk_content = self.properties_file.read_text(encoding="utf-8")
+        original_content = _recover_true_original(disk_content)
+        if original_content != disk_content:
+            logger.warning(
+                "%s was left mid-patch by an interrupted prior run; recovering the original before continuing.",
+                self.properties_file,
+            )
+            self.properties_file.write_text(original_content, encoding="utf-8")
+
         existing_key = extract_property(original_content, "sonar.projectKey")
         if existing_key == project_key:
             yield
@@ -127,6 +136,40 @@ class SonarPropertiesHandler:
                     self.properties_file,
                     _redact_auth_properties(original_content),
                 )
+
+
+def _recover_true_original(content: str) -> str:
+    """Recover the true pre-patch content when a prior run was killed before its own
+    restore in `patched()` ran, leaving stale recovery header(s) plus a temporary
+    projectKey/projectName on disk. The topmost commented projectKey/projectName pair
+    is always the real original, since it was captured before any prior corruption.
+    """
+    lines = content.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if _RECOVERY_HEADER_MARKER in line), None)
+    if start is None:
+        return content
+
+    end = start
+    while end < len(lines) and (
+        lines[end].lstrip().startswith("#") or _KEY_RE.match(lines[end]) or _NAME_RE.match(lines[end])
+    ):
+        end += 1
+
+    cruft = lines[start:end]
+    recovered: list[str] = []
+    for pattern in (_KEY_RE, _NAME_RE):
+        commented = next((ln for ln in cruft if _match_commented_property(ln, pattern)), None)
+        if commented is not None:
+            recovered.append(commented.lstrip().removeprefix("#").lstrip())
+
+    return "".join(lines[:start] + recovered + lines[end:])
+
+
+def _match_commented_property(line: str, pattern: re.Pattern[str]) -> bool:
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        return False
+    return bool(pattern.match(stripped.removeprefix("#").lstrip()))
 
 
 def extract_property(content: str, key: str) -> str | None:
