@@ -768,6 +768,20 @@ class TestBuildPayloadHeadSha:
         assert "SonarQube: no findings on or near changed lines." in payload["body"]
         assert "(commit" not in payload["body"]
 
+    def test_commit_included_in_fallback_body(self) -> None:
+        client = GitHubReviewClient()
+        report = self._make_report(
+            head_sha="abcdef1234567890",
+            files=[
+                FileReview(
+                    file_path="src/f.py",
+                    issues=[ReviewIssue(rule="python:S1481", message="Remove unused variable", line=10)],
+                )
+            ],
+        )
+        payload = client._build_fallback_payload(report)
+        assert "(commit abcdef1)" in payload["body"]
+
 
 class TestBuildPayloadCap:
     def _make_report_with_n_issues(self, n: int) -> ReviewResult:

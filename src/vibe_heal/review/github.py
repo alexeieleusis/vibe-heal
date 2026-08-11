@@ -263,7 +263,8 @@ class GitHubReviewClient:
 
     def _build_fallback_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build a fallback payload with a top-level summary comment."""
-        lines: list[str] = []
+        sha_suffix = f" (commit {report.head_sha[:7]})" if report.head_sha else ""
+        lines: list[str] = [f"SonarQube fallback review{sha_suffix}"] if sha_suffix else []
         seen_rules: set[str] = set()
         for file_review in report.files:
             for issue in file_review.issues:
