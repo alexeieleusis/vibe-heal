@@ -175,10 +175,9 @@ class ReviewResult(BaseModel):
     project_label: str = Field(
         default="",
         description=(
-            "Human-readable label identifying which project/subdirectory this review covers "
-            "(sonar-project.properties name/key, path from repo root, or directory name). "
-            "Used to disambiguate PR comments when a repo runs multiple analyses from "
-            "different subdirectories."
+            "Human-readable label identifying which SonarQube project this review run analyzed "
+            "(the temporary analysis project's display name). Included in PR comments to "
+            "distinguish runs when multiple reviews target different projects."
         ),
     )
     branch: str = Field(description="Current branch name")

@@ -368,6 +368,45 @@ class TestRunAnalysis:
         mock_delete.assert_called_once_with("temp-key")
 
     @pytest.mark.asyncio
+    async def test_project_label_reflects_current_run_temp_project(
+        self,
+        orchestrator,
+        tmp_path: Path,
+    ) -> None:
+        """project_label must come from this run's own temp project, not from
+        whatever sonar-project.properties happens to contain on disk (which
+        may be left over from a different, unrelated PR's interrupted run)."""
+        with (
+            _basic_analysis_patches(orchestrator),
+            patch.object(
+                orchestrator.project_manager,
+                "copy_exclusion_settings",
+                return_value=([], 0),
+            ),
+            patch.object(
+                orchestrator.analysis_runner,
+                "run_analysis",
+                return_value=AnalysisResult(success=True, task_id="task-1", dashboard_url="http://dash"),
+            ),
+            patch.object(
+                orchestrator.client,
+                "get_issues",
+                return_value=[],
+            ),
+            patch.object(
+                orchestrator.project_manager,
+                "delete_project",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+            )
+
+        assert result.project_label == "temp-name"
+
+    @pytest.mark.asyncio
     async def test_full_happy_path(
         self,
         orchestrator,

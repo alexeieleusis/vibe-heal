@@ -22,7 +22,6 @@ from vibe_heal.review.models import (
     ReviewIssue,
     ReviewResult,
 )
-from vibe_heal.review.project_label import resolve_project_label
 from vibe_heal.review.reporter import (
     default_report_dir,
     load_report_from_path,
@@ -193,8 +192,6 @@ class ReviewOrchestrator:
         )
 
         try:
-            result.project_label = resolve_project_label(Path.cwd(), self.branch_analyzer.repo)
-
             # Step 1: Get modified files
             dim(f"Analyzing branch against {base_branch}...")
             modified_files = self.branch_analyzer.get_modified_files(base_branch)
@@ -228,6 +225,7 @@ class ReviewOrchestrator:
 
             # Step 4: Create temp project
             temp_project = await self._create_temp_project()
+            result.project_label = temp_project.project_name
 
             # Step 5: Run analysis
             console.print("[dim]Running SonarQube analysis...[/dim]")
