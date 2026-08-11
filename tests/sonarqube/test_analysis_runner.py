@@ -248,10 +248,11 @@ INFO: Analysis total time: 10.234 s
         mock_process.communicate = AsyncMock(side_effect=hang)
         mock_process.kill = Mock()  # Process.kill() is synchronous in the real API
 
+        analysis_runner.config.scanner_timeout_seconds = 0.05
+
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_process),
-            patch("vibe_heal.sonarqube.analysis_runner._SCANNER_TIMEOUT_SECONDS", 0.05),
         ):
             result = await analysis_runner.run_analysis(
                 project_key="test-key",

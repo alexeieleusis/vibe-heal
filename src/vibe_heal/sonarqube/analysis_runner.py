@@ -16,7 +16,6 @@ from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
 
 logger = logging.getLogger(__name__)
 
-_SCANNER_TIMEOUT_SECONDS = 300
 _SERVER_ANALYSIS_TIMEOUT_SECONDS = 300
 
 _AUTH_ERROR_RE = re.compile(r"401|403|unauthorized|authentication", re.IGNORECASE)
@@ -123,16 +122,17 @@ class AnalysisRunner:
         )
 
         dim("    Waiting for scanner to complete...")
+        timeout_seconds = self.config.scanner_timeout_seconds
         try:
-            async with asyncio.timeout(_SCANNER_TIMEOUT_SECONDS):
+            async with asyncio.timeout(timeout_seconds):
                 stdout, stderr = await proc.communicate()
         except TimeoutError:
             proc.kill()
             await proc.wait()
-            error(f"    Scanner did not complete after {_SCANNER_TIMEOUT_SECONDS}s — killed")
+            error(f"    Scanner did not complete after {timeout_seconds}s — killed")
             return AnalysisResult(
                 success=False,
-                error_message=f"sonar-scanner did not complete after {_SCANNER_TIMEOUT_SECONDS}s — killed",
+                error_message=f"sonar-scanner did not complete after {timeout_seconds}s — killed",
             )
         dim(f"    Scanner finished with exit code: {proc.returncode}")
 

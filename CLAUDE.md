@@ -385,6 +385,9 @@ SONARQUBE_PROJECT_KEY=your_project
 # Context enrichment (optional, enhances AI fix quality)
 # CODE_CONTEXT_LINES=5  # Lines before/after issue to show AI (default: 5)
 # INCLUDE_RULE_DESCRIPTION=true  # Include full rule docs in prompts (default: true)
+
+# Scanner execution (optional)
+# SCANNER_TIMEOUT_SECONDS=300  # Max seconds to wait for sonar-scanner before killing it (default: 300)
 ```
 
 **Custom environment files**: All CLI commands support `--env-file` to specify a custom configuration file:
