@@ -181,6 +181,7 @@ class ReviewResult(BaseModel):
         ),
     )
     branch: str = Field(description="Current branch name")
+    head_sha: str = Field(default="", description="Full HEAD commit SHA the review was generated against")
     base_branch: str = Field(description="Base branch for comparison (e.g., 'origin/main')")
     generated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

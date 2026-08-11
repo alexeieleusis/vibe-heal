@@ -212,6 +212,7 @@ class TestRunAnalysis:
         mock = MagicMock()
         mock.get_current_branch.return_value = "feature/test"
         mock.get_user_email.return_value = "user@example.com"
+        mock.repo.head.commit.hexsha = "deadbeef" * 5
         return mock
 
     @pytest.fixture
@@ -1192,7 +1193,9 @@ class TestRunAnalysisCoverage:
         from vibe_heal.review.orchestrator import ReviewOrchestrator
 
         mock_client = AsyncMock()
-        return ReviewOrchestrator(config, mock_client, MagicMock(), mock_diff_parser)
+        mock_analyzer = MagicMock()
+        mock_analyzer.repo.head.commit.hexsha = "deadbeef" * 5
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_diff_parser)
 
     def _standard_patches(self, orchestrator):
         """All patches needed to reach the per-file loop."""

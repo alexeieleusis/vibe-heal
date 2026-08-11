@@ -50,6 +50,7 @@ class ReviewAnalysisResult(BaseModel):
     project_key: str = ""
     project_label: str = ""
     branch: str = ""
+    head_sha: str = ""
     base_branch: str = ""
     files: list[FileReview] = Field(default_factory=list)
     files_analyzed: int = 0
@@ -182,11 +183,13 @@ class ReviewOrchestrator:
         temp_project: TempProjectMetadata | None = None
         base_branch = await self._resolve_base_branch(base_branch, verbose)
         branch = self.branch_analyzer.get_current_branch()
+        head_sha = self.branch_analyzer.repo.head.commit.hexsha
         if report_file is None:
             report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"
         result = ReviewAnalysisResult(
             project_key=self.config.sonarqube_project_key,
             branch=branch,
+            head_sha=head_sha,
             base_branch=base_branch,
             report_file=report_file,
         )
@@ -241,6 +244,7 @@ class ReviewOrchestrator:
                 return ReviewAnalysisResult(
                     project_key=self.config.sonarqube_project_key,
                     branch=result.branch,
+                    head_sha=result.head_sha,
                     base_branch=base_branch,
                     success=False,
                     error_message=error_msg,
@@ -305,6 +309,7 @@ class ReviewOrchestrator:
             return ReviewAnalysisResult(
                 project_key=self.config.sonarqube_project_key,
                 branch=result.branch,
+                head_sha=result.head_sha,
                 base_branch=base_branch,
                 success=False,
                 error_message=f"Review failed: {e}",
@@ -836,6 +841,7 @@ class ReviewOrchestrator:
             project_key=result.project_key,
             project_label=result.project_label,
             branch=result.branch,
+            head_sha=result.head_sha,
             base_branch=result.base_branch,
             files=result.files,
             files_analyzed=result.files_analyzed,

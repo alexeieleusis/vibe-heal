@@ -16,6 +16,8 @@ from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
 
 logger = logging.getLogger(__name__)
 
+_SCANNER_TIMEOUT_SECONDS = 300
+
 _AUTH_ERROR_RE = re.compile(r"401|403|unauthorized|authentication", re.IGNORECASE)
 _AUTH_HINT = (
     "\nHint: authentication may be configured via environment variable "
@@ -120,7 +122,17 @@ class AnalysisRunner:
         )
 
         dim("    Waiting for scanner to complete...")
-        stdout, stderr = await proc.communicate()
+        try:
+            async with asyncio.timeout(_SCANNER_TIMEOUT_SECONDS):
+                stdout, stderr = await proc.communicate()
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            error(f"    Scanner did not complete after {_SCANNER_TIMEOUT_SECONDS}s — killed")
+            return AnalysisResult(
+                success=False,
+                error_message=f"sonar-scanner did not complete after {_SCANNER_TIMEOUT_SECONDS}s — killed",
+            )
         dim(f"    Scanner finished with exit code: {proc.returncode}")
 
         if proc.returncode != 0:
