@@ -17,6 +17,7 @@ from vibe_heal.sonarqube.properties_handler import SonarPropertiesHandler
 logger = logging.getLogger(__name__)
 
 _SCANNER_TIMEOUT_SECONDS = 300
+_SERVER_ANALYSIS_TIMEOUT_SECONDS = 300
 
 _AUTH_ERROR_RE = re.compile(r"401|403|unauthorized|authentication", re.IGNORECASE)
 _AUTH_HINT = (
@@ -158,11 +159,15 @@ class AnalysisRunner:
         dim(f"    Task ID: {task_id}")
         dim("    Waiting for server-side analysis to complete...")
         try:
-            async with asyncio.timeout(300):
+            async with asyncio.timeout(_SERVER_ANALYSIS_TIMEOUT_SECONDS):
                 analysis_success, server_error = await self._wait_for_analysis(task_id)
         except TimeoutError:
-            error("    Analysis timed out after 300 seconds")
-            return AnalysisResult(success=False, task_id=task_id, error_message="Analysis timed out after 300 seconds")
+            error(f"    Analysis timed out after {_SERVER_ANALYSIS_TIMEOUT_SECONDS} seconds")
+            return AnalysisResult(
+                success=False,
+                task_id=task_id,
+                error_message=f"Analysis timed out after {_SERVER_ANALYSIS_TIMEOUT_SECONDS} seconds",
+            )
 
         if analysis_success:
             success("    ✓ Server-side analysis completed successfully")

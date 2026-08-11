@@ -212,7 +212,7 @@ class TestRunAnalysis:
         mock = MagicMock()
         mock.get_current_branch.return_value = "feature/test"
         mock.get_user_email.return_value = "user@example.com"
-        mock.repo.head.commit.hexsha = "deadbeef" * 5
+        mock.get_head_sha.return_value = "deadbeef" * 5
         return mock
 
     @pytest.fixture
@@ -1194,7 +1194,7 @@ class TestRunAnalysisCoverage:
 
         mock_client = AsyncMock()
         mock_analyzer = MagicMock()
-        mock_analyzer.repo.head.commit.hexsha = "deadbeef" * 5
+        mock_analyzer.get_head_sha.return_value = "deadbeef" * 5
         return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_diff_parser)
 
     def _standard_patches(self, orchestrator):

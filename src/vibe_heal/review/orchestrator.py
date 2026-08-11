@@ -183,7 +183,7 @@ class ReviewOrchestrator:
         temp_project: TempProjectMetadata | None = None
         base_branch = await self._resolve_base_branch(base_branch, verbose)
         branch = self.branch_analyzer.get_current_branch()
-        head_sha = self.branch_analyzer.repo.head.commit.hexsha
+        head_sha = self.branch_analyzer.get_head_sha()
         if report_file is None:
             report_file = default_report_dir(self.config.sonarqube_project_key, branch) / "review.json"
         result = ReviewAnalysisResult(
@@ -241,14 +241,9 @@ class ReviewOrchestrator:
             if not analysis_result.success:
                 error_msg = analysis_result.error_message or "Analysis failed"
                 error(f"Analysis failed: {error_msg}")
-                return ReviewAnalysisResult(
-                    project_key=self.config.sonarqube_project_key,
-                    branch=result.branch,
-                    head_sha=result.head_sha,
-                    base_branch=base_branch,
-                    success=False,
-                    error_message=error_msg,
-                )
+                result.success = False
+                result.error_message = error_msg
+                return result
 
             console.print("[dim]Analysis completed successfully.[/dim]")
 
@@ -306,14 +301,9 @@ class ReviewOrchestrator:
             return result
 
         except Exception as e:
-            return ReviewAnalysisResult(
-                project_key=self.config.sonarqube_project_key,
-                branch=result.branch,
-                head_sha=result.head_sha,
-                base_branch=base_branch,
-                success=False,
-                error_message=f"Review failed: {e}",
-            )
+            result.success = False
+            result.error_message = f"Review failed: {e}"
+            return result
 
         finally:
             await self._cleanup_temp_project(temp_project)
