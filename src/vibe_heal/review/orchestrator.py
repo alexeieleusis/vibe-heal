@@ -243,6 +243,7 @@ class ReviewOrchestrator:
                 error(f"Analysis failed: {error_msg}")
                 result.success = False
                 result.error_message = error_msg
+                result.report_file = None
                 return result
 
             console.print("[dim]Analysis completed successfully.[/dim]")
@@ -303,6 +304,7 @@ class ReviewOrchestrator:
         except Exception as e:
             result.success = False
             result.error_message = f"Review failed: {e}"
+            result.report_file = None
             return result
 
         finally:
