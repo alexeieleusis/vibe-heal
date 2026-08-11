@@ -151,7 +151,12 @@ def _recover_true_original(content: str) -> str:
 
     end = start
     while end < len(lines) and (
-        lines[end].lstrip().startswith("#") or _KEY_RE.match(lines[end]) or _NAME_RE.match(lines[end])
+        _RECOVERY_HEADER_MARKER in lines[end]
+        or lines[end].lstrip().startswith("# restore the lines below")
+        or _match_commented_property(lines[end], _KEY_RE)
+        or _match_commented_property(lines[end], _NAME_RE)
+        or _KEY_RE.match(lines[end])
+        or _NAME_RE.match(lines[end])
     ):
         end += 1
 

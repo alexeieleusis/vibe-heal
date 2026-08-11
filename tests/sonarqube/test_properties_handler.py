@@ -327,6 +327,26 @@ class TestRecoverTrueOriginal:
         )
         assert _recover_true_original(dangling) == "sonar.sources=src\n"
 
+    def test_preserves_unrelated_comment_immediately_after_active_pair(self) -> None:
+        """A plain comment that happens to follow the active projectKey/projectName
+        lines is not part of the recovery block and must survive recovery."""
+        dangling = (
+            "# vibe-heal: temporary analysis project. If this process was interrupted,\n"
+            "# restore the lines below (remove the '#' prefix):\n"
+            "# sonar.projectKey=fe\n"
+            "# sonar.projectName=Oscilar Frontend\n"
+            "sonar.projectKey=temp-key\n"
+            "sonar.projectName=Temp Name\n"
+            "# Important: keep sources scoped to src only\n"
+            "sonar.sources=src\n"
+        )
+        assert _recover_true_original(dangling) == (
+            "sonar.projectKey=fe\n"
+            "sonar.projectName=Oscilar Frontend\n"
+            "# Important: keep sources scoped to src only\n"
+            "sonar.sources=src\n"
+        )
+
 
 class TestPatched:
     def test_patches_file_during_with_block(self, tmp_path: Path, config: VibeHealConfig) -> None:
