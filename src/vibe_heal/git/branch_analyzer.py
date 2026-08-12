@@ -140,6 +140,20 @@ class BranchAnalyzer:
         except Exception as e:
             raise BranchAnalyzerError(f"Failed to get current branch: {e}") from e
 
+    def get_head_sha(self) -> str:
+        """Get the full commit SHA of the current HEAD.
+
+        Returns:
+            Full HEAD commit SHA (e.g. 'abcdef1234...')
+
+        Raises:
+            BranchAnalyzerError: If HEAD has no commit (e.g. empty repository)
+        """
+        try:
+            return self.repo.head.commit.hexsha
+        except Exception as e:
+            raise BranchAnalyzerError(f"Failed to get HEAD commit SHA: {e}") from e
+
     def validate_branch_exists(self, branch: str) -> bool:
         """Check if a branch exists in the repository.
 

@@ -1,7 +1,7 @@
 """Tests for AnalysisRunner class."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -233,6 +233,40 @@ INFO: Analysis total time: 10.234 s
         assert result.error_message is None
 
     @pytest.mark.asyncio
+    async def test_scanner_hang_times_out_and_kills_process(
+        self, analysis_runner: AnalysisRunner, tmp_path: Path
+    ) -> None:
+        """A scanner subprocess that never completes must be killed, not awaited forever."""
+        import asyncio
+
+        async def hang() -> tuple[bytes, bytes]:
+            await asyncio.sleep(3600)
+            return b"", b""
+
+        mock_process = AsyncMock()
+        mock_process.returncode = None
+        mock_process.communicate = AsyncMock(side_effect=hang)
+        mock_process.kill = Mock()  # Process.kill() is synchronous in the real API
+
+        analysis_runner.config.scanner_timeout_seconds = 0.05
+
+        with (
+            patch.object(analysis_runner, "validate_scanner_available", return_value=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        ):
+            result = await analysis_runner.run_analysis(
+                project_key="test-key",
+                project_name="Test Project",
+                project_dir=tmp_path,
+            )
+
+        assert result.success is False
+        assert result.retryable is False
+        assert "did not complete" in result.error_message
+        mock_process.kill.assert_called_once()
+        mock_process.wait.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_scanner_execution_fails(self, analysis_runner: AnalysisRunner, tmp_path: Path) -> None:
         """Test when scanner execution fails."""
         mock_process = AsyncMock()
@@ -382,11 +416,15 @@ INFO: More about the report processing at https://sonar.test.com/api/ce/task?id=
             await asyncio.sleep(1000)
             return True, None
 
+        real_timeout = asyncio.timeout
+
         with (
             patch.object(analysis_runner, "validate_scanner_available", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_process),
             patch.object(analysis_runner, "_wait_for_analysis", side_effect=wait_forever),
-            patch("asyncio.timeout", return_value=asyncio.timeout(0.1)),  # Very short timeout
+            # Fresh Timeout instance per call — asyncio.Timeout can't be entered twice, and
+            # this function now opens a timeout around both the scanner wait and this one.
+            patch("asyncio.timeout", side_effect=lambda _: real_timeout(0.1)),
         ):
             result = await analysis_runner.run_analysis(
                 project_key="test-key",

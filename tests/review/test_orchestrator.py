@@ -212,6 +212,7 @@ class TestRunAnalysis:
         mock = MagicMock()
         mock.get_current_branch.return_value = "feature/test"
         mock.get_user_email.return_value = "user@example.com"
+        mock.get_head_sha.return_value = "deadbeef" * 5
         return mock
 
     @pytest.fixture
@@ -540,6 +541,67 @@ class TestRunAnalysis:
 
         assert result.success is False
         assert "Unexpected error" in (result.error_message or "")
+        mock_delete.assert_called_once_with("temp-key")
+
+    @pytest.mark.asyncio
+    async def test_exception_mid_loop_preserves_accumulated_result(
+        self,
+        orchestrator,
+        tmp_path: Path,
+    ) -> None:
+        """An exception partway through the per-file loop must not discard
+        diagnostics/files/branch/head_sha already accumulated by earlier files.
+
+        Regression guard for the in-place-mutation refactor: reintroducing
+        `return ReviewAnalysisResult(...)` in the except branch would reset
+        every field asserted below to blank while still passing every other
+        test in this class, since those all fail before the loop starts.
+        """
+        first_diag = FileDiagnostics(file_path="src/file1.py", lookup_key="src/file1.py")
+        first_issue = ReviewIssue(rule="python:S1481", message="Issue 1", line=10, severity="MAJOR")
+
+        with (
+            _basic_analysis_patches(orchestrator, modified_files=[Path("src/file1.py"), Path("src/file2.py")]),
+            patch.object(
+                orchestrator.project_manager,
+                "copy_exclusion_settings",
+                return_value=([], 0, 0),
+            ),
+            patch.object(
+                orchestrator.analysis_runner,
+                "run_analysis",
+                return_value=AnalysisResult(success=True, task_id="task-1", dashboard_url="http://dash"),
+            ),
+            patch.object(
+                orchestrator,
+                "_get_filtered_issues",
+                side_effect=[([first_issue], first_diag), RuntimeError("boom on second file")],
+            ),
+            patch.object(orchestrator, "_enrich_issues_with_descriptions", new_callable=AsyncMock),
+            patch.object(orchestrator, "_get_active_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_get_resolved_duplications", new_callable=AsyncMock, return_value=[]),
+            patch.object(orchestrator, "_fetch_coverage", new_callable=AsyncMock, return_value=(None, 0, 0)),
+            patch.object(
+                orchestrator.project_manager,
+                "delete_project",
+                new_callable=AsyncMock,
+            ) as mock_delete,
+        ):
+            result = await orchestrator.run_analysis(
+                base_branch="origin/main",
+                report_file=tmp_path / "review.json",
+            )
+
+        assert result.success is False
+        assert "boom on second file" in (result.error_message or "")
+        # These were set before the loop started and must survive the exception.
+        assert result.branch == "feature/test"
+        assert result.head_sha == "deadbeef" * 5
+        # These were accumulated by the first file before the second one raised.
+        assert result.diagnostics == [first_diag]
+        assert len(result.files) == 1
+        assert result.files[0].file_path == "src/file1.py"
+        assert result.report_file is None
         mock_delete.assert_called_once_with("temp-key")
 
     @pytest.mark.asyncio
@@ -1192,7 +1254,9 @@ class TestRunAnalysisCoverage:
         from vibe_heal.review.orchestrator import ReviewOrchestrator
 
         mock_client = AsyncMock()
-        return ReviewOrchestrator(config, mock_client, MagicMock(), mock_diff_parser)
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_head_sha.return_value = "deadbeef" * 5
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_diff_parser)
 
     def _standard_patches(self, orchestrator):
         """All patches needed to reach the per-file loop."""

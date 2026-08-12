@@ -65,6 +65,12 @@ class VibeHealConfig(BaseSettings):
         description="Include full rule description in AI prompts",
     )
 
+    # Scanner execution settings
+    scanner_timeout_seconds: int = Field(
+        default=300,
+        description="Max seconds to wait for the sonar-scanner subprocess before killing it",
+    )
+
     # Pre-commit hook settings
     pre_commit_command: str | None = Field(
         default=None,

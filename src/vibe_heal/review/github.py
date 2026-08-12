@@ -184,6 +184,7 @@ class GitHubReviewClient:
 
         total_findings = total_before_cap + len(nearby_lines)
         label_suffix = f" [{report.project_label}]" if report.project_label else ""
+        sha_suffix = f" (commit {report.head_sha[:7]})" if report.head_sha else ""
         if total_findings:
             breakdown = []
             if comments:
@@ -192,9 +193,9 @@ class GitHubReviewClient:
                 breakdown.append(f"{len(overflow)} capped")
             if nearby_lines:
                 breakdown.append(f"{len(nearby_lines)} near changed lines")
-            summary = f"SonarQube{label_suffix}: {total_findings} finding(s) ({', '.join(breakdown)})."
+            summary = f"SonarQube{label_suffix}: {total_findings} finding(s) ({', '.join(breakdown)}).{sha_suffix}"
         else:
-            summary = f"SonarQube{label_suffix}: no findings on or near changed lines."
+            summary = f"SonarQube{label_suffix}: no findings on or near changed lines.{sha_suffix}"
         body_parts = [summary]
         if nearby_lines:
             body_parts.append(
@@ -262,7 +263,8 @@ class GitHubReviewClient:
 
     def _build_fallback_payload(self, report: ReviewResult) -> dict[str, Any]:
         """Build a fallback payload with a top-level summary comment."""
-        lines: list[str] = []
+        sha_suffix = f" (commit {report.head_sha[:7]})" if report.head_sha else ""
+        lines: list[str] = [f"SonarQube fallback review{sha_suffix}"] if sha_suffix else []
         seen_rules: set[str] = set()
         for file_review in report.files:
             for issue in file_review.issues:
