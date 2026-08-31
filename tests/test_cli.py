@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +12,7 @@ from vibe_heal.cli import app
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.models import FixSummary
 from vibe_heal.sonarqube.models import SonarQubeIssue
+from vibe_heal.sonarqube.project_manager import PruneResult, StaleProject
 
 runner = CliRunner()
 
@@ -405,6 +407,141 @@ class TestCleanupCommand:
         assert "src/file2.py: 0 issues fixed" in result.stdout
         assert "src/file3.py: 5 issues fixed" in result.stdout
         assert "Error: Fix failed" in result.stdout
+
+
+class TestPruneProjectsCommand:
+    """Tests for prune-projects command."""
+
+    def _stale_project(self, key: str = "my_project_user_example_com_main_240101-0000") -> StaleProject:
+        return StaleProject(project_key=key, created_at=datetime.now(timezone.utc) - timedelta(hours=2))
+
+    @patch("vibe_heal.cli.ProjectManager")
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_dry_run_does_not_delete(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+        mock_project_manager_class: MagicMock,
+    ) -> None:
+        """--dry-run lists stale projects without calling prune_stale_projects."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "my_project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_project_manager = MagicMock()
+        mock_project_manager.find_stale_projects = AsyncMock(return_value=[self._stale_project()])
+        mock_project_manager.prune_stale_projects = AsyncMock()
+        mock_project_manager_class.return_value = mock_project_manager
+
+        result = runner.invoke(app, ["prune-projects", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "No projects deleted" in result.stdout
+        mock_project_manager.prune_stale_projects.assert_not_called()
+
+    @patch("vibe_heal.cli.typer.confirm")
+    @patch("vibe_heal.cli.ProjectManager")
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_declining_confirmation_aborts_without_deleting(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+        mock_project_manager_class: MagicMock,
+        mock_confirm: MagicMock,
+    ) -> None:
+        """Declining the confirmation prompt aborts without pruning."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "my_project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_project_manager = MagicMock()
+        mock_project_manager.find_stale_projects = AsyncMock(return_value=[self._stale_project()])
+        mock_project_manager.prune_stale_projects = AsyncMock()
+        mock_project_manager_class.return_value = mock_project_manager
+
+        mock_confirm.return_value = False
+
+        result = runner.invoke(app, ["prune-projects"])
+
+        assert result.exit_code == 0
+        assert "Aborted" in result.stdout
+        mock_confirm.assert_called_once()
+        mock_project_manager.prune_stale_projects.assert_not_called()
+
+    @patch("vibe_heal.cli.typer.confirm")
+    @patch("vibe_heal.cli.ProjectManager")
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_yes_flag_skips_confirmation_and_deletes(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+        mock_project_manager_class: MagicMock,
+        mock_confirm: MagicMock,
+    ) -> None:
+        """--yes skips the confirmation prompt entirely and prunes the stale projects."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "my_project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        stale = [self._stale_project()]
+        mock_project_manager = MagicMock()
+        mock_project_manager.find_stale_projects = AsyncMock(return_value=stale)
+        mock_project_manager.prune_stale_projects = AsyncMock(return_value=PruneResult(deleted_count=1, total_count=1))
+        mock_project_manager_class.return_value = mock_project_manager
+
+        result = runner.invoke(app, ["prune-projects", "--yes"])
+
+        assert result.exit_code == 0
+        mock_confirm.assert_not_called()
+        mock_project_manager.prune_stale_projects.assert_called_once_with(stale)
+
+    @patch("vibe_heal.cli.ProjectManager")
+    @patch("vibe_heal.cli.SonarQubeClient")
+    @patch("vibe_heal.cli.VibeHealConfig")
+    def test_partial_failure_exits_nonzero(
+        self,
+        mock_config_class: MagicMock,
+        mock_client_class: MagicMock,
+        mock_project_manager_class: MagicMock,
+    ) -> None:
+        """Exits with code 1 when some stale projects fail to delete."""
+        mock_config = MagicMock(spec=VibeHealConfig)
+        mock_config.sonarqube_project_key = "my_project"
+        mock_config_class.return_value = mock_config
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        mock_project_manager = MagicMock()
+        mock_project_manager.find_stale_projects = AsyncMock(
+            return_value=[self._stale_project(), self._stale_project("proj_b")]
+        )
+        mock_project_manager.prune_stale_projects = AsyncMock(return_value=PruneResult(deleted_count=1, total_count=2))
+        mock_project_manager_class.return_value = mock_project_manager
+
+        result = runner.invoke(app, ["prune-projects", "--yes"])
+
+        assert result.exit_code == 1
 
 
 class TestConfigCommand:

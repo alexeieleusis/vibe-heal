@@ -7,7 +7,7 @@ import pytest
 
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
-from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
+from vibe_heal.sonarqube.project_manager import ProjectManager, StaleProject, TempProjectMetadata
 
 
 @pytest.fixture
@@ -427,6 +427,55 @@ class TestFindStaleProjects:
         result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
 
         assert result == []
+
+
+class TestPruneStaleProjects:
+    """Tests for prune_stale_projects method."""
+
+    def _stale_project(self, key: str) -> StaleProject:
+        return StaleProject(project_key=key, created_at=datetime.now(timezone.utc) - timedelta(hours=2))
+
+    @pytest.mark.asyncio
+    async def test_all_deletions_succeed(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
+        """When every deletion succeeds, deleted_count matches total_count and failed_count is zero."""
+        stale_projects = [self._stale_project("proj_a"), self._stale_project("proj_b")]
+        mock_client.delete_project = AsyncMock()
+
+        result = await project_manager.prune_stale_projects(stale_projects)
+
+        assert result.deleted_count == 2
+        assert result.total_count == 2
+        assert result.failed_count == 0
+        assert mock_client.delete_project.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_is_reflected_in_failed_count(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A failed deletion is skipped rather than aborting the batch, and counted as failed."""
+        stale_projects = [self._stale_project("proj_a"), self._stale_project("proj_b"), self._stale_project("proj_c")]
+        mock_client.delete_project = AsyncMock(side_effect=[None, SonarQubeAPIError("boom"), None])
+
+        result = await project_manager.prune_stale_projects(stale_projects)
+
+        assert result.deleted_count == 2
+        assert result.total_count == 3
+        assert result.failed_count == 1
+        assert mock_client.delete_project.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_empty_input_returns_zero_counts(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Pruning an empty list deletes nothing and reports zero counts."""
+        mock_client.delete_project = AsyncMock()
+
+        result = await project_manager.prune_stale_projects([])
+
+        assert result.deleted_count == 0
+        assert result.total_count == 0
+        assert result.failed_count == 0
+        mock_client.delete_project.assert_not_awaited()
 
 
 class TestCopyExclusionSettings:
