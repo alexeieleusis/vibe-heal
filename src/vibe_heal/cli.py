@@ -622,6 +622,7 @@ def prune_projects(
     older_than: int = typer.Option(
         60,
         "--older-than",
+        min=1,
         help="Minimum age in minutes before a zero-analysis temp project is considered stale",
     ),
     dry_run: bool = typer.Option(
