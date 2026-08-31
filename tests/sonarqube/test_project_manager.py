@@ -448,6 +448,26 @@ class TestFindStaleProjects:
 
         assert [p.project_key for p in result] == [ok_key]
 
+    @pytest.mark.asyncio
+    async def test_pairs_analyses_counts_with_correct_candidate(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """With multiple candidates, each analyses count is paired with its own project key."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        stale_key = f"my_project_user_example_com_a_{old_timestamp}"
+        active_key = f"my_project_user_example_com_b_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": stale_key, "name": "my_project analysis user a"},
+                {"key": active_key, "name": "my_project analysis user b"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(side_effect=[0, 2])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert [p.project_key for p in result] == [stale_key]
+
 
 class TestPruneStaleProjects:
     """Tests for prune_stale_projects method."""
