@@ -428,6 +428,26 @@ class TestFindStaleProjects:
 
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_one_candidate_failing_does_not_sink_the_batch(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A single candidate whose analyses-count lookup fails is skipped, not fatal."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        failing_key = f"my_project_user_example_com_main_{old_timestamp}"
+        ok_key = f"my_project_user_example_com_other_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": failing_key, "name": "my_project analysis user main"},
+                {"key": ok_key, "name": "my_project analysis user other"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(side_effect=[SonarQubeAPIError("not found"), 0])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert [p.project_key for p in result] == [ok_key]
+
 
 class TestPruneStaleProjects:
     """Tests for prune_stale_projects method."""

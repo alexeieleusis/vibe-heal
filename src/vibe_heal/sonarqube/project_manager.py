@@ -198,14 +198,19 @@ class ProjectManager:
             aged_candidates.append((key, created_at))
 
         analyses_counts = await asyncio.gather(
-            *(self.client.get_project_analyses_count(key) for key, _ in aged_candidates)
+            *(self.client.get_project_analyses_count(key) for key, _ in aged_candidates),
+            return_exceptions=True,
         )
 
-        return [
-            StaleProject(project_key=key, created_at=created_at)
-            for (key, created_at), analyses_count in zip(aged_candidates, analyses_counts, strict=True)
-            if analyses_count == 0
-        ]
+        stale_projects = []
+        for (key, created_at), analyses_count in zip(aged_candidates, analyses_counts, strict=True):
+            if isinstance(analyses_count, BaseException):
+                logger.warning(f"Skipping {key}: failed to get analyses count: {analyses_count}")
+                continue
+            if analyses_count == 0:
+                stale_projects.append(StaleProject(project_key=key, created_at=created_at))
+
+        return stale_projects
 
     async def prune_stale_projects(self, stale_projects: list[StaleProject]) -> PruneResult:
         """Delete stale temp projects, reporting progress as it goes.
