@@ -1,13 +1,13 @@
 """Tests for ProjectManager class."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeAPIError
-from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
+from vibe_heal.sonarqube.project_manager import ProjectManager, StaleProject, TempProjectMetadata
 
 
 @pytest.fixture
@@ -347,6 +347,175 @@ class TestTempProjectMetadata:
                 base_project_key="base",
                 branch_name="main",
             )
+
+
+class TestFindStaleProjects:
+    """Tests for find_stale_projects method."""
+
+    @pytest.mark.asyncio
+    async def test_finds_stale_temp_project(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
+        """A temp project older than the threshold with zero analyses is reported stale."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        stale_key = f"my_project_user_example_com_main_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[{"key": stale_key, "name": "my_project analysis user main"}]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert len(result) == 1
+        assert result[0].project_key == stale_key
+        assert result[0].age_minutes >= 120
+        mock_client.search_projects.assert_called_once_with(query="my_project")
+        mock_client.get_project_analyses_count.assert_called_once_with(stale_key)
+
+    @pytest.mark.asyncio
+    async def test_skips_project_with_finished_analysis(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A temp project that has at least one analysis is not stale."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        key = f"my_project_user_example_com_main_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(return_value=[{"key": key, "name": "my_project analysis user main"}])
+        mock_client.get_project_analyses_count = AsyncMock(return_value=1)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_skips_project_younger_than_threshold(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A recently created temp project is not stale, even with zero analyses."""
+        recent_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%y%m%d-%H%M")
+        key = f"my_project_user_example_com_main_{recent_timestamp}"
+        mock_client.search_projects = AsyncMock(return_value=[{"key": key, "name": "my_project analysis user main"}])
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+        mock_client.get_project_analyses_count.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_non_matching_project_keys(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Projects that don't match the temp-project naming convention are ignored."""
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": "my_project", "name": "My Project"},
+                {"key": "my_project_other_thing", "name": "My Project Other"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+        mock_client.get_project_analyses_count.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_candidates(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """No candidates found means no stale projects."""
+        mock_client.search_projects = AsyncMock(return_value=[])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_one_candidate_failing_does_not_sink_the_batch(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A single candidate whose analyses-count lookup fails is skipped, not fatal."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        failing_key = f"my_project_user_example_com_main_{old_timestamp}"
+        ok_key = f"my_project_user_example_com_other_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": failing_key, "name": "my_project analysis user main"},
+                {"key": ok_key, "name": "my_project analysis user other"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(side_effect=[SonarQubeAPIError("not found"), 0])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert [p.project_key for p in result] == [ok_key]
+
+    @pytest.mark.asyncio
+    async def test_pairs_analyses_counts_with_correct_candidate(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """With multiple candidates, each analyses count is paired with its own project key."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        stale_key = f"my_project_user_example_com_a_{old_timestamp}"
+        active_key = f"my_project_user_example_com_b_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": stale_key, "name": "my_project analysis user a"},
+                {"key": active_key, "name": "my_project analysis user b"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(side_effect=[0, 2])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert [p.project_key for p in result] == [stale_key]
+
+
+class TestPruneStaleProjects:
+    """Tests for prune_stale_projects method."""
+
+    def _stale_project(self, key: str) -> StaleProject:
+        return StaleProject(project_key=key, created_at=datetime.now(timezone.utc) - timedelta(hours=2))
+
+    @pytest.mark.asyncio
+    async def test_all_deletions_succeed(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
+        """When every deletion succeeds, deleted_count matches total_count and failed_count is zero."""
+        stale_projects = [self._stale_project("proj_a"), self._stale_project("proj_b")]
+        mock_client.delete_project = AsyncMock()
+
+        result = await project_manager.prune_stale_projects(stale_projects)
+
+        assert result.deleted_count == 2
+        assert result.total_count == 2
+        assert result.failed_count == 0
+        assert mock_client.delete_project.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_is_reflected_in_failed_count(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A failed deletion is skipped rather than aborting the batch, and counted as failed."""
+        stale_projects = [self._stale_project("proj_a"), self._stale_project("proj_b"), self._stale_project("proj_c")]
+        mock_client.delete_project = AsyncMock(side_effect=[None, SonarQubeAPIError("boom"), None])
+
+        result = await project_manager.prune_stale_projects(stale_projects)
+
+        assert result.deleted_count == 2
+        assert result.total_count == 3
+        assert result.failed_count == 1
+        assert mock_client.delete_project.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_empty_input_returns_zero_counts(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Pruning an empty list deletes nothing and reports zero counts."""
+        mock_client.delete_project = AsyncMock()
+
+        result = await project_manager.prune_stale_projects([])
+
+        assert result.deleted_count == 0
+        assert result.total_count == 0
+        assert result.failed_count == 0
+        mock_client.delete_project.assert_not_awaited()
 
 
 class TestCopyExclusionSettings:

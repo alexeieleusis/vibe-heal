@@ -456,6 +456,101 @@ class TestSonarQubeClient:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_search_projects_single_page(self, config: VibeHealConfig) -> None:
+        """Test searching projects that fit on a single page."""
+        response_data = {
+            "components": [
+                {"key": "proj_a", "name": "Project A"},
+                {"key": "proj_b", "name": "Project B"},
+            ],
+            "paging": {"pageIndex": 1, "pageSize": 100, "total": 2},
+        }
+        route = respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(200, json=response_data)
+        )
+
+        async with SonarQubeClient(config) as client:
+            projects = await client.search_projects(query="proj")
+
+        assert [p["key"] for p in projects] == ["proj_a", "proj_b"]
+        assert route.called
+        assert route.calls.last.request.url.params["q"] == "proj"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_search_projects_paginates(self, config: VibeHealConfig) -> None:
+        """Test that search_projects follows pagination across multiple pages."""
+        page_1 = {
+            "components": [{"key": "proj_a", "name": "Project A"}],
+            "paging": {"pageIndex": 1, "pageSize": 1, "total": 2},
+        }
+        page_2 = {
+            "components": [{"key": "proj_b", "name": "Project B"}],
+            "paging": {"pageIndex": 2, "pageSize": 1, "total": 2},
+        }
+        route = respx.get("https://sonar.test.com/api/projects/search").mock(
+            side_effect=[httpx.Response(200, json=page_1), httpx.Response(200, json=page_2)]
+        )
+
+        async with SonarQubeClient(config) as client:
+            projects = await client.search_projects(page_size=1)
+
+        assert [p["key"] for p in projects] == ["proj_a", "proj_b"]
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_search_projects_missing_total_raises(self, config: VibeHealConfig) -> None:
+        """Test that search_projects raises when paging.total is absent, instead of silently truncating."""
+        respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(200, json={"components": [{"key": "proj_a", "name": "Project A"}]})
+        )
+
+        async with SonarQubeClient(config) as client:
+            with pytest.raises(SonarQubeAPIError, match="API response missing total count"):
+                await client.search_projects()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_search_projects_no_query(self, config: VibeHealConfig) -> None:
+        """Test that omitting query does not send the q param."""
+        route = respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(
+                200, json={"components": [], "paging": {"pageIndex": 1, "pageSize": 100, "total": 0}}
+            )
+        )
+
+        async with SonarQubeClient(config) as client:
+            await client.search_projects()
+
+        assert route.called
+        assert "q" not in route.calls.last.request.url.params
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("analyses", "expected_count"),
+        [
+            ([{"key": "a1"}, {"key": "a2"}], 2),
+            ([], 0),
+        ],
+    )
+    async def test_get_project_analyses_count(
+        self, config: VibeHealConfig, analyses: list[dict], expected_count: int
+    ) -> None:
+        """Test counting finished analyses for a project."""
+        route = respx.get("https://sonar.test.com/api/project_analyses/search").mock(
+            return_value=httpx.Response(200, json={"analyses": analyses})
+        )
+
+        async with SonarQubeClient(config) as client:
+            count = await client.get_project_analyses_count("my-project")
+
+        assert count == expected_count
+        assert route.calls.last.request.url.params["project"] == "my-project"
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_get_project_settings(self, config: VibeHealConfig) -> None:
         """Test getting project settings for both scalar and multi-value shapes."""
         response_data = {
