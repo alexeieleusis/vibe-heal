@@ -449,7 +449,9 @@ class SonarQubeClient:
 
             paging = data.get("paging", {})
             total = paging.get("total")
-            if total is None or page * page_size >= total:
+            if total is None:
+                raise SonarQubeAPIError("API response missing total count")
+            if page * page_size >= total:
                 break
             page += 1
 

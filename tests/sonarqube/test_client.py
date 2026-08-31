@@ -500,6 +500,18 @@ class TestSonarQubeClient:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_search_projects_missing_total_raises(self, config: VibeHealConfig) -> None:
+        """Test that search_projects raises when paging.total is absent, instead of silently truncating."""
+        respx.get("https://sonar.test.com/api/projects/search").mock(
+            return_value=httpx.Response(200, json={"components": [{"key": "proj_a", "name": "Project A"}]})
+        )
+
+        async with SonarQubeClient(config) as client:
+            with pytest.raises(SonarQubeAPIError, match="API response missing total count"):
+                await client.search_projects()
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_search_projects_no_query(self, config: VibeHealConfig) -> None:
         """Test that omitting query does not send the q param."""
         route = respx.get("https://sonar.test.com/api/projects/search").mock(
