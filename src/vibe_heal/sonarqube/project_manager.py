@@ -1,5 +1,6 @@
 """SonarQube project lifecycle management for temporary projects."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from vibe_heal.output import console, dim, warn
+from vibe_heal.output import console, dim, error, success, warn
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import SonarQubeError
 
@@ -25,6 +26,30 @@ class TempProjectMetadata(BaseModel):
     user_email: str
 
 
+class StaleProject(BaseModel):
+    """A temp SonarQube project with zero finished analyses, eligible for pruning."""
+
+    project_key: str
+    created_at: datetime  # parsed from the timestamp embedded in the project key
+
+    @property
+    def age_minutes(self) -> float:
+        """Minutes elapsed since the project was created."""
+        return (datetime.now(timezone.utc) - self.created_at).total_seconds() / 60
+
+
+class PruneResult(BaseModel):
+    """Result of pruning a batch of stale temp projects."""
+
+    deleted_count: int
+    total_count: int
+
+    @property
+    def failed_count(self) -> int:
+        """Number of projects that failed to delete."""
+        return self.total_count - self.deleted_count
+
+
 class ProjectManager:
     """Manages temporary SonarQube project lifecycle.
 
@@ -40,6 +65,10 @@ class ProjectManager:
         "sonar.inclusions",
         "sonar.test.inclusions",
     )
+
+    # Shared with find_stale_projects, which must parse timestamps in this same format.
+    TIMESTAMP_FORMAT: ClassVar[str] = "%y%m%d-%H%M"
+    _TIMESTAMP_PATTERN: ClassVar[str] = r"\d{6}-\d{4}"  # matches TIMESTAMP_FORMAT's shape
 
     def __init__(self, client: SonarQubeClient) -> None:
         """Initialize the ProjectManager.
@@ -80,7 +109,7 @@ class ProjectManager:
         sanitized_branch = self._sanitize_identifier(branch_name)
 
         # Generate timestamp in yymmdd-hhmm format
-        timestamp = datetime.now(timezone.utc).strftime("%y%m%d-%H%M")
+        timestamp = datetime.now(timezone.utc).strftime(self.TIMESTAMP_FORMAT)
 
         project_key = f"{base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}"
         email_local = user_email.split("@")[0] if "@" in user_email else user_email
@@ -126,6 +155,77 @@ class ProjectManager:
             SonarQubeAPIError: If API request fails
         """
         return await self.client.project_exists(project_key)
+
+    async def find_stale_projects(self, base_key: str, older_than_minutes: int = 60) -> list[StaleProject]:
+        """Find temp projects for base_key that never completed an analysis.
+
+        Matches vibe-heal's temp project naming convention
+        ({base_key}_{sanitized_email}_{sanitized_branch}_{timestamp}) and only
+        considers projects older than older_than_minutes (parsed from the
+        timestamp embedded in the key) so a project whose analysis is still
+        in flight is never flagged.
+
+        Args:
+            base_key: Base project key whose temp projects should be swept
+            older_than_minutes: Minimum age in minutes before a project is considered stale
+
+        Returns:
+            List of stale temp projects with zero finished analyses
+
+        Raises:
+            SonarQubeAPIError: If a search or analyses-count request fails
+        """
+        pattern = re.compile(rf"^{re.escape(base_key)}_.+_({self._TIMESTAMP_PATTERN})$")
+        now = datetime.now(timezone.utc)
+
+        candidates = await self.client.search_projects(query=base_key)
+
+        aged_candidates: list[tuple[str, datetime]] = []
+        for project in candidates:
+            key = project.get("key", "")
+            match = pattern.match(key)
+            if not match:
+                continue
+
+            try:
+                created_at = datetime.strptime(match.group(1), self.TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+
+            if (now - created_at).total_seconds() / 60 < older_than_minutes:
+                continue
+
+            aged_candidates.append((key, created_at))
+
+        analyses_counts = await asyncio.gather(
+            *(self.client.get_project_analyses_count(key) for key, _ in aged_candidates)
+        )
+
+        return [
+            StaleProject(project_key=key, created_at=created_at)
+            for (key, created_at), analyses_count in zip(aged_candidates, analyses_counts, strict=True)
+            if analyses_count == 0
+        ]
+
+    async def prune_stale_projects(self, stale_projects: list[StaleProject]) -> PruneResult:
+        """Delete stale temp projects, reporting progress as it goes.
+
+        Args:
+            stale_projects: Stale projects to delete (e.g. from find_stale_projects)
+
+        Returns:
+            Summary of how many projects were deleted vs. failed
+        """
+        deleted = 0
+        for project in stale_projects:
+            try:
+                await self.delete_project(project.project_key)
+                success(f"  Deleted: {project.project_key}")
+                deleted += 1
+            except Exception as e:
+                error(f"  Failed to delete {project.project_key}: {e}")
+
+        return PruneResult(deleted_count=deleted, total_count=len(stale_projects))
 
     async def copy_exclusion_settings(self, source_key: str, target_key: str) -> tuple[list[str], int, int]:
         """Copy exclusion settings from source project to target project.

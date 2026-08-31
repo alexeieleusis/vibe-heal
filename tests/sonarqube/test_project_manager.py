@@ -1,6 +1,6 @@
 """Tests for ProjectManager class."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -347,6 +347,86 @@ class TestTempProjectMetadata:
                 base_project_key="base",
                 branch_name="main",
             )
+
+
+class TestFindStaleProjects:
+    """Tests for find_stale_projects method."""
+
+    @pytest.mark.asyncio
+    async def test_finds_stale_temp_project(self, project_manager: ProjectManager, mock_client: AsyncMock) -> None:
+        """A temp project older than the threshold with zero analyses is reported stale."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        stale_key = f"my_project_user_example_com_main_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(
+            return_value=[{"key": stale_key, "name": "my_project analysis user main"}]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert len(result) == 1
+        assert result[0].project_key == stale_key
+        assert result[0].age_minutes >= 120
+        mock_client.search_projects.assert_called_once_with(query="my_project")
+        mock_client.get_project_analyses_count.assert_called_once_with(stale_key)
+
+    @pytest.mark.asyncio
+    async def test_skips_project_with_finished_analysis(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A temp project that has at least one analysis is not stale."""
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%y%m%d-%H%M")
+        key = f"my_project_user_example_com_main_{old_timestamp}"
+        mock_client.search_projects = AsyncMock(return_value=[{"key": key, "name": "my_project analysis user main"}])
+        mock_client.get_project_analyses_count = AsyncMock(return_value=1)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_skips_project_younger_than_threshold(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """A recently created temp project is not stale, even with zero analyses."""
+        recent_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%y%m%d-%H%M")
+        key = f"my_project_user_example_com_main_{recent_timestamp}"
+        mock_client.search_projects = AsyncMock(return_value=[{"key": key, "name": "my_project analysis user main"}])
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+        mock_client.get_project_analyses_count.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_non_matching_project_keys(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """Projects that don't match the temp-project naming convention are ignored."""
+        mock_client.search_projects = AsyncMock(
+            return_value=[
+                {"key": "my_project", "name": "My Project"},
+                {"key": "my_project_other_thing", "name": "My Project Other"},
+            ]
+        )
+        mock_client.get_project_analyses_count = AsyncMock(return_value=0)
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
+        mock_client.get_project_analyses_count.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_candidates(
+        self, project_manager: ProjectManager, mock_client: AsyncMock
+    ) -> None:
+        """No candidates found means no stale projects."""
+        mock_client.search_projects = AsyncMock(return_value=[])
+
+        result = await project_manager.find_stale_projects("my_project", older_than_minutes=60)
+
+        assert result == []
 
 
 class TestCopyExclusionSettings:

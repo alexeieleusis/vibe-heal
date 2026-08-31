@@ -421,6 +421,40 @@ class SonarQubeClient:
         components = data.get("components", [])
         return len(components) > 0
 
+    async def search_projects(self, query: str | None = None, page_size: int = 100) -> list[dict]:
+        """Search for projects, optionally filtered by a text query.
+
+        Args:
+            query: Optional text to match against project keys/names (API's `q` param)
+            page_size: Number of projects per page (default: 100)
+
+        Returns:
+            List of raw project dicts from the API (each has at least "key" and "name")
+
+        Raises:
+            SonarQubeAuthError: Authentication failed
+            SonarQubeAPIError: API request failed
+        """
+        projects: list[dict] = []
+        page = 1
+
+        while True:
+            params: dict[str, Any] = {"p": page, "ps": page_size}
+            if query:
+                params["q"] = query
+
+            data = await self._request("GET", "/api/projects/search", params=params)
+            components = data.get("components", [])
+            projects.extend(components)
+
+            paging = data.get("paging", {})
+            total = paging.get("total")
+            if total is None or page * page_size >= total:
+                break
+            page += 1
+
+        return projects
+
     async def get_project_analyses_count(self, project_key: str) -> int:
         """Get the number of analyses run for a project.
 

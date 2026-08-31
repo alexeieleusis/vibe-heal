@@ -29,6 +29,7 @@ from vibe_heal.review.models import ReviewIssue
 from vibe_heal.review.orchestrator import DEFAULT_BASE_BRANCH, BaselineScanResult, ReviewAnalysisResult
 from vibe_heal.review.reporter import default_report_dir
 from vibe_heal.sonarqube.client import SonarQubeClient
+from vibe_heal.sonarqube.project_manager import ProjectManager, StaleProject
 
 app = typer.Typer(
     name="vibe-heal",
@@ -551,6 +552,120 @@ def dedupe_branch(
             )
         )
 
+    except ConfigurationError as e:
+        error(f"Configuration error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        error(f"Error: {e}")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+def _display_stale_projects(stale_projects: list[StaleProject]) -> None:
+    """Display a list of stale temp projects.
+
+    Args:
+        stale_projects: Stale projects found by ProjectManager.find_stale_projects
+    """
+    bold(f"\nFound {len(stale_projects)} stale project(s):")
+    for project in stale_projects:
+        age = project.age_minutes
+        age_display = f"{age / 60:.1f}h" if age >= 60 else f"{age:.0f}m"
+        console.print(f"  - {rich_escape(project.project_key)} (age: {age_display}, 0 analyses)")
+
+
+async def _run_prune_projects(
+    config: VibeHealConfig,
+    older_than: int,
+    dry_run: bool,
+    yes: bool,
+) -> None:
+    """Run the prune-projects workflow.
+
+    Args:
+        config: Configuration object
+        older_than: Minimum age in minutes before a zero-analysis temp project is considered stale
+        dry_run: List stale projects without deleting them
+        yes: Skip the confirmation prompt before deleting
+    """
+    async with SonarQubeClient(config) as client:
+        project_manager = ProjectManager(client)
+        stale_projects = await project_manager.find_stale_projects(
+            base_key=config.sonarqube_project_key,
+            older_than_minutes=older_than,
+        )
+
+        if not stale_projects:
+            success("No stale projects found.")
+            return
+
+        _display_stale_projects(stale_projects)
+
+        if dry_run:
+            dim("\n[dry-run] No projects deleted.")
+            return
+
+        if not yes and not typer.confirm(f"\nDelete {len(stale_projects)} project(s)?"):
+            warn("Aborted. No projects deleted.")
+            return
+
+        result = await project_manager.prune_stale_projects(stale_projects)
+
+        bold(f"\nPruned {result.deleted_count}/{result.total_count} project(s).")
+        if result.failed_count:
+            sys.exit(1)
+
+
+@app.command()
+def prune_projects(
+    older_than: int = typer.Option(
+        60,
+        "--older-than",
+        help="Minimum age in minutes before a zero-analysis temp project is considered stale",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="List stale projects without deleting them",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt",
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=VERBOSE_OUTPUT_HELP,
+    ),
+) -> None:
+    """Delete stale vibe-heal temp SonarQube projects that never completed an analysis.
+
+    Finds temp projects (created by review/cleanup/dedupe-branch) matching the
+    configured project key that have zero finished analyses and are older than
+    --older-than minutes, then deletes them after confirmation.
+    """
+    setup_logging(verbose)
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        asyncio.run(
+            _run_prune_projects(
+                config=config,
+                older_than=older_than,
+                dry_run=dry_run,
+                yes=yes,
+            )
+        )
     except ConfigurationError as e:
         error(f"Configuration error: {e}")
         sys.exit(1)
