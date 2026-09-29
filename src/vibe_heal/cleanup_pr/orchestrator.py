@@ -18,6 +18,12 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vibe_heal.ai_tools.base import AITool
+from vibe_heal.cleanup_pr.main_duplications import (
+    MainDuplicationTask,
+    build_main_duplication_commit_message,
+    build_main_duplication_prompt,
+    build_main_duplication_task,
+)
 from vibe_heal.cleanup_pr.scope import select_in_scope_duplications, select_in_scope_issues
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.deduplication.client import DuplicationClient
@@ -30,6 +36,8 @@ from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, dim, error, success, warn
 from vibe_heal.processor.issue_processor import IssueProcessor
+from vibe_heal.review.models import FileDiagnostics
+from vibe_heal.review.orchestrator import ReviewOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
@@ -45,6 +53,7 @@ class FileCleanupPrResult(BaseModel):
     duplications_fixed: int = 0
     duplications_out_of_scope: int = 0
     main_duplications_fixed: int = 0
+    main_duplications_skipped: int = 0
     success: bool
     error_message: str | None = None
 
@@ -201,6 +210,8 @@ class CleanupPrOrchestrator:
                 min_severity=min_severity,
                 dry_run=dry_run,
                 verbose=verbose,
+                include_main_duplications=include_main_duplications,
+                original_project_key=original_project_key,
             )
 
             return CleanupPrResult(
@@ -223,6 +234,7 @@ class CleanupPrOrchestrator:
                 analysis_result=e.analysis_result,
                 total_issues_fixed=sum(f.issues_fixed for f in e.files_processed),
                 total_duplications_fixed=sum(f.duplications_fixed for f in e.files_processed),
+                total_main_duplications_fixed=sum(f.main_duplications_fixed for f in e.files_processed),
                 external_files_touched=e.external_files_touched,
                 error_message=str(e),
             )
@@ -506,6 +518,8 @@ class CleanupPrOrchestrator:
         min_severity: str | None,
         dry_run: bool,
         verbose: bool,
+        include_main_duplications: bool = False,
+        original_project_key: str | None = None,
     ) -> tuple[list[FileCleanupPrResult], AnalysisResult | None, list[Path]]:
         """Run the analysis + per-file duplications-then-issues fix loop (FR-2 steps 5-6).
 
@@ -522,6 +536,9 @@ class CleanupPrOrchestrator:
             min_severity: Minimum issue severity to fix.
             dry_run: Preview without committing.
             verbose: Enable verbose output.
+            include_main_duplications: First fix main duplications (FR-6, FR-2 step 5) before the loop.
+            original_project_key: The real project's key (config points at the temp project); required
+                with ``include_main_duplications``.
 
         Returns:
             Tuple of (per-file results, analysis result, external files touched).
@@ -535,24 +552,45 @@ class CleanupPrOrchestrator:
         external_files: list[Path] = []
         analysis_result: AnalysisResult | None = None
 
+        # FR-2 step 5: main duplications first (11.A-3), before any other fix commit. When
+        # nothing was committed the analysis is still fresh and the first iteration reuses it.
+        reusable_analysis: AnalysisResult | None = None
+        if include_main_duplications:
+            if original_project_key is None:
+                msg = "original_project_key is required with include_main_duplications"
+                raise ValueError(msg)
+            reusable_analysis = await self._run_main_duplication_phase(
+                modified_files=modified_files,
+                temp_project=temp_project,
+                base_branch=base_branch,
+                original_project_key=original_project_key,
+                results=results,
+                external_files=external_files,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
+
         for iteration in range(max_iterations):
             bold(f"\nIteration {iteration + 1}/{max_iterations}")
 
             # Step 6.1: full-repo analysis into the temp project.
-            dim("Running SonarQube analysis on full repository...")
-            analysis_result = await self.analysis_runner.run_analysis(
-                project_key=temp_project.project_key,
-                project_name=temp_project.project_name,
-                project_dir=Path.cwd(),
-            )
-            if not analysis_result.success:
-                raise CleanupPrAnalysisError(iteration + 1, analysis_result, list(results.values()), external_files)
-            dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
+            if reusable_analysis is not None:
+                analysis_result, reusable_analysis = reusable_analysis, None
+                dim("Reusing the analysis from the main-duplication phase (no commits were made).")
+            else:
+                dim("Running SonarQube analysis on full repository...")
+                analysis_result = await self.analysis_runner.run_analysis(
+                    project_key=temp_project.project_key,
+                    project_name=temp_project.project_name,
+                    project_dir=Path.cwd(),
+                )
+                if not analysis_result.success:
+                    raise CleanupPrAnalysisError(iteration + 1, analysis_result, list(results.values()), external_files)
+                dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
 
             # Step 6.2: recompute the diff every iteration (fix commits shift lines).
             diff_lines = self.diff_parser.get_diff_lines(base_branch)
-            diff_files = set(diff_lines.new_lines) | set(diff_lines.old_lines) | set(diff_lines.strict_new_lines)
-            diff_files |= {self._to_repo_relative(f) for f in modified_files}
+            diff_files = self._diff_files(diff_lines, modified_files)
 
             # Step 6.3: duplications first, then issues, per file.
             in_scope_remaining = 0
@@ -584,6 +622,177 @@ class CleanupPrOrchestrator:
                 await asyncio.sleep(5)
 
         return list(results.values()), analysis_result, external_files
+
+    def _diff_files(self, diff_lines: DiffLines, modified_files: list[Path]) -> set[str]:
+        """Repo-relative paths of every file in the branch diff (plus the selected files)."""
+        diff_files = set(diff_lines.new_lines) | set(diff_lines.old_lines) | set(diff_lines.strict_new_lines)
+        diff_files |= {self._to_repo_relative(f) for f in modified_files}
+        return diff_files
+
+    # ------------------------------------------------------------------
+    # Main duplications (FR-2 step 5 + FR-6, only with --include-main-duplications)
+    # ------------------------------------------------------------------
+
+    async def _run_main_duplication_phase(
+        self,
+        modified_files: list[Path],
+        temp_project: TempProjectMetadata,
+        base_branch: str,
+        original_project_key: str,
+        results: dict[Path, FileCleanupPrResult],
+        external_files: list[Path],
+        dry_run: bool,
+        verbose: bool,
+    ) -> AnalysisResult | None:
+        """Analyze the branch, then detect and fix main duplications (once, from the original diff).
+
+        The qualifying set is computed before the first fix commit, so ``old_lines`` still
+        describes the original diff. Failure policy is the same as elsewhere: a failed AI
+        attempt increments ``failed`` and processing continues; nothing is reverted.
+
+        Returns:
+            The analysis result when it is still fresh (no commits were made), else None
+            so that the iteration loop starts with a new analysis.
+
+        Raises:
+            CleanupPrAnalysisError: If the analysis fails.
+        """
+        bold("\nMain duplications")
+        dim("Running SonarQube analysis on full repository...")
+        analysis_result = await self.analysis_runner.run_analysis(
+            project_key=temp_project.project_key,
+            project_name=temp_project.project_name,
+            project_dir=Path.cwd(),
+        )
+        if not analysis_result.success:
+            raise CleanupPrAnalysisError(1, analysis_result, list(results.values()), external_files)
+        dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
+
+        diff_lines = self.diff_parser.get_diff_lines(base_branch)
+        diff_files = self._diff_files(diff_lines, modified_files)
+        merge_base = str(self.branch_analyzer.repo.git.merge_base(base_branch, "HEAD")).strip()
+
+        tasks: list[MainDuplicationTask] = []
+        for file_path in modified_files:
+            tasks.extend(
+                await self._detect_main_duplications(
+                    file_path, diff_lines, temp_project, original_project_key, merge_base, verbose
+                )
+            )
+
+        if not tasks:
+            dim("No main duplications to fix.")
+            return analysis_result
+
+        commits = 0
+        for task in tasks:
+            commits += await self._fix_main_duplication(
+                task, results[task.file_path], diff_files, external_files, dry_run
+            )
+        return None if commits else analysis_result
+
+    async def _detect_main_duplications(
+        self,
+        file_path: Path,
+        diff_lines: DiffLines,
+        temp_project: TempProjectMetadata,
+        original_project_key: str,
+        merge_base: str,
+        verbose: bool,
+    ) -> list[MainDuplicationTask]:
+        """Detect a file's qualifying main duplications (FR-6 Detection).
+
+        Queries the REAL project (repo-relative path), keeps blocks that intersect the
+        old-side changed lines and overlap no active duplication of the temp project.
+        Returned in reverse line order (highest main line first).
+        """
+        repo_relative = self._to_repo_relative(file_path)
+        strict_lines = diff_lines.strict_new_lines.get(repo_relative, set())
+        if not diff_lines.old_lines.get(repo_relative) or not strict_lines:
+            return []
+
+        # Active duplications (FR-5) of the branch, from the temp project.
+        groups, target_ref = await self._fetch_duplications(file_path.as_posix(), temp_project, file_path, verbose)
+        active_ranges: set[tuple[int, int]] = set()
+        if target_ref is not None:
+            for group in select_in_scope_duplications(groups, target_ref, strict_lines).in_scope:
+                block = group.get_target_block(target_ref)
+                if block is not None:
+                    active_ranges.add((block.from_line, block.to_line))
+
+        reviewer = ReviewOrchestrator(
+            self.config, self.client, branch_analyzer=self.branch_analyzer, diff_parser=self.diff_parser
+        )
+        diag = FileDiagnostics(file_path=repo_relative, lookup_key=repo_relative)
+        resolved_list = await reviewer._get_resolved_duplications(
+            file_path,
+            {repo_relative: strict_lines},
+            diff_lines.old_lines,
+            active_ranges,
+            original_project_key,
+            diag,
+        )
+        if verbose:
+            dim(f"  {file_path}: main duplications lookup {diag.resolved_dup_api_status}, {len(resolved_list)} found")
+
+        tasks: list[MainDuplicationTask] = []
+        for resolved in sorted(resolved_list, key=lambda r: r.main_from_line, reverse=True):
+            task = build_main_duplication_task(
+                self.branch_analyzer.repo, merge_base, file_path, repo_relative, resolved
+            )
+            if task is None:
+                if verbose:
+                    dim(
+                        f"  {file_path}: main block at line {resolved.main_from_line} skipped (no main-side text or diff)"
+                    )
+                continue
+            tasks.append(task)
+        return tasks
+
+    async def _fix_main_duplication(
+        self,
+        task: MainDuplicationTask,
+        result: FileCleanupPrResult,
+        diff_files: set[str],
+        external_files: list[Path],
+        dry_run: bool,
+    ) -> int:
+        """Fix one main duplication with one AI task and, on success, one commit (FR-6 Fix/Commits).
+
+        Returns:
+            The number of commits created (0 or 1).
+        """
+        line = task.resolved.main_from_line
+        if dry_run:
+            dim(f"  Would fix main duplication at main line {line} in {task.file_path} (dry-run)")
+            result.main_duplications_fixed += 1
+            return 0
+
+        # Same failure policy as cleanup: a dirty tree left by a failed attempt raises here.
+        self.git_manager.require_clean_working_directory()
+        head_before = self.branch_analyzer.get_head_sha()
+        dim(f"\n{task.file_path}: fixing main duplication at main line {line}")
+        fix_result = await self.ai_tool.fix_duplication(build_main_duplication_prompt(task), task.file_path.as_posix())
+        if not fix_result.success:
+            error(
+                f"  Failed to fix main duplication at main line {line}: {fix_result.error_message or 'unknown error'}"
+            )
+            self._mark_failures(result, 1)
+            return 0
+
+        message = build_main_duplication_commit_message(task, self.ai_tool.tool_type.display_name)
+        try:
+            sha = self.git_manager.create_commit(message, None, include_untracked=True)
+        except Exception as e:
+            error(f"  Failed to commit main duplication fix: {e}")
+            self._mark_failures(result, 1)
+            return 0
+        if sha is None:
+            result.main_duplications_skipped += 1
+            return 0
+        result.main_duplications_fixed += 1
+        self._record_external_files(head_before, diff_files, external_files)
+        return 1
 
     async def _process_file(
         self,
