@@ -10,6 +10,7 @@ from vibe_heal.ai_tools import AIToolType, ClaudeCodeTool, FixResult
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.processor.models import ProcessingResult
 from vibe_heal.sonarqube.exceptions import SonarQubeRuleNotFoundError
 from vibe_heal.sonarqube.models import SonarQubeIssue, SonarQubeRule
 
@@ -254,6 +255,168 @@ class TestOrchestratorFixFile:
         assert summary.total_issues == 1
         assert summary.fixed == 0
         assert summary.skipped == 1
+
+    @pytest.mark.asyncio
+    async def test_fix_file_issue_filter_none_passes_full_list_to_processor(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+    ) -> None:
+        """When issue_filter is omitted, the processor receives the full fetched list."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        issues = [
+            SonarQubeIssue(
+                key="issue-1",
+                rule="python:S1481",
+                message="First issue",
+                component="project:src/test.py",
+                line=10,
+                status="OPEN",
+                severity="MAJOR",
+                type="CODE_SMELL",
+            ),
+            SonarQubeIssue(
+                key="issue-2",
+                rule="python:S1481",
+                message="Second issue",
+                component="project:src/test.py",
+                line=20,
+                status="OPEN",
+                severity="MAJOR",
+                type="CODE_SMELL",
+            ),
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = issues
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mock_processor = mocker.patch("vibe_heal.orchestrator.IssueProcessor")
+        mock_processor.return_value.process.return_value = ProcessingResult(
+            total_issues=2,
+            fixable_issues=2,
+            skipped_issues=0,
+            issues_to_fix=[],
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True)
+
+        mock_processor.return_value.process.assert_called_once_with(issues)
+        assert summary.total_issues == 2
+        assert summary.fixed == 0
+
+    @pytest.mark.asyncio
+    async def test_fix_file_issue_filter_passes_only_matching_issues_to_processor(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+    ) -> None:
+        """When issue_filter is supplied, only the issues it keeps reach the processor."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        issues = [
+            SonarQubeIssue(
+                key="issue-1",
+                rule="python:S1481",
+                message="First issue",
+                component="project:src/test.py",
+                line=10,
+                status="OPEN",
+                severity="MAJOR",
+                type="CODE_SMELL",
+            ),
+            SonarQubeIssue(
+                key="issue-2",
+                rule="python:S1481",
+                message="Second issue",
+                component="project:src/test.py",
+                line=20,
+                status="OPEN",
+                severity="MAJOR",
+                type="CODE_SMELL",
+            ),
+            SonarQubeIssue(
+                key="issue-3",
+                rule="python:S1481",
+                message="Third issue",
+                component="project:src/test.py",
+                line=30,
+                status="OPEN",
+                severity="MAJOR",
+                type="CODE_SMELL",
+            ),
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = issues
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        mock_processor = mocker.patch("vibe_heal.orchestrator.IssueProcessor")
+        mock_processor.return_value.process.return_value = ProcessingResult(
+            total_issues=1,
+            fixable_issues=1,
+            skipped_issues=0,
+            issues_to_fix=[],
+        )
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        await orchestrator.fix_file(str(test_file), dry_run=True, issue_filter=lambda issue: issue.line == 20)
+
+        mock_processor.return_value.process.assert_called_once_with([issues[1]])
+
+    @pytest.mark.asyncio
+    async def test_fix_file_issue_filter_removes_all_issues_uses_existing_empty_path(
+        self,
+        mock_config: VibeHealConfig,
+        mocker: MockerFixture,
+        tmp_path: Path,
+    ) -> None:
+        """When issue_filter removes every issue, the existing no-fixable path is taken."""
+        mocker.patch("shutil.which", return_value="/usr/bin/claude")
+        mocker.patch.object(GitManager, "is_repository", return_value=True)
+
+        issue = SonarQubeIssue(
+            key="issue-1",
+            rule="python:S1481",
+            message="First issue",
+            component="project:src/test.py",
+            line=10,
+            status="OPEN",
+            severity="MAJOR",
+            type="CODE_SMELL",
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get_issues_for_file.return_value = [issue]
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mocker.patch("vibe_heal.orchestrator.SonarQubeClient", return_value=mock_client)
+
+        orchestrator = VibeHealOrchestrator(mock_config)
+        test_file = tmp_path / "test.py"
+        test_file.write_text("code")
+
+        summary = await orchestrator.fix_file(str(test_file), dry_run=True, issue_filter=lambda i: False)
+
+        assert summary.total_issues == 0
+        assert summary.fixed == 0
+        assert summary.failed == 0
 
     @pytest.mark.asyncio
     async def test_fix_file_successful_dry_run(

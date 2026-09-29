@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.progress import Progress, SpinnerColumn, TaskID, TextColumn
@@ -65,6 +66,7 @@ class VibeHealOrchestrator:
         dry_run: bool = False,
         max_issues: int | None = None,
         min_severity: str | None = None,
+        issue_filter: Callable[[SonarQubeIssue], bool] | None = None,
     ) -> FixSummary:
         """Fix SonarQube issues in a file.
 
@@ -73,6 +75,8 @@ class VibeHealOrchestrator:
             dry_run: If True, don't commit changes
             max_issues: Maximum number of issues to fix
             min_severity: Minimum severity to process
+            issue_filter: Optional predicate; when set, only fetched issues for which it
+                returns True are passed to the processor
 
         Returns:
             Summary of fixes
@@ -96,6 +100,10 @@ class VibeHealOrchestrator:
         if not issues:
             success("No issues found!")
             return FixSummary(total_issues=0)
+
+        # Apply the optional caller-supplied issue filter before processing
+        if issue_filter is not None:
+            issues = [i for i in issues if issue_filter(i)]
 
         # Step 3: Process issues (filter and sort)
         processor = IssueProcessor(
