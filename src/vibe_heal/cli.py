@@ -15,6 +15,7 @@ from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
+from vibe_heal.cleanup_pr.orchestrator import CleanupPrOrchestrator, CleanupPrResult
 from vibe_heal.config import ConfigurationError, VibeHealConfig
 from vibe_heal.converters.oxlint import convert_oxlint_to_eslint
 from vibe_heal.deduplication.orchestrator import (
@@ -403,6 +404,174 @@ def cleanup(
                 base_branch=base_branch,
                 max_iterations=max_iterations,
                 file_patterns=file_patterns,
+                verbose=verbose,
+            )
+        )
+
+    except ConfigurationError as e:
+        error(f"Configuration error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        error(f"Error: {e}")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) -> None:
+    """Display PR-scoped cleanup results.
+
+    Args:
+        result: Cleanup-PR result to display
+        dry_run: Whether this was a dry run (nothing was fixed or committed)
+    """
+    console.print("\n[bold]Cleanup Summary (PR scope):[/bold]")
+    console.print(f"  Files processed: {len(result.files_processed)}")
+    success(f"  Total issues fixed: {result.total_issues_fixed}")
+    success(f"  Total duplications fixed: {result.total_duplications_fixed}")
+    if dry_run:
+        dim("  Dry run: no changes were made")
+
+    if result.files_processed:
+        console.print("\n[bold]Per-File Results:[/bold]")
+        for file_result in result.files_processed:
+            status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
+            console.print(f"  {status} {rich_escape(str(file_result.file_path))}")
+            console.print(
+                f"      issues: {file_result.issues_fixed} fixed, {file_result.issues_out_of_scope} out of scope"
+            )
+            console.print(
+                f"      duplications: {file_result.duplications_fixed} fixed, "
+                f"{file_result.duplications_out_of_scope} out of scope"
+            )
+            if file_result.error_message:
+                error(f"      Error: {file_result.error_message}")
+
+    if not result.success:
+        if result.error_message:
+            error(f"\nCleanup failed: {result.error_message}")
+        sys.exit(1)
+
+    console.print("\n[green]✨ Branch cleanup (PR scope) complete![/green]")
+    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+
+
+async def _run_cleanup_pr(
+    config: VibeHealConfig,
+    ai_tool_instance: AITool,
+    base_branch: str,
+    max_iterations: int,
+    file_patterns: list[str] | None,
+    min_severity: str | None,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Run PR-scoped branch cleanup workflow.
+
+    Args:
+        config: Configuration object
+        ai_tool_instance: AI tool instance to use for fixing
+        base_branch: Base branch to compare against
+        max_iterations: Maximum analyze/fix rounds for the whole branch
+        file_patterns: Optional file patterns to filter
+        min_severity: Optional minimum issue severity
+        dry_run: Preview without AI calls or commits
+        verbose: Enable verbose output
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = CleanupPrOrchestrator(config, client, ai_tool_instance)
+
+        result = await orchestrator.cleanup_pr(
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+            min_severity=min_severity,
+            include_main_duplications=False,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+
+        _display_cleanup_pr_results(result, dry_run=dry_run)
+
+
+@app.command()
+def cleanup_pr(
+    base_branch: str = typer.Option(
+        DEFAULT_BASE_BRANCH,
+        "--base-branch",
+        "-b",
+        help=BASE_BRANCH_HELP,
+    ),
+    max_iterations: int = typer.Option(
+        10,
+        "--max-iterations",
+        "-i",
+        help="Maximum fix iterations per file",
+    ),
+    file_patterns: list[str] | None = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help=FILE_PATTERN_HELP,
+    ),
+    min_severity: str | None = typer.Option(
+        None,
+        "--min-severity",
+        help="Minimum severity (BLOCKER, CRITICAL, MAJOR, MINOR, INFO)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview fixes without committing",
+    ),
+    ai_tool: AIToolType | None = typer.Option(
+        None,
+        "--ai-tool",
+        help=AI_TOOL_OVERRIDE_HELP,
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=VERBOSE_OUTPUT_HELP,
+    ),
+) -> None:
+    """Clean up issues and duplications introduced by the current branch (PR scope).
+
+    Creates a temporary SonarQube project, analyzes the branch, and fixes only
+    findings on lines changed relative to the base branch.
+    """
+    setup_logging(verbose)
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        if ai_tool:
+            config.ai_tool = ai_tool
+
+        _display_branch_operation_header(
+            operation_name="Branch Cleanup (PR scope)",
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+        )
+
+        ai_tool_instance = initialize_ai_tool(config)
+
+        asyncio.run(
+            _run_cleanup_pr(
+                config=config,
+                ai_tool_instance=ai_tool_instance,
+                base_branch=base_branch,
+                max_iterations=max_iterations,
+                file_patterns=file_patterns,
+                min_severity=min_severity,
+                dry_run=dry_run,
                 verbose=verbose,
             )
         )
