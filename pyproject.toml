@@ -37,7 +37,7 @@ Documentation = "https://alexeieleusis.github.io/vibe-heal/"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-    "pre-commit>=4.6.1",
+    "pre-commit>=4.6.2",
     "tox-uv>=1.36.0",
     "deptry>=0.23.0",
     "mypy>=2.3.0",
