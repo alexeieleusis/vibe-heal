@@ -4,9 +4,11 @@ Skeleton for the ``cleanup-pr`` workflow. This module owns the strict
 preconditions (FR-2 step 1 + 11.A-12), file selection (step 2), the temporary
 SonarQube project lifecycle (step 4 + step 7), and the top-level failure policy
 (11.A-8 / 11.A-14, same as ``cleanup``). The analysis + per-file fix loop
-(FR-2 steps 5-6) is a clearly-marked stub that WO-2b-ii / Phase 05 fills in.
+(FR-2 steps 5-6) lives in ``_run_iteration_loop``: analyze, recompute the diff, fix
+in-scope duplications then in-scope issues per file, repeat.
 """
 
+import asyncio
 import shlex
 import subprocess
 from pathlib import Path
@@ -14,13 +16,21 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vibe_heal.ai_tools.base import AITool
+from vibe_heal.cleanup_pr.scope import select_in_scope_duplications, select_in_scope_issues
 from vibe_heal.config import VibeHealConfig
+from vibe_heal.deduplication.client import DuplicationClient
+from vibe_heal.deduplication.models import DuplicationGroup
+from vibe_heal.deduplication.orchestrator import DeduplicationOrchestrator
 from vibe_heal.git.branch_analyzer import BranchAnalyzer, BranchNotFoundError
+from vibe_heal.git.diff_parser import DiffLines, DiffParser
 from vibe_heal.git.exceptions import GitOperationError, NotAGitRepositoryError
 from vibe_heal.git.manager import GitManager
-from vibe_heal.output import dim, error, success, warn
+from vibe_heal.orchestrator import VibeHealOrchestrator
+from vibe_heal.output import bold, dim, error, success, warn
+from vibe_heal.processor.issue_processor import IssueProcessor
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
+from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
 from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetadata
 
 
@@ -51,6 +61,26 @@ class CleanupPrResult(BaseModel):
     error_message: str | None = None
 
 
+class CleanupPrAnalysisError(Exception):
+    """Raised by the iteration loop when a SonarQube analysis round fails.
+
+    Carries the partial state so ``cleanup_pr`` can return a failed result that
+    still reports what was done before the failure.
+    """
+
+    def __init__(
+        self,
+        iteration: int,
+        analysis_result: AnalysisResult,
+        files_processed: list[FileCleanupPrResult],
+        external_files_touched: list[Path],
+    ) -> None:
+        super().__init__(f"Analysis failed at iteration {iteration}: {analysis_result.error_message}")
+        self.analysis_result = analysis_result
+        self.files_processed = files_processed
+        self.external_files_touched = external_files_touched
+
+
 class CleanupPrOrchestrator:
     """Orchestrates the branch PR cleanup workflow.
 
@@ -58,7 +88,7 @@ class CleanupPrOrchestrator:
     - Strict preconditions (repo, base branch, AI tool, clean tree, fetch, up-to-date)
     - File selection (modified vs. base)
     - Temporary project creation
-    - SonarQube analysis + per-file fix loop (stub, Phase 05)
+    - SonarQube analysis + per-file duplications-then-issues fix loop
     - Project cleanup
     """
 
@@ -67,6 +97,7 @@ class CleanupPrOrchestrator:
         config: VibeHealConfig,
         client: SonarQubeClient,
         ai_tool: AITool,
+        diff_parser: DiffParser | None = None,
     ) -> None:
         """Initialize the cleanup-pr orchestrator.
 
@@ -74,6 +105,7 @@ class CleanupPrOrchestrator:
             config: Application configuration
             client: SonarQube API client
             ai_tool: AI tool for fixing issues
+            diff_parser: Optional DiffParser instance (for testing)
         """
         self.config = config
         self.client = client
@@ -82,6 +114,7 @@ class CleanupPrOrchestrator:
         self.analysis_runner = AnalysisRunner(config, client)
         self.branch_analyzer = BranchAnalyzer(Path.cwd())
         self.git_manager = GitManager(Path.cwd(), pre_commit_command=config.pre_commit_command)
+        self.diff_parser = diff_parser if diff_parser is not None else DiffParser(Path.cwd())
 
     async def cleanup_pr(
         self,
@@ -146,6 +179,7 @@ class CleanupPrOrchestrator:
             ) = await self._run_iteration_loop(
                 modified_files=modified_files,
                 temp_project=temp_project,
+                base_branch=base_branch,
                 max_iterations=max_iterations,
                 min_severity=min_severity,
                 dry_run=dry_run,
@@ -161,6 +195,19 @@ class CleanupPrOrchestrator:
                 total_duplications_fixed=sum(f.duplications_fixed for f in files_processed),
                 total_main_duplications_fixed=sum(f.main_duplications_fixed for f in files_processed),
                 external_files_touched=external_files_touched,
+            )
+
+        except CleanupPrAnalysisError as e:
+            error(str(e))
+            return CleanupPrResult(
+                success=False,
+                files_processed=e.files_processed,
+                temp_project=temp_project,
+                analysis_result=e.analysis_result,
+                total_issues_fixed=sum(f.issues_fixed for f in e.files_processed),
+                total_duplications_fixed=sum(f.duplications_fixed for f in e.files_processed),
+                external_files_touched=e.external_files_touched,
+                error_message=str(e),
             )
 
         except Exception as e:
@@ -365,13 +412,14 @@ class CleanupPrOrchestrator:
                 warn(f"Warning: Failed to delete temporary project: {e}")
 
     # ------------------------------------------------------------------
-    # Iteration/fix loop (FR-2 steps 5-6) — STUB
+    # Iteration/fix loop (FR-2 steps 5-6)
     # ------------------------------------------------------------------
 
     async def _run_iteration_loop(
         self,
         modified_files: list[Path],
         temp_project: TempProjectMetadata,
+        base_branch: str,
         max_iterations: int,
         min_severity: str | None,
         dry_run: bool,
@@ -379,9 +427,15 @@ class CleanupPrOrchestrator:
     ) -> tuple[list[FileCleanupPrResult], AnalysisResult | None, list[Path]]:
         """Run the analysis + per-file duplications-then-issues fix loop (FR-2 steps 5-6).
 
+        Each iteration runs a full-repo analysis, recomputes the diff (earlier fix
+        commits shift line numbers), then per file fixes in-scope duplications first
+        and in-scope issues second. Stops early when nothing in scope remains. Under
+        ``dry_run`` nothing is committed, so a single analysis/scoping round is run.
+
         Args:
             modified_files: Selected files to process.
             temp_project: Active temp project (keys are already overridden by the caller).
+            base_branch: Base branch the diff is computed against.
             max_iterations: Maximum analysis iterations for the whole branch.
             min_severity: Minimum issue severity to fix.
             dry_run: Preview without committing.
@@ -389,7 +443,245 @@ class CleanupPrOrchestrator:
 
         Returns:
             Tuple of (per-file results, analysis result, external files touched).
+
+        Raises:
+            CleanupPrAnalysisError: If an analysis round fails.
         """
-        # WO-2b-ii / Phase 05: implement the iteration loop here.
-        files = [FileCleanupPrResult(file_path=f, success=True) for f in modified_files]
-        return files, None, []
+        results: dict[Path, FileCleanupPrResult] = {
+            f: FileCleanupPrResult(file_path=f, success=True) for f in modified_files
+        }
+        external_files: list[Path] = []
+        analysis_result: AnalysisResult | None = None
+
+        for iteration in range(max_iterations):
+            bold(f"\nIteration {iteration + 1}/{max_iterations}")
+
+            # Step 6.1: full-repo analysis into the temp project.
+            dim("Running SonarQube analysis on full repository...")
+            analysis_result = await self.analysis_runner.run_analysis(
+                project_key=temp_project.project_key,
+                project_name=temp_project.project_name,
+                project_dir=Path.cwd(),
+            )
+            if not analysis_result.success:
+                raise CleanupPrAnalysisError(iteration + 1, analysis_result, list(results.values()), external_files)
+            dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
+
+            # Step 6.2: recompute the diff every iteration (fix commits shift lines).
+            diff_lines = self.diff_parser.get_diff_lines(base_branch)
+            diff_files = set(diff_lines.new_lines) | set(diff_lines.old_lines) | set(diff_lines.strict_new_lines)
+            diff_files |= {self._to_repo_relative(f) for f in modified_files}
+
+            # Step 6.3: duplications first, then issues, per file.
+            in_scope_remaining = 0
+            for file_path in modified_files:
+                in_scope_remaining += await self._process_file(
+                    file_path=file_path,
+                    result=results[file_path],
+                    diff_lines=diff_lines,
+                    diff_files=diff_files,
+                    external_files=external_files,
+                    temp_project=temp_project,
+                    min_severity=min_severity,
+                    dry_run=dry_run,
+                    verbose=verbose,
+                )
+
+            # Step 6.4: stop early when nothing in scope remains.
+            if in_scope_remaining == 0:
+                success("✓ No in-scope issues or duplications remaining!")
+                break
+
+            if dry_run:
+                # Nothing is committed in a dry run, so another round would see the same findings.
+                break
+
+            # Step 6.5: wait before the next analysis, as cleanup does.
+            if iteration < max_iterations - 1:
+                dim("Waiting for SonarQube to process changes...")
+                await asyncio.sleep(5)
+
+        return list(results.values()), analysis_result, external_files
+
+    async def _process_file(
+        self,
+        file_path: Path,
+        result: FileCleanupPrResult,
+        diff_lines: DiffLines,
+        diff_files: set[str],
+        external_files: list[Path],
+        temp_project: TempProjectMetadata,
+        min_severity: str | None,
+        dry_run: bool,
+        verbose: bool,
+    ) -> int:
+        """Fix one file's in-scope duplications, then its in-scope issues.
+
+        Updates ``result`` and ``external_files`` in place.
+
+        Returns:
+            The number of in-scope items found in this file this round (0 means converged).
+        """
+        repo_relative = self._to_repo_relative(file_path)
+        # DiffParser maps are keyed by repo-relative path; SonarQube is queried by CWD-relative path.
+        new_lines = diff_lines.new_lines.get(repo_relative, set())
+        strict_lines = diff_lines.strict_new_lines.get(repo_relative, set())
+        if not new_lines and not strict_lines:
+            if verbose:
+                dim(f"  {file_path}: skipped (no changed lines)")
+            return 0
+
+        # Duplications first (FR-5): a refactor can remove or move code that has issues.
+        dup_found, dup_failed, dup_commits = await self._fix_duplications(
+            file_path, result, strict_lines, diff_files, external_files, temp_project, dry_run, verbose
+        )
+        if dup_commits:
+            # The temp-project analysis predates these commits, so its line numbers are stale for
+            # this file; defer its issues to the next iteration's fresh analysis.
+            if verbose:
+                dim(f"  {file_path}: issues deferred to next iteration (duplication commits shifted lines)")
+            self._mark_failures(result, dup_failed)
+            return dup_found
+
+        # Issues second (FR-4).
+        issue_found, issue_failed = await self._fix_issues(
+            file_path, result, new_lines, strict_lines, min_severity, dry_run, verbose
+        )
+        self._mark_failures(result, dup_failed + issue_failed)
+        return dup_found + issue_found
+
+    @staticmethod
+    def _mark_failures(result: FileCleanupPrResult, failed: int) -> None:
+        """Flag the file result when any fix failed."""
+        if failed:
+            result.success = False
+            result.error_message = f"{failed} fix(es) failed"
+
+    async def _fix_duplications(
+        self,
+        file_path: Path,
+        result: FileCleanupPrResult,
+        strict_lines: set[int],
+        diff_files: set[str],
+        external_files: list[Path],
+        temp_project: TempProjectMetadata,
+        dry_run: bool,
+        verbose: bool,
+    ) -> tuple[int, int, int]:
+        """Fix a file's in-scope duplications (FR-5).
+
+        Returns:
+            ``(in_scope_found, failed, commits_created)``.
+        """
+        cwd_relative = file_path.as_posix()
+        groups, target_ref = await self._fetch_duplications(cwd_relative, temp_project, file_path, verbose)
+        if target_ref is None:
+            return 0, 0, 0
+
+        scope = select_in_scope_duplications(groups, target_ref, strict_lines)
+        result.duplications_out_of_scope = scope.out_of_scope_count
+        if not scope.in_scope:
+            return 0, 0, 0
+
+        dim(f"\n{file_path}: {len(scope.in_scope)} in-scope duplication group(s)")
+        head_before = self.branch_analyzer.get_head_sha()
+        dedupe = DeduplicationOrchestrator(self.config, self.ai_tool, git_manager=self.git_manager)
+        summary = await dedupe.dedupe_file(
+            file_path=cwd_relative,
+            dry_run=dry_run,
+            max_duplications=None,
+            group_filter=lambda group, ref: bool(select_in_scope_duplications([group], ref, strict_lines).in_scope),
+        )
+        result.duplications_fixed += summary.fixed
+        if summary.commits:
+            self._record_external_files(head_before, diff_files, external_files)
+        return len(scope.in_scope), summary.failed, len(summary.commits)
+
+    async def _fix_issues(
+        self,
+        file_path: Path,
+        result: FileCleanupPrResult,
+        new_lines: set[int],
+        strict_lines: set[int],
+        min_severity: str | None,
+        dry_run: bool,
+        verbose: bool,
+    ) -> tuple[int, int]:
+        """Fix a file's in-scope issues (FR-4).
+
+        Returns:
+            ``(in_scope_found, failed)``.
+        """
+        cwd_relative = file_path.as_posix()
+        try:
+            issues = await self.client.get_issues_for_file(cwd_relative)
+        except ComponentNotFoundError:
+            if verbose:
+                dim(f"  {file_path}: skipped (not in SonarQube analysis)")
+            return 0, 0
+
+        scope = select_in_scope_issues(issues, new_lines, strict_lines)
+        result.issues_out_of_scope = scope.out_of_scope_count
+        actionable = IssueProcessor(min_severity=min_severity, max_issues=None).process(scope.in_scope)
+        if not actionable.issues_to_fix:
+            return 0, 0
+
+        dim(f"\n{file_path}: {len(actionable.issues_to_fix)} in-scope issue(s)")
+        fixer = VibeHealOrchestrator(config=self.config, ai_tool=self.ai_tool)
+        summary = await fixer.fix_file(
+            file_path=cwd_relative,
+            dry_run=dry_run,
+            max_issues=None,
+            min_severity=min_severity,
+            issue_filter=lambda issue: bool(select_in_scope_issues([issue], new_lines, strict_lines).in_scope),
+        )
+        result.issues_fixed += summary.fixed
+        return len(actionable.issues_to_fix), summary.failed
+
+    async def _fetch_duplications(
+        self,
+        cwd_relative: str,
+        temp_project: TempProjectMetadata,
+        file_path: Path,
+        verbose: bool,
+    ) -> tuple[list[DuplicationGroup], str | None]:
+        """Fetch a file's duplication groups from the temp project.
+
+        Returns:
+            ``(groups, target_ref)``; ``target_ref`` is None when the file is not in the
+            analysis or has no target reference (nothing to scope).
+        """
+        try:
+            async with DuplicationClient(self.config) as dup_client:
+                response = await dup_client.get_duplications_for_file(cwd_relative)
+        except ComponentNotFoundError:
+            if verbose:
+                dim(f"  {file_path}: skipped for duplications (not in SonarQube analysis)")
+            return [], None
+        if not response.duplications:
+            return [], None
+        target_ref = response.get_target_file_ref(f"{temp_project.project_key}:{cwd_relative}")
+        return response.duplications, target_ref
+
+    def _record_external_files(self, head_before: str, diff_files: set[str], external_files: list[Path]) -> None:
+        """Record files a duplication refactor modified outside the branch diff (11.A-11)."""
+        head_after = self.branch_analyzer.get_head_sha()
+        if head_after == head_before:
+            return
+        changed = self.branch_analyzer.repo.git.diff("--name-only", head_before, head_after)
+        for name in changed.splitlines():
+            name = name.strip()
+            if name and name not in diff_files and Path(name) not in external_files:
+                warn(f"  Duplication refactor modified a file outside the branch diff: {name}")
+                external_files.append(Path(name))
+
+    def _to_repo_relative(self, file_path: Path) -> str:
+        """Convert a (possibly CWD-relative) path to a repo-root-relative POSIX string."""
+        try:
+            repo_root = Path(self.branch_analyzer.repo.working_dir)
+            if file_path.is_absolute():
+                return file_path.relative_to(repo_root).as_posix()
+            resolved = (Path.cwd() / file_path).resolve()
+            return resolved.relative_to(repo_root.resolve()).as_posix()
+        except (ValueError, TypeError):
+            return file_path.as_posix()
