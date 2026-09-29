@@ -749,7 +749,7 @@ class TestIterationLoopControl:
     async def test_flag_off_never_queries_real_project(
         self, orchestrator: CleanupPrOrchestrator, mock_client: AsyncMock, temp_project: TempProjectMetadata
     ) -> None:
-        """include_main_duplications=True is ignored: only the temp project is analyzed/queried."""
+        """Flag off: only the temp project is analyzed/queried, never the real project."""
         with (
             _preconditions_pass(orchestrator),
             patch.object(orchestrator.branch_analyzer, "get_modified_files", return_value=[_FILE]),
@@ -770,7 +770,7 @@ class TestIterationLoopControl:
                 return original.__next__() if hasattr(original, "__next__") else []
 
             mock_client.get_issues_for_file = AsyncMock(side_effect=spy)
-            result = await orchestrator.cleanup_pr(include_main_duplications=True)
+            result = await orchestrator.cleanup_pr(include_main_duplications=False)
 
         assert result.success is True
         assert keys_seen == [temp_project.project_key]

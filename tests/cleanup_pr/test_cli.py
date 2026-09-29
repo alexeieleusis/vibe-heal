@@ -165,9 +165,9 @@ class TestCleanupPrCommand:
         assert "Cleanup failed: Analysis failed at iteration 2: nope" in result.stdout
         assert "complete!" not in result.stdout
 
-    def test_include_main_duplications_rejected(self, mocks: tuple[MagicMock, MagicMock]) -> None:
+    def test_include_main_duplications_passed_through(self, mocks: tuple[MagicMock, MagicMock]) -> None:
         orchestrator, _ = mocks
         result = runner.invoke(app, ["cleanup-pr", "--include-main-duplications"])
 
-        assert result.exit_code == 2
-        orchestrator.cleanup_pr.assert_not_called()
+        assert result.exit_code == 0
+        assert orchestrator.cleanup_pr.call_args.kwargs["include_main_duplications"] is True

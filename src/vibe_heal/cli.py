@@ -463,6 +463,7 @@ async def _run_cleanup_pr(
     max_iterations: int,
     file_patterns: list[str] | None,
     min_severity: str | None,
+    include_main_duplications: bool,
     dry_run: bool,
     verbose: bool,
 ) -> None:
@@ -475,6 +476,7 @@ async def _run_cleanup_pr(
         max_iterations: Maximum analyze/fix rounds for the whole branch
         file_patterns: Optional file patterns to filter
         min_severity: Optional minimum issue severity
+        include_main_duplications: Also handle duplications from main (runs a baseline scan)
         dry_run: Preview without AI calls or commits
         verbose: Enable verbose output
     """
@@ -486,7 +488,7 @@ async def _run_cleanup_pr(
             max_iterations=max_iterations,
             file_patterns=file_patterns,
             min_severity=min_severity,
-            include_main_duplications=False,
+            include_main_duplications=include_main_duplications,
             dry_run=dry_run,
             verbose=verbose,
         )
@@ -518,6 +520,15 @@ def cleanup_pr(
         None,
         "--min-severity",
         help="Minimum severity (BLOCKER, CRITICAL, MAJOR, MINOR, INFO)",
+    ),
+    include_main_duplications: bool = typer.Option(
+        False,
+        "--include-main-duplications",
+        help=(
+            "Also fix duplications that existed in the base branch and were modified or removed by "
+            "this branch. Runs a baseline scan of the base branch that overwrites the real project's "
+            "SonarQube analysis (even with --dry-run)."
+        ),
     ),
     dry_run: bool = typer.Option(
         False,
@@ -571,6 +582,7 @@ def cleanup_pr(
                 max_iterations=max_iterations,
                 file_patterns=file_patterns,
                 min_severity=min_severity,
+                include_main_duplications=include_main_duplications,
                 dry_run=dry_run,
                 verbose=verbose,
             )

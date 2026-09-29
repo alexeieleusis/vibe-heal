@@ -10,7 +10,9 @@ in-scope duplications then in-scope issues per file, repeat.
 
 import asyncio
 import shlex
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -131,15 +133,16 @@ class CleanupPrOrchestrator:
         The strict preconditions (FR-2 step 1 + 11.A-12) run up front, before any
         SonarQube work: the tree must be a clean git repository sitting on top of
         a freshly fetched base branch, with an available AI tool unless this is a
-        dry run. ``include_main_duplications`` is accepted for forward
-        compatibility but is not acted on in this phase (behaves as False).
+        dry run. With ``include_main_duplications`` a baseline scan of the base ref
+        (FR-2 step 3) refreshes the real project's analysis before the temp project
+        is created; it always runs when the flag is set, including in dry-run.
 
         Args:
             base_branch: Base branch to fetch and compare against (default: origin/main)
             max_iterations: Maximum analysis iterations for the whole branch (default: 10)
             file_patterns: Optional list of glob patterns to filter files
             min_severity: Minimum issue severity to fix (passed through to the loop)
-            include_main_duplications: Accepted but unused in this phase (WO-3)
+            include_main_duplications: Run the baseline scan of the base ref against the real project (FR-2 step 3)
             dry_run: Preview without committing (skips the AI-tool availability check)
             verbose: Enable verbose output
 
@@ -161,6 +164,20 @@ class CleanupPrOrchestrator:
 
             if not modified_files:
                 return CleanupPrResult(success=True, files_processed=[])
+
+            # Step 3: baseline scan of the base ref into the real project (flag only).
+            # Runs before the temp project exists, so a failure needs no deletion.
+            if include_main_duplications:
+                baseline_result = await self._run_baseline_scan(base_branch)
+                if not baseline_result.success:
+                    msg = f"Baseline scan failed: {baseline_result.error_message}"
+                    error(msg)
+                    return CleanupPrResult(
+                        success=False,
+                        files_processed=[],
+                        analysis_result=baseline_result,
+                        error_message=msg,
+                    )
 
             # Step 4: create the temporary SonarQube project.
             temp_project = await self._create_temp_project()
@@ -376,6 +393,71 @@ class CleanupPrOrchestrator:
                     filtered.append(file_path)
                     break
         return filtered
+
+    # ------------------------------------------------------------------
+    # Baseline scan (FR-2 step 3, only with --include-main-duplications)
+    # ------------------------------------------------------------------
+
+    async def _run_baseline_scan(self, base_branch: str) -> AnalysisResult:
+        """Refresh the real project's analysis so it reflects ``base_branch``.
+
+        Checks the base ref out into a temporary ``git worktree`` (git state of the
+        working tree is untouched), runs a full analysis against the real project
+        key from there, and removes the worktree in a ``finally`` on every path.
+        Always runs when called: no up-to-date check (11.A-13). This overwrites the
+        real project's analysis on the server, including in dry-run.
+
+        Args:
+            base_branch: Base ref to scan (e.g. 'origin/main').
+
+        Returns:
+            The AnalysisResult of the baseline scan.
+
+        Raises:
+            GitOperationError: If the worktree cannot be created.
+        """
+        project_key = self.config.sonarqube_project_key
+        worktree_dir = Path(tempfile.mkdtemp(prefix="vibe-heal-baseline-"))
+        created = False
+        try:
+            self._add_worktree(worktree_dir, base_branch)
+            created = True
+            dim(f"Running baseline SonarQube scan of {base_branch} against {project_key}...")
+            return await self.analysis_runner.run_analysis(
+                project_key=project_key,
+                project_name=project_key,
+                project_dir=worktree_dir,
+            )
+        finally:
+            self._remove_worktree(worktree_dir, created)
+
+    @staticmethod
+    def _add_worktree(worktree_dir: Path, base_branch: str) -> None:
+        """Create a detached worktree of ``base_branch`` at ``worktree_dir``."""
+        cmd = ["git", "worktree", "add", "--detach", str(worktree_dir), base_branch]
+        try:
+            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
+        except OSError as e:
+            msg = f"Failed to create worktree for {base_branch}: {e}"
+            raise GitOperationError(msg) from e
+        if result.returncode != 0:
+            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            msg = f"Failed to create worktree for {base_branch}: {stderr_text or f'exit code {result.returncode}'}"
+            raise GitOperationError(msg)
+
+    @staticmethod
+    def _remove_worktree(worktree_dir: Path, created: bool) -> None:
+        """Remove the baseline worktree; failures are warnings, never errors."""
+        if created:
+            cmd = ["git", "worktree", "remove", "--force", str(worktree_dir)]
+            try:
+                result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+                if result.returncode != 0:
+                    warn(f"Warning: Failed to remove worktree {worktree_dir}")
+            except OSError as e:
+                warn(f"Warning: Failed to remove worktree {worktree_dir}: {e}")
+        # Also drops the mkdtemp directory when the worktree was never created.
+        shutil.rmtree(worktree_dir, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Temp project lifecycle (FR-2 step 4 + step 7)
