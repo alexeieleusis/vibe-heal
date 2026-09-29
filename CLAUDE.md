@@ -260,6 +260,51 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Always cleans up temporary project in finally block
   - Supports file pattern filtering (e.g., `["*.py", "src/**/*.ts"]`)
 
+**`cleanup_pr/`**: PR-scoped branch cleanup workflow (issues and duplications on changed lines only)
+
+- `CleanupPrOrchestrator` (`cleanup_pr/orchestrator.py`) - orchestrates the PR-scoped cleanup; new package mirroring `cleanup/`
+  - `cleanup_pr(base_branch, max_iterations, file_patterns, min_severity, include_main_duplications, dry_run, verbose) -> CleanupPrResult` - main workflow
+  - Constructor takes optional `diff_parser` (for testing)
+  - Does not replace `cleanup` / `dedupe-branch` (those fix whole modified files); does no GitHub interaction (run `review --post` afterwards) and does not push
+  - Workflow:
+    1. Preconditions, all before any SonarQube work: git repo, base branch exists (`BranchAnalyzer.validate_branch_exists`), AI tool available (skipped with `--dry-run`), strict clean working tree via `GitManager.require_clean_working_directory()` (untracked files are fine)
+    2. `git fetch <remote> <branch>` of the base ref (also in dry-run; failure refuses to run, no fallback to the local ref), then refuse unless `git merge-base --is-ancestor <base_branch> HEAD` passes (a merged-in base passes; applies to any `--base-branch`)
+    3. Select files (`BranchAnalyzer.get_modified_files`) then apply the pattern filter (`Path.match`, like `cleanup` and `review`; `dedupe-branch` uses `fnmatch`). No files selected = success with zero counts
+    4. Baseline scan, only with `--include-main-duplications` (see below)
+    5. Create temp project via `ProjectManager.create_temp_project_with_settings(..., command_name="cleanup-pr")` (copies exclusion settings)
+    6. With the flag: main-duplication phase first. Then the iteration loop
+    7. Delete temp project in `finally` (deletion failure is a warning)
+  - Project-key override: like `cleanup`, temporarily rewrites `config.sonarqube_project_key` and `client.config.sonarqube_project_key` to the temp project and restores both in `finally`
+  - Iteration loop (`_run_iteration_loop`), up to `max_iterations` whole-branch rounds:
+    - Analyze the full repo into the temp project, recompute `DiffParser.get_diff_lines(base_branch)` every round (fix commits shift lines)
+    - Per file: in-scope active duplications first (`dedupe_file`), then in-scope issues (`fix_file`). If a duplication commit landed in a file, its issues are deferred to the next round (analysis line numbers are stale)
+    - Stops early when nothing in scope remains; `asyncio.sleep(5)` between rounds; `--dry-run` runs a single round (nothing is committed)
+    - Fixed counters accumulate across rounds; `*_out_of_scope` counters reflect the latest round
+    - Issues introduced by our own fix commits are in scope in the next round
+    - A failed analysis round raises `CleanupPrAnalysisError` (result `success=False`, earlier commits kept)
+  - Paths follow `ReviewOrchestrator._to_repo_relative`: repo-relative for `DiffParser` maps, CWD-relative for SonarQube queries. `ComponentNotFoundError` for a file means skip it
+  - Failure policy: no revert logic. Earlier commits are kept; a failed AI attempt leaves edits in the working tree and the next attempt aborts with a dirty-tree error
+- Scoping (`cleanup_pr/scope.py`)
+  - Issues: kept only if `IssueLineFilter` keeps them (strict changed lines plus 3-line trailing window, same as `review`); mapped back from `ReviewIssue` to `SonarQubeIssue` by `(rule, line)` (`select_in_scope_issues`)
+  - Duplications: fixed only when the target block intersects strict changed lines; reuses the active-finding logic from `review` (`select_in_scope_duplications`)
+  - Issue fixes stay in one file; a duplication refactor may edit files outside the diff (listed in `CleanupPrResult.external_files_touched`, warning emitted)
+- Shared-plumbing hooks (optional predicates, default `None`, let `cleanup-pr` scope the existing fixers without duplicating code):
+  - `VibeHealOrchestrator.fix_file(..., issue_filter)` - `Callable[[SonarQubeIssue], bool]` applied to fetched issues
+  - `DeduplicationOrchestrator.dedupe_file(..., group_filter)` - `Callable[[DuplicationGroup, str], bool]` applied to `(group, target_ref)`
+- Main duplications (`--include-main-duplications`, opt-in, `cleanup_pr/main_duplications.py`)
+  - Baseline scan (`_run_baseline_scan`): checks out the base ref into a temporary detached `git worktree` and scans the **real** project key with `AnalysisRunner.run_analysis`; worktree removed in `finally`. Overwrites the real project's analysis on the SonarQube server, runs even in `--dry-run`, skipped if no files were selected. With the flag a run does two full-repo analyses. Without the flag there is no baseline scan and the real project is never queried
+  - Main duplication = block in the real project's duplications intersecting the branch's old-side changed lines and not overlapping any active duplication range. Qualifying set is computed once from the original diff (`_run_main_duplication_phase`), before the first fix commit
+  - One AI task and one commit per duplication group; several groups in one file go highest line first, prompts are not re-numbered after earlier commits
+  - Helpers: `MainDuplicationTask`, `read_main_file_lines`, `format_block_snippet` (<=6 lines whole, else first 3 + last 3 + omitted count), `extract_branch_hunks`, `build_main_duplication_task` / `_prompt` / `_commit_message`
+  - Prompt: main-side block, other locations, branch-side diff hunks, ordered instructions
+  - Dry-run counts main duplications as "would fix" without calling the AI (`dedupe_file` in dry-run does call the AI without committing)
+- `CleanupPrResult` model - `success`, `files_processed: list[FileCleanupPrResult]`, `temp_project`, `analysis_result`, `total_issues_fixed`, `total_duplications_fixed`, `total_main_duplications_fixed`, `external_files_touched: list[Path]`, `error_message`
+- `FileCleanupPrResult` model - `file_path`, `issues_fixed`, `issues_out_of_scope`, `duplications_fixed`, `duplications_out_of_scope`, `main_duplications_fixed`, `main_duplications_skipped`, `success`, `error_message`
+- Commit formats (one commit per fix, no new trailer):
+  - Issue: `fix: [SQ-RULE] message`
+  - Duplication: `refactor: [duplication] remove duplicate code at line X`
+  - Main duplication: `refactor: [duplication] extract shared code from removed main duplication at line X` (body: Main-side block / Other locations / Branch-side changed range)
+
 **`deduplication/`**: Code duplication removal module
 
 - `DuplicationClient` - SonarQube duplications API client
@@ -334,6 +379,15 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Flags: `--base-branch` (default: origin/main), `--max-iterations` (default: 10), `--pattern` (file filters), `--ai-tool`, `--env-file`, `--verbose`
   - Creates temporary SonarQube project, runs analysis, dedupes files iteratively
   - Displays per-file results with duplications fixed counts
+- `vibe-heal cleanup-pr` - clean up issues and duplications introduced by the current branch (PR scope; function `cleanup_pr`)
+  - Flags: `--base-branch`/`-b` (default: origin/main; plain ref, no `gh` auto-detection), `--max-iterations`/`-i` (default: 10; maximum analyze → fix rounds for the whole branch), `--pattern`/`-p` (glob filters, same as `cleanup`), `--min-severity` (issues only), `--dry-run`, `--ai-tool`, `--env-file`, `--verbose`/`-v`, `--include-main-duplications` (opt-in, default off)
+  - Fixes only findings on lines changed vs the base branch (duplications first, then issues); see `cleanup_pr/` above for preconditions and scoping
+  - `--dry-run` runs analysis and scoping and prints what would be fixed; no fix commits (main duplications are counted without AI calls)
+  - `--include-main-duplications` runs a baseline scan that overwrites the real project's SonarQube analysis, even with `--dry-run`
+  - Helpers `_run_cleanup_pr` and `_display_cleanup_pr_results`; displays per-file issues/duplications fixed and out-of-scope counts. It does not yet display `main_duplications_fixed`, `total_main_duplications_fixed` or `external_files_touched`
+  - Header and `--max-iterations` help text are copied from `cleanup` ("per file"); the count is really whole-branch analysis rounds
+  - Errors: `ConfigurationError` prints `Configuration error: ...` and exits 1; any other exception prints `Error: ...` and exits 1 (traceback with `--verbose`); a failed result exits 1 after the per-file table
+  - Does not replace `cleanup` / `dedupe-branch`, does no GitHub interaction (run `review --post` afterwards) and does not push
 - `vibe-heal review` - analyze SonarQube issues on changed lines (read-only, no fixes)
   - Flags: `--base-branch` (default: origin/main), `--pattern`, `--report-file`, `--env-file`, `--verbose`
   - Creates temporary SonarQube project, runs analysis, reports issues/duplications on changed lines only
