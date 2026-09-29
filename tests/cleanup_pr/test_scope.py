@@ -1,9 +1,13 @@
-"""Tests for cleanup_pr.scope.select_in_scope_issues (FR-4 issue selection)."""
+"""Tests for cleanup_pr.scope (FR-4 issue selection, FR-5 duplication selection)."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from vibe_heal.cleanup_pr.scope import select_in_scope_issues
+import pytest
+
+from vibe_heal.cleanup_pr.scope import select_in_scope_duplications, select_in_scope_issues
+from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
 from vibe_heal.review.models import ReviewIssue
+from vibe_heal.review.orchestrator import ReviewOrchestrator
 from vibe_heal.sonarqube.models import SonarQubeIssue
 
 
@@ -22,6 +26,13 @@ def _make_issue(
         line=line,
         status=status,
     )
+
+
+def _make_group(from_line: int, size: int, target_ref: str = "1") -> DuplicationGroup:
+    """Build a DuplicationGroup with a target block plus one other-file block."""
+    target_block = DuplicationBlock(**{"from": from_line, "size": size, "_ref": target_ref})
+    other_block = DuplicationBlock(**{"from": 50, "size": 10, "_ref": "2"})
+    return DuplicationGroup(blocks=[target_block, other_block])
 
 
 # Strict changed lines {10, 14} with a 3-line trailing window produce the
@@ -170,3 +181,147 @@ class TestSelectInScopeIssues:
         )
         assert result.in_scope == [issues[0]]
         assert result.out_of_scope_count == 1
+
+
+class TestSelectInScopeDuplications:
+    """Tests for select_in_scope_duplications()."""
+
+    def test_keeps_group_intersecting_strict_lines(self) -> None:
+        """A group whose target block covers a strict changed line is kept."""
+        groups = [_make_group(10, 15)]  # block lines 10-24; strict lines 10 and 14 inside
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == groups
+        assert result.out_of_scope_count == 0
+
+    def test_drops_group_not_intersecting_strict_lines(self) -> None:
+        """A group whose target block misses all strict lines is dropped and counted out of scope."""
+        groups = [_make_group(100, 10)]  # block lines 100-109
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == []
+        assert result.out_of_scope_count == 1
+
+    def test_drops_group_touching_only_window_not_strict(self) -> None:
+        """A block touching only the 3-line trailing window, not the strict lines, is excluded."""
+        groups = [_make_group(15, 3)]  # block lines 15-17: inside WINDOW_LINES, outside STRICT_LINES
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == []
+        assert result.out_of_scope_count == 1
+
+    def test_keeps_group_touching_from_line_edge(self) -> None:
+        """A block whose from_line equals a strict changed line is kept."""
+        groups = [_make_group(14, 5)]  # block lines 14-18; from_line == 14 is strict
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == groups
+        assert result.out_of_scope_count == 0
+
+    def test_keeps_group_touching_to_line_edge(self) -> None:
+        """A block whose to_line equals a strict changed line is kept."""
+        groups = [_make_group(5, 6)]  # block lines 5-10; to_line == 10 is strict
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == groups
+        assert result.out_of_scope_count == 0
+
+    def test_drops_group_without_target_block(self) -> None:
+        """A group with no block for the target ref is dropped and counted out of scope."""
+        groups = [_make_group(10, 15, target_ref="2")]  # no block for target ref "1"
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == []
+        assert result.out_of_scope_count == 1
+
+    def test_out_of_scope_counts_considered_minus_kept(self) -> None:
+        """Out of scope = groups considered minus groups kept."""
+        groups = [
+            _make_group(10, 15),  # kept: target block intersects strict lines
+            _make_group(100, 10),  # dropped: target block misses strict lines
+            _make_group(15, 3),  # dropped: target block touches only the window
+        ]
+
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        assert result.in_scope == [groups[0]]
+        assert result.out_of_scope_count == 2
+
+    def test_empty_groups(self) -> None:
+        """An empty group list yields an empty result."""
+        result = select_in_scope_duplications([], "1", STRICT_LINES)
+
+        assert result.in_scope == []
+        assert result.out_of_scope_count == 0
+
+
+class TestActiveFindingBehaviorUnchanged:
+    """Extracting changed_lines_in_block leaves _build_active_finding behaving as before."""
+
+    @pytest.fixture
+    def orchestrator(self) -> ReviewOrchestrator:
+        from vibe_heal.config import VibeHealConfig
+
+        config = VibeHealConfig(
+            sonarqube_url="https://sonar.test.com",
+            sonarqube_token="test-token",
+            sonarqube_project_key="temp-project",
+        )
+        mock_client = AsyncMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.repo.working_dir = "/repo"
+        mock_parser = MagicMock()
+        return ReviewOrchestrator(config, mock_client, mock_analyzer, mock_parser)
+
+    @staticmethod
+    def _make_response() -> MagicMock:
+        """Build a mock DuplicationsResponse whose file-info lookup succeeds."""
+        response = MagicMock(spec=DuplicationsResponse)
+        file_info = MagicMock()
+        file_info.key = "temp-project:src/file.py"
+        response.get_file_info.return_value = file_info
+        return response
+
+    def test_finding_built_when_block_intersects_strict_lines(self, orchestrator) -> None:
+        """A block covering strict lines still yields a ReviewDuplication with the lowest strict line as anchor."""
+        group = _make_group(10, 15)  # block lines 10-24; strict lines {10, 14} inside
+
+        finding = orchestrator._build_active_finding(group, "1", STRICT_LINES, self._make_response())
+
+        assert finding is not None
+        assert finding.from_line == 10
+        assert finding.to_line == 24
+        assert finding.anchor_line == 10
+
+    def test_no_finding_when_block_misses_strict_lines(self, orchestrator) -> None:
+        group = _make_group(100, 10)  # block lines 100-109
+
+        finding = orchestrator._build_active_finding(group, "1", STRICT_LINES, self._make_response())
+
+        assert finding is None
+
+    def test_no_finding_when_block_touches_only_window(self, orchestrator) -> None:
+        group = _make_group(15, 3)  # block lines 15-17: window only, not strict
+
+        finding = orchestrator._build_active_finding(group, "1", STRICT_LINES, self._make_response())
+
+        assert finding is None
+
+    def test_finding_decision_matches_scope_predicate(self, orchestrator) -> None:
+        """_build_active_finding keeps a group iff select_in_scope_duplications does."""
+        groups = [_make_group(10, 15), _make_group(100, 10), _make_group(15, 3)]
+        result = select_in_scope_duplications(groups, "1", STRICT_LINES)
+
+        finding_decisions = [
+            orchestrator._build_active_finding(group, "1", STRICT_LINES, self._make_response()) is not None
+            for group in groups
+        ]
+
+        assert result.in_scope == [groups[0]]
+        assert finding_decisions == [True, False, False]

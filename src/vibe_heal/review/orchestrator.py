@@ -43,6 +43,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_BRANCH = "origin/main"
 
 
+def changed_lines_in_block(block: DuplicationBlock, changed_lines: set[int]) -> set[int]:
+    """Return the changed lines that fall inside a duplication block.
+
+    The block's ``[from_line, to_line]`` range is inclusive. This is the shared
+    active-duplication intersection test: a block is active when the returned
+    set is non-empty.
+
+    Args:
+        block: Duplication block whose line range is tested.
+        changed_lines: Changed-line set to intersect with the block (for the
+            active-duplication rule, the strict changed lines of the block's file).
+
+    Returns:
+        The block's lines that are in ``changed_lines`` (possibly empty).
+    """
+    block_lines = set(range(block.from_line, block.to_line + 1))
+    return block_lines & changed_lines
+
+
 class ReviewAnalysisResult(BaseModel):
     """Result of a review analysis operation."""
 
@@ -577,8 +596,7 @@ class ReviewOrchestrator:
         target_block = group.get_target_block(target_ref)
         if target_block is None:
             return None
-        block_lines = set(range(target_block.from_line, target_block.to_line + 1))
-        changed_in_block = block_lines & new_changed_lines
+        changed_in_block = changed_lines_in_block(target_block, new_changed_lines)
         if not changed_in_block:
             return None
         # Use the lowest changed line in the block as the anchor so the GitHub
