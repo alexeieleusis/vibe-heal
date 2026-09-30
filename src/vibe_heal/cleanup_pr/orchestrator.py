@@ -169,6 +169,9 @@ class CleanupPrOrchestrator:
         temp_project: TempProjectMetadata | None = None
         original_project_key: str | None = None
         files_processed: list[FileCleanupPrResult] = []
+        # Owned here so an unexpected mid-run exception still reports earlier progress.
+        loop_results: dict[Path, FileCleanupPrResult] = {}
+        loop_external_files: list[Path] = []
 
         try:
             # Step 2: select and filter the modified files.
@@ -215,6 +218,8 @@ class CleanupPrOrchestrator:
                 verbose=verbose,
                 include_main_duplications=include_main_duplications,
                 original_project_key=original_project_key,
+                results=loop_results,
+                external_files=loop_external_files,
             )
 
             return CleanupPrResult(
@@ -243,10 +248,16 @@ class CleanupPrOrchestrator:
             )
 
         except Exception as e:
+            # Earlier commits are kept, so report the progress made before the failure.
+            partial = list(loop_results.values()) or files_processed
             return CleanupPrResult(
                 success=False,
-                files_processed=files_processed,
+                files_processed=partial,
                 temp_project=temp_project,
+                total_issues_fixed=sum(f.issues_fixed for f in partial),
+                total_duplications_fixed=sum(f.duplications_fixed for f in partial),
+                total_main_duplications_fixed=sum(f.main_duplications_fixed for f in partial),
+                external_files_touched=loop_external_files,
                 error_message=f"Cleanup failed: {e}",
             )
 
@@ -492,6 +503,8 @@ class CleanupPrOrchestrator:
         verbose: bool,
         include_main_duplications: bool = False,
         original_project_key: str | None = None,
+        results: dict[Path, FileCleanupPrResult] | None = None,
+        external_files: list[Path] | None = None,
     ) -> tuple[list[FileCleanupPrResult], AnalysisResult | None, list[Path]]:
         """Run the analysis + per-file duplications-then-issues fix loop (FR-2 steps 5-6).
 
@@ -511,6 +524,9 @@ class CleanupPrOrchestrator:
             include_main_duplications: First fix main duplications (FR-6, FR-2 step 5) before the loop.
             original_project_key: The real project's key (config points at the temp project); required
                 with ``include_main_duplications``.
+            results: Optional caller-owned dict filled with per-file results, so the caller can
+                still report progress if the loop raises unexpectedly.
+            external_files: Optional caller-owned list of external files touched (same purpose).
 
         Returns:
             Tuple of (per-file results, analysis result, external files touched).
@@ -518,10 +534,11 @@ class CleanupPrOrchestrator:
         Raises:
             CleanupPrAnalysisError: If an analysis round fails.
         """
-        results: dict[Path, FileCleanupPrResult] = {
-            f: FileCleanupPrResult(file_path=f, success=True) for f in modified_files
-        }
-        external_files: list[Path] = []
+        if results is None:
+            results = {}
+        if external_files is None:
+            external_files = []
+        results.update({f: FileCleanupPrResult(file_path=f, success=True) for f in modified_files})
         analysis_result: AnalysisResult | None = None
 
         # FR-2 step 5: main duplications first (11.A-3), before any other fix commit. When

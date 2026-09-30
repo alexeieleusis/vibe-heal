@@ -816,6 +816,38 @@ class TestIterationLoopControl:
         mock_delete.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_unexpected_exception_keeps_partial_progress(
+        self, orchestrator: CleanupPrOrchestrator, mock_client: AsyncMock, temp_project: TempProjectMetadata
+    ) -> None:
+        """A mid-run exception still reports fixes committed before it."""
+        with (
+            _preconditions_pass(orchestrator),
+            patch.object(orchestrator.branch_analyzer, "get_modified_files", return_value=[_FILE]),
+            patch.object(
+                orchestrator.project_manager,
+                "create_temp_project_with_settings",
+                new_callable=AsyncMock,
+                return_value=temp_project,
+            ),
+            patch.object(orchestrator.project_manager, "delete_project", new_callable=AsyncMock),
+            _loop_env(
+                orchestrator,
+                mock_client,
+                temp_project,
+                [_diff({10, 11}, {10, 11})],
+                [[_issue("in1", 11)]],
+                fixed_issues=2,
+            ) as env,
+        ):
+            env.sleep.side_effect = RuntimeError("dirty tree")
+            result = await orchestrator.cleanup_pr(max_iterations=2)
+
+        assert result.success is False
+        assert "Cleanup failed: dirty tree" in result.error_message
+        assert result.files_processed[0].file_path == _FILE
+        assert result.total_issues_fixed == 2
+
+    @pytest.mark.asyncio
     async def test_component_not_found_skips_file(
         self, orchestrator: CleanupPrOrchestrator, mock_client: AsyncMock, temp_project: TempProjectMetadata
     ) -> None:
