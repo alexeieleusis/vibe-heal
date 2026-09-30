@@ -899,19 +899,43 @@ class TestIterationLoopControl:
             patch.object(orchestrator.project_manager, "delete_project", new_callable=AsyncMock),
             _loop_env(orchestrator, mock_client, temp_project, [_diff({10})]) as h,
         ):
-            keys_seen: list[str] = []
-            original = mock_client.get_issues_for_file.side_effect
+            real_key = orchestrator.config.sonarqube_project_key
+            issue_keys: list[str] = []
+            dup_keys: list[str] = []
 
-            async def spy(path: str) -> list[SonarQubeIssue]:
-                keys_seen.append(mock_client.config.sonarqube_project_key)
-                return original.__next__() if hasattr(original, "__next__") else []
+            def issues_side_effect(_path: str) -> list[SonarQubeIssue]:
+                issue_keys.append(mock_client.config.sonarqube_project_key)
+                return []
 
-            mock_client.get_issues_for_file = AsyncMock(side_effect=spy)
-            result = await orchestrator.cleanup_pr(include_main_duplications=False)
+            def dup_query_side_effect(_path: str) -> DuplicationsResponse:
+                dup_keys.append(orchestrator.config.sonarqube_project_key)
+                return DuplicationsResponse()
+
+            def dup_client_factory(cfg: VibeHealConfig) -> MagicMock:
+                dup_keys.append(cfg.sonarqube_project_key)
+                cm = MagicMock()
+                cm.__aenter__ = AsyncMock(return_value=h.dup_client)
+                cm.__aexit__ = AsyncMock(return_value=None)
+                return cm
+
+            mock_client.get_issues_for_file = AsyncMock(side_effect=issues_side_effect)
+            h.dup_client.get_duplications_for_file = AsyncMock(side_effect=dup_query_side_effect)
+            with patch(f"{_MODULE}.DuplicationClient", side_effect=dup_client_factory):
+                result = await orchestrator.cleanup_pr(include_main_duplications=False)
 
         assert result.success is True
-        assert keys_seen == [temp_project.project_key]
-        assert h.analysis.call_args.kwargs["project_key"] == temp_project.project_key
+        temp_key = temp_project.project_key
+        assert real_key != temp_key
+        # Every issue and duplication query ran while the temp key was active.
+        assert issue_keys
+        assert set(issue_keys) == {temp_key}
+        assert dup_keys
+        assert set(dup_keys) == {temp_key}
+        # Every scanner run targeted the temp project.
+        assert h.analysis.await_args_list
+        assert all(c.kwargs["project_key"] == temp_key for c in h.analysis.await_args_list)
+        # No other client call (e.g. project_exists on the real key) was made.
+        assert {c[0] for c in mock_client.method_calls} == {"get_issues_for_file"}
         assert result.total_main_duplications_fixed == 0
         assert orchestrator.config.sonarqube_project_key == "my-project"
 
