@@ -49,6 +49,9 @@ AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
 FILE_PATTERN_HELP = "File patterns to filter (e.g., '*.py', 'src/**/*.ts')"
 BASE_BRANCH_HELP = "Base branch to compare against"
 
+# Display constants
+GITHUB_FOOTER_LINE = "\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]"
+
 
 def setup_logging(verbose: bool) -> None:
     """Setup logging configuration.
@@ -305,7 +308,7 @@ def _display_cleanup_results(result: CleanupResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch cleanup complete![/green]")
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    console.print(GITHUB_FOOTER_LINE)
 
 
 async def _run_cleanup(
@@ -477,7 +480,7 @@ def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) 
         sys.exit(1)
 
     console.print("\n[green]✨ Branch cleanup (PR scope) complete![/green]")
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    console.print(GITHUB_FOOTER_LINE)
 
 
 async def _run_cleanup_pr(
@@ -649,7 +652,7 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch deduplication complete![/green]")
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    console.print(GITHUB_FOOTER_LINE)
 
 
 async def _run_dedupe_branch(
