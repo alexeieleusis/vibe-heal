@@ -667,6 +667,48 @@ class TestIterationLoopDuplicationScope:
         assert external == [Path("src/util.py")]
         repo.git.diff.assert_called_once_with("--name-only", "h0", "h1")
 
+    @pytest.mark.asyncio
+    async def test_file_touched_by_earlier_commit_is_deferred(
+        self, orchestrator: CleanupPrOrchestrator, mock_client: AsyncMock, temp_project: TempProjectMetadata
+    ) -> None:
+        """A file a duplication commit modified earlier in the round is not fixed from stale analysis."""
+        pk = temp_project.project_key
+        repo = MagicMock()
+        repo.git.diff.return_value = "src/a.py\nsrc/b.py\n"
+        diff = DiffLines(
+            new_lines={"src/a.py": {10}, "src/b.py": {10}},
+            old_lines={},
+            strict_new_lines={"src/a.py": {10}, "src/b.py": {10}},
+        )
+        other = Path("src/b.py")
+        with (
+            _loop_env(
+                orchestrator,
+                mock_client,
+                temp_project,
+                [diff],
+                issues=[[_issue("i", 10)]],
+                dup_responses=[_dup_response(pk, 9, 3)],
+                fixed_dups=1,
+            ) as h,
+            patch.object(orchestrator.branch_analyzer, "repo", repo),
+        ):
+            orchestrator.diff_parser.get_diff_lines.side_effect = [diff]
+            files, _, _ = await orchestrator._run_iteration_loop(
+                modified_files=[_FILE, other],
+                temp_project=temp_project,
+                base_branch="origin/main",
+                max_iterations=1,
+                min_severity=None,
+                dry_run=False,
+                verbose=True,
+            )
+
+        assert files[1].issues_fixed == 0
+        h.fixer.fix_file.assert_not_awaited()
+        mock_client.get_issues_for_file.assert_not_awaited()
+        assert h.dedupe.dedupe_file.await_count == 1  # b.py was not processed at all
+
 
 class TestIterationLoopControl:
     """Loop control: diff recompute, early stop, failures, dry-run, flag off."""

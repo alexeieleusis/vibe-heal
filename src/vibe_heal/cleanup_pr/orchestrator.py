@@ -127,6 +127,8 @@ class CleanupPrOrchestrator:
         self.branch_analyzer = BranchAnalyzer(Path.cwd())
         self.git_manager = GitManager(Path.cwd(), pre_commit_command=config.pre_commit_command)
         self.diff_parser = diff_parser if diff_parser is not None else DiffParser(Path.cwd())
+        # Repo-relative files touched by fix commits since the current analysis; their line numbers are stale.
+        self._stale_files: set[str] = set()
 
     async def cleanup_pr(
         self,
@@ -537,6 +539,7 @@ class CleanupPrOrchestrator:
             diff_files = self._diff_files(diff_lines, modified_files)
 
             # Step 6.3: duplications first, then issues, per file.
+            self._stale_files.clear()
             in_scope_remaining = 0
             for file_path in modified_files:
                 in_scope_remaining += await self._process_file(
@@ -826,6 +829,12 @@ class CleanupPrOrchestrator:
             The number of in-scope items found in this file this round (0 means converged).
         """
         repo_relative = self._to_repo_relative(file_path)
+        if repo_relative in self._stale_files:
+            # An earlier commit this round (e.g. a duplication refactor extracting into this file)
+            # changed it after the analysis, so its findings' line numbers no longer match.
+            if verbose:
+                dim(f"  {file_path}: deferred to next iteration (modified by an earlier fix this round)")
+            return 1
         # DiffParser maps are keyed by repo-relative path; SonarQube is queried by CWD-relative path.
         new_lines = diff_lines.new_lines.get(repo_relative, set())
         strict_lines = diff_lines.strict_new_lines.get(repo_relative, set())
@@ -974,6 +983,8 @@ class CleanupPrOrchestrator:
         changed = self.branch_analyzer.repo.git.diff("--name-only", head_before, head_after)
         for name in changed.splitlines():
             name = name.strip()
+            if name:
+                self._stale_files.add(name)
             if name and name not in diff_files and Path(name) not in external_files:
                 warn(f"  Duplication refactor modified a file outside the branch diff: {name}")
                 external_files.append(Path(name))
