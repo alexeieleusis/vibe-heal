@@ -596,9 +596,10 @@ class TestIterationLoopIssueScope:
         assert files[0].issues_out_of_scope == 2
         assert external == []
         issue_filter = h.fixer.fix_file.call_args.kwargs["issue_filter"]
-        assert issue_filter(_issue("x", 15)) is True
-        assert issue_filter(_issue("x", 16)) is False
-        assert issue_filter(_issue("x", 9)) is False
+        assert issue_filter(_issue("in1", 11)) is True
+        assert issue_filter(_issue("edge", 15)) is True
+        assert issue_filter(_issue("after", 16)) is False
+        assert issue_filter(_issue("before", 9)) is False
         # Queried by CWD-relative path.
         mock_client.get_issues_for_file.assert_awaited_with("src/a.py")
 

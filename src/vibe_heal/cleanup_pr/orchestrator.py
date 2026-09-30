@@ -94,6 +94,12 @@ class CleanupPrAnalysisError(Exception):
         self.external_files_touched = external_files_touched
 
 
+def _target_range(group: DuplicationGroup, target_ref: str) -> tuple[int, int] | None:
+    """Identify a duplication group by its target block's line range."""
+    block = group.get_target_block(target_ref)
+    return None if block is None else (block.from_line, block.to_line)
+
+
 class CleanupPrOrchestrator:
     """Orchestrates the branch PR cleanup workflow.
 
@@ -933,6 +939,8 @@ class CleanupPrOrchestrator:
         if not scope.in_scope:
             return 0, 0, 0
 
+        # Scoping ran once above; the hook only checks membership of the precomputed target ranges.
+        in_scope_ranges = {_target_range(group, target_ref) for group in scope.in_scope}
         dim(f"\n{file_path}: {len(scope.in_scope)} in-scope duplication group(s)")
         head_before = self.branch_analyzer.get_head_sha()
         dedupe = DeduplicationOrchestrator(self.config, self.ai_tool, git_manager=self.git_manager)
@@ -940,7 +948,7 @@ class CleanupPrOrchestrator:
             file_path=cwd_relative,
             dry_run=dry_run,
             max_duplications=None,
-            group_filter=lambda group, ref: bool(select_in_scope_duplications([group], ref, strict_lines).in_scope),
+            group_filter=lambda group, ref: _target_range(group, ref) in in_scope_ranges,
         )
         result.duplications_fixed += summary.fixed
         if summary.commits:
@@ -976,6 +984,8 @@ class CleanupPrOrchestrator:
         if not actionable.issues_to_fix:
             return 0, 0
 
+        # Scoping ran once above; the hook only checks membership of the precomputed issue keys.
+        in_scope_keys = {issue.key for issue in scope.in_scope}
         dim(f"\n{file_path}: {len(actionable.issues_to_fix)} in-scope issue(s)")
         fixer = VibeHealOrchestrator(config=self.config, ai_tool=self.ai_tool)
         summary = await fixer.fix_file(
@@ -983,7 +993,7 @@ class CleanupPrOrchestrator:
             dry_run=dry_run,
             max_issues=None,
             min_severity=min_severity,
-            issue_filter=lambda issue: bool(select_in_scope_issues([issue], new_lines, strict_lines).in_scope),
+            issue_filter=lambda issue: issue.key in in_scope_keys,
         )
         result.issues_fixed += summary.fixed
         return len(actionable.issues_to_fix), summary.failed
