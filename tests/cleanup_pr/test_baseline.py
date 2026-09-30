@@ -170,7 +170,10 @@ class TestBaselineScan:
         assert env.worktree_cmds == []
         assert orchestrator.analysis_runner.run_analysis.await_count == 0
         assert env.events == ["create_temp"]
-        orchestrator.client.assert_not_called()
+        # No SonarQube query may reference the real project key: assert the client
+        # mock (and every child method mock) received zero calls, not just that the
+        # client object was never invoked as a callable.
+        assert orchestrator.client.mock_calls == []
 
     @pytest.mark.asyncio
     async def test_analysis_failure_returns_failed_result_and_removes_worktree(
