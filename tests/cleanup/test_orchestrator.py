@@ -221,74 +221,8 @@ class TestCleanupBranch:
 # Tests for the new integrated workflow are in TestCleanupBranch
 
 
-class TestFilterFiles:
-    """Tests for _filter_files method."""
-
-    def test_filter_single_pattern(self, orchestrator: CleanupOrchestrator) -> None:
-        """Test filtering with a single pattern."""
-        files = [
-            Path("src/file1.py"),
-            Path("src/file2.ts"),
-            Path("test/test1.py"),
-        ]
-
-        result = orchestrator._filter_files(files, ["*.py"])
-
-        assert len(result) == 2
-        assert Path("src/file1.py") in result
-        assert Path("test/test1.py") in result
-
-    def test_filter_multiple_patterns(self, orchestrator: CleanupOrchestrator) -> None:
-        """Test filtering with multiple patterns."""
-        files = [
-            Path("src/file1.py"),
-            Path("src/file2.ts"),
-            Path("src/file3.js"),
-            Path("test.txt"),
-        ]
-
-        result = orchestrator._filter_files(files, ["*.py", "*.ts"])
-
-        assert len(result) == 2
-        assert Path("src/file1.py") in result
-        assert Path("src/file2.ts") in result
-
-    def test_filter_glob_pattern(self, orchestrator: CleanupOrchestrator) -> None:
-        """Test filtering with glob patterns."""
-        files = [
-            Path("src/module/file1.py"),
-            Path("src/file2.py"),
-            Path("test/test1.py"),
-        ]
-
-        result = orchestrator._filter_files(files, ["src/**/*.py"])
-
-        # Path.match only matches the nested module file
-        assert len(result) == 1
-        assert Path("src/module/file1.py") in result
-
-    def test_filter_no_matches(self, orchestrator: CleanupOrchestrator) -> None:
-        """Test filtering when no files match."""
-        files = [
-            Path("src/file1.py"),
-            Path("src/file2.py"),
-        ]
-
-        result = orchestrator._filter_files(files, ["*.ts"])
-
-        assert len(result) == 0
-
-    def test_filter_all_match(self, orchestrator: CleanupOrchestrator) -> None:
-        """Test filtering when all files match."""
-        files = [
-            Path("file1.py"),
-            Path("file2.py"),
-            Path("file3.py"),
-        ]
-
-        result = orchestrator._filter_files(files, ["*.py"])
-
-        assert len(result) == 3
+# Note: _filter_files was extracted to vibe_heal.git.file_selection.filter_files_by_patterns;
+# its tests live in tests/git/test_file_selection.py.
 
 
 class TestCreateTempProject(BaseTestCreateTempProject):

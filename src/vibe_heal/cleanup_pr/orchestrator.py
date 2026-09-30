@@ -32,6 +32,7 @@ from vibe_heal.deduplication.orchestrator import DeduplicationOrchestrator
 from vibe_heal.git.branch_analyzer import BranchAnalyzer, BranchNotFoundError
 from vibe_heal.git.diff_parser import DiffLines, DiffParser
 from vibe_heal.git.exceptions import GitOperationError, NotAGitRepositoryError
+from vibe_heal.git.file_selection import select_modified_files
 from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, dim, error, success, warn
@@ -169,7 +170,7 @@ class CleanupPrOrchestrator:
 
         try:
             # Step 2: select and filter the modified files.
-            modified_files = self._select_files(base_branch, file_patterns)
+            modified_files = select_modified_files(self.branch_analyzer, base_branch, file_patterns)
 
             if not modified_files:
                 return CleanupPrResult(success=True, files_processed=[])
@@ -352,59 +353,6 @@ class CleanupPrOrchestrator:
             msg = f"Branch is not up to date with {base_branch}; rebase or merge {base_branch} first"
             error(msg)
             raise GitOperationError(msg)
-
-    # ------------------------------------------------------------------
-    # File selection (FR-2 step 2)
-    # ------------------------------------------------------------------
-
-    def _select_files(self, base_branch: str, file_patterns: list[str] | None) -> list[Path]:
-        """Select the modified files vs. the base branch, optionally pattern-filtered.
-
-        Uses ``Path.match`` (the cleanup/review behavior), not ``fnmatch``.
-
-        Args:
-            base_branch: Base branch to compare against.
-            file_patterns: Optional glob patterns to filter files.
-
-        Returns:
-            The selected modified files (empty when nothing is in scope).
-        """
-        dim(f"Analyzing branch against {base_branch}...")
-        modified_files = self.branch_analyzer.get_modified_files(base_branch)
-        dim(f"Found {len(modified_files)} modified files")
-
-        if not modified_files:
-            return []
-
-        if file_patterns:
-            dim(f"Filtering files with patterns: {file_patterns}")
-            modified_files = self._filter_files(modified_files, file_patterns)
-            dim(f"After filtering: {len(modified_files)} files remain")
-
-        if modified_files:
-            dim("Files to process:")
-            for f in modified_files:
-                dim(f"  - {f}")
-
-        return modified_files
-
-    def _filter_files(self, files: list[Path], patterns: list[str]) -> list[Path]:
-        """Filter files by glob patterns using ``Path.match``.
-
-        Args:
-            files: List of file paths.
-            patterns: List of glob patterns (e.g. ["*.py", "src/**/*.ts"]).
-
-        Returns:
-            Files matching at least one pattern.
-        """
-        filtered = []
-        for file_path in files:
-            for pattern in patterns:
-                if file_path.match(pattern):
-                    filtered.append(file_path)
-                    break
-        return filtered
 
     # ------------------------------------------------------------------
     # Baseline scan (FR-2 step 3, only with --include-main-duplications)

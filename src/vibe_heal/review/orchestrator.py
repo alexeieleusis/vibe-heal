@@ -10,6 +10,7 @@ from vibe_heal.deduplication.client import DuplicationClient
 from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
+from vibe_heal.git.file_selection import filter_files_by_patterns
 from vibe_heal.output import console, dim, error, success, warn
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
@@ -227,7 +228,7 @@ class ReviewOrchestrator:
             # Step 2: Filter by patterns if specified
             if file_patterns:
                 dim(f"Filtering files with patterns: {file_patterns}")
-                modified_files = self._filter_files(modified_files, file_patterns)
+                modified_files = filter_files_by_patterns(modified_files, file_patterns)
                 dim(f"After filtering: {len(modified_files)} files remain")
 
             if not modified_files:
@@ -811,28 +812,6 @@ class ReviewOrchestrator:
             return resolved.relative_to(repo_root.resolve()).as_posix()
         except (ValueError, TypeError):
             return file_path.as_posix()
-
-    def _filter_files(
-        self,
-        files: list[Path],
-        patterns: list[str],
-    ) -> list[Path]:
-        """Filter files by glob patterns.
-
-        Args:
-            files: List of file paths.
-            patterns: List of glob patterns.
-
-        Returns:
-            Filtered list of files matching at least one pattern.
-        """
-        filtered: list[Path] = []
-        for file_path in files:
-            for pattern in patterns:
-                if file_path.match(pattern):
-                    filtered.append(file_path)
-                    break
-        return filtered
 
     def _write_report(self, result: ReviewAnalysisResult, report_file: Path | None) -> None:
         """Write report files if a report path is specified.

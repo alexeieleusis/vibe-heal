@@ -239,6 +239,9 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `get_current_branch()` - returns active branch name
   - `validate_branch_exists(branch)` - checks local and remote branches
   - `get_user_email()` - retrieves git user email for project naming
+- `file_selection.py` - shared file-selection helpers used by `cleanup`, `cleanup-pr`, and `review`
+  - `select_modified_files(branch_analyzer, base_branch, file_patterns)` - modified files vs. base branch, optionally glob-filtered, with dim logging
+  - `filter_files_by_patterns(files, patterns)` - glob filter using `Path.match` (not `fnmatch`; `dedupe-branch` intentionally keeps `fnmatch`)
 
 **`orchestrator.py`**: Main workflow coordination
 
@@ -254,7 +257,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Workflow: analyze branch → create temp project → run analysis → fix files iteratively → delete temp project
   - `_cleanup_file(file_path, project_key, project_name, max_iterations)` - fixes single file until no issues remain
   - Reuses `VibeHealOrchestrator.fix_file()` for actual fixing
-  - `_filter_files(files, patterns)` - filters files by glob patterns
+  - File selection/filtering via shared `git/file_selection.py` helpers (`select_modified_files`)
   - `CleanupResult` model - tracks overall cleanup results
   - `FileCleanupResult` model - tracks per-file cleanup results
   - Always cleans up temporary project in finally block

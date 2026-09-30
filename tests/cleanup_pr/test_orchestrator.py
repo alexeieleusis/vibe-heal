@@ -249,17 +249,8 @@ class TestCleanupPrFileSelection:
         mock_create.assert_not_called()
         assert mock_client.method_calls == []
 
-    def test_filter_files_uses_path_match(self, orchestrator: CleanupPrOrchestrator) -> None:
-        """_filter_files matches with Path.match (not fnmatch), like cleanup/review."""
-        files = [Path("src/module/a.py"), Path("src/b.py"), Path("data/c.json")]
-        result = orchestrator._filter_files(files, ["src/**/*.py"])
-        assert result == [Path("src/module/a.py")]
-
-    def test_filter_files_multiple_patterns(self, orchestrator: CleanupPrOrchestrator) -> None:
-        """A file is kept if it matches any of the patterns."""
-        files = [Path("src/a.py"), Path("src/b.ts"), Path("data/c.json")]
-        result = orchestrator._filter_files(files, ["*.py", "*.ts"])
-        assert result == [Path("src/a.py"), Path("src/b.ts")]
+    # Note: pattern filtering now lives in vibe_heal.git.file_selection;
+    # its Path.match semantics are tested in tests/git/test_file_selection.py.
 
 
 class TestCleanupPrTempProjectLifecycle:
