@@ -15,7 +15,11 @@ from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
-from vibe_heal.cleanup_pr.orchestrator import CleanupPrOrchestrator, CleanupPrResult
+from vibe_heal.cleanup_pr.orchestrator import (
+    CleanupPrOrchestrator,
+    CleanupPrResult,
+    FileCleanupPrResult,
+)
 from vibe_heal.config import ConfigurationError, VibeHealConfig
 from vibe_heal.converters.oxlint import convert_oxlint_to_eslint
 from vibe_heal.deduplication.orchestrator import (
@@ -420,6 +424,28 @@ def cleanup(
         sys.exit(1)
 
 
+def _display_cleanup_pr_file_result(file_result: FileCleanupPrResult) -> None:
+    """Display cleanup results for a single file.
+
+    Args:
+        file_result: Per-file cleanup-PR result to display
+    """
+    status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
+    console.print(f"  {status} {rich_escape(str(file_result.file_path))}")
+    console.print(f"      issues: {file_result.issues_fixed} fixed, {file_result.issues_out_of_scope} out of scope")
+    console.print(
+        f"      duplications: {file_result.duplications_fixed} fixed, "
+        f"{file_result.duplications_out_of_scope} out of scope"
+    )
+    if file_result.main_duplications_fixed or file_result.main_duplications_skipped:
+        console.print(
+            f"      main duplications: {file_result.main_duplications_fixed} fixed, "
+            f"{file_result.main_duplications_skipped} skipped"
+        )
+    if file_result.error_message:
+        error(f"      Error: {file_result.error_message}")
+
+
 def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) -> None:
     """Display PR-scoped cleanup results.
 
@@ -443,22 +469,7 @@ def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) 
     if result.files_processed:
         console.print("\n[bold]Per-File Results:[/bold]")
         for file_result in result.files_processed:
-            status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
-            console.print(f"  {status} {rich_escape(str(file_result.file_path))}")
-            console.print(
-                f"      issues: {file_result.issues_fixed} fixed, {file_result.issues_out_of_scope} out of scope"
-            )
-            console.print(
-                f"      duplications: {file_result.duplications_fixed} fixed, "
-                f"{file_result.duplications_out_of_scope} out of scope"
-            )
-            if file_result.main_duplications_fixed or file_result.main_duplications_skipped:
-                console.print(
-                    f"      main duplications: {file_result.main_duplications_fixed} fixed, "
-                    f"{file_result.main_duplications_skipped} skipped"
-                )
-            if file_result.error_message:
-                error(f"      Error: {file_result.error_message}")
+            _display_cleanup_pr_file_result(file_result)
 
     if not result.success:
         if result.error_message:
