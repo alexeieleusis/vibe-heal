@@ -12,6 +12,7 @@ from tests.cleanup_pr.test_orchestrator import _git_result, _preconditions_pass
 from vibe_heal.ai_tools.base import AITool
 from vibe_heal.cleanup_pr.orchestrator import CleanupPrOrchestrator
 from vibe_heal.config import VibeHealConfig
+from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.exceptions import GitOperationError
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
@@ -126,7 +127,7 @@ def _patch_subprocess(
         msg = f"Unexpected command {cmd}"
         raise AssertionError(msg)
 
-    return patch("vibe_heal.cleanup_pr.orchestrator.subprocess.run", side_effect=fake_run)
+    return patch("vibe_heal.git.branch_analyzer.subprocess.run", side_effect=fake_run)
 
 
 class TestBaselineScan:
@@ -225,7 +226,7 @@ class TestBaselineScan:
         with (
             _preconditions_pass(orchestrator),
             _patch_subprocess(env, worktree_add_rc=128),
-            patch("vibe_heal.cleanup_pr.orchestrator.tempfile.mkdtemp", return_value=str(leaked_dir)),
+            patch("vibe_heal.git.branch_analyzer.tempfile.mkdtemp", return_value=str(leaked_dir)),
         ):
             result = await orchestrator.cleanup_pr(include_main_duplications=True)
 
@@ -247,8 +248,8 @@ class TestBaselineScan:
         with (
             _preconditions_pass(orchestrator),
             _patch_subprocess(env, worktree_remove_rc=1),
-            patch("vibe_heal.cleanup_pr.orchestrator.warn") as warn,
-            patch("vibe_heal.cleanup_pr.orchestrator.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
+            patch("vibe_heal.git.branch_analyzer.warn") as warn,
+            patch("vibe_heal.git.branch_analyzer.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
         ):
             result = await orchestrator.cleanup_pr(include_main_duplications=True)
 
@@ -270,8 +271,8 @@ class TestBaselineScan:
         with (
             _preconditions_pass(orchestrator),
             _patch_subprocess(env, worktree_remove_exc=OSError("disk full")),
-            patch("vibe_heal.cleanup_pr.orchestrator.warn") as warn,
-            patch("vibe_heal.cleanup_pr.orchestrator.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
+            patch("vibe_heal.git.branch_analyzer.warn") as warn,
+            patch("vibe_heal.git.branch_analyzer.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
         ):
             result = await orchestrator.cleanup_pr(include_main_duplications=True)
 
@@ -309,8 +310,10 @@ class TestBaselineScan:
         delete.assert_awaited_once()
 
     def test_worktree_add_oserror_raises_git_operation_error(self) -> None:
+        analyzer = BranchAnalyzer(Path.cwd())
         with (
-            patch("vibe_heal.cleanup_pr.orchestrator.subprocess.run", side_effect=OSError("no git")),
+            patch("vibe_heal.git.branch_analyzer.subprocess.run", side_effect=OSError("no git")),
             pytest.raises(GitOperationError, match="no git"),
+            analyzer.temporary_worktree("origin/main"),
         ):
-            CleanupPrOrchestrator._add_worktree(Path("/tmp/x"), "origin/main")  # noqa: S108
+            pass

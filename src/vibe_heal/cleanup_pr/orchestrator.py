@@ -9,10 +9,6 @@ in-scope duplications then in-scope issues per file, repeat.
 """
 
 import asyncio
-import shlex
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -308,35 +304,6 @@ class CleanupPrOrchestrator:
         # Strict clean working tree (untracked files are fine), checked once up front.
         self.git_manager.require_clean_working_directory()
 
-    def _split_remote_ref(self, base_branch: str) -> tuple[str, str] | None:
-        """Split a base ref into ``(remote, branch)`` if its prefix is a real remote.
-
-        ``origin/main`` -> ``("origin", "main")``. A bare name (``main``) or a local
-        branch containing a slash (``release/1.0``) has no remote prefix and yields
-        ``None``. Remote names are taken from ``git remote``; the longest matching
-        prefix wins.
-
-        Raises:
-            GitOperationError: If ``git remote`` cannot be run or fails.
-        """
-        cmd = ["git", "remote"]
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)  # noqa: S603
-        except OSError as e:
-            msg = f"Failed to run 'git remote': {e}"
-            error(msg)
-            raise GitOperationError(msg) from e
-        if result.returncode != 0:
-            msg = f"'git remote' exited with code {result.returncode}"
-            error(msg)
-            raise GitOperationError(msg)
-        remotes = result.stdout.decode(errors="replace").split() if result.stdout else []
-        for remote in sorted(remotes, key=len, reverse=True):
-            prefix = f"{remote}/"
-            if base_branch.startswith(prefix) and len(base_branch) > len(prefix):
-                return remote, base_branch[len(prefix) :]
-        return None
-
     def _fetch_base_branch(self, base_branch: str) -> None:
         """Fetch the base ref's remote ref; refuse to run on any fetch failure.
 
@@ -351,25 +318,14 @@ class CleanupPrOrchestrator:
         Raises:
             GitOperationError: If the git binary is unavailable or the fetch fails.
         """
-        split = self._split_remote_ref(base_branch)
-        if split is None:
-            warn(f"'{base_branch}' is not a remote-tracking ref; skipping fetch and using the local ref as-is")
-            return
-        remote, branch = split
-        cmd = ["git", "fetch", remote, branch]
         dim(f"Fetching {base_branch} ...")
         try:
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
-        except OSError as e:
-            msg = f"Failed to run 'git fetch {remote} {branch}': {e}"
-            error(msg)
-            raise GitOperationError(msg) from e
-        if result.returncode != 0:
-            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
-            detail = stderr_text or f"'git fetch {remote} {branch}' exited with code {result.returncode}"
-            msg = f"Refusing to run: unable to fetch {base_branch}. {detail}"
-            error(msg)
-            raise GitOperationError(msg)
+            fetched = self.branch_analyzer.fetch_remote_ref(base_branch)
+        except GitOperationError as e:
+            error(str(e))
+            raise
+        if not fetched:
+            warn(f"'{base_branch}' is not a remote-tracking ref; skipping fetch and using the local ref as-is")
 
     def _check_up_to_date_with_base(self, base_branch: str) -> None:
         """Ensure HEAD sits on top of the base branch (base is an ancestor of HEAD).
@@ -383,15 +339,13 @@ class CleanupPrOrchestrator:
         Raises:
             GitOperationError: If HEAD is not up to date with the base branch.
         """
-        cmd = shlex.split(f"git merge-base --is-ancestor {base_branch} HEAD")
         dim(f"Checking that HEAD is up to date with {base_branch} ...")
         try:
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
-        except OSError as e:
-            msg = f"Failed to check ancestry with {base_branch}: {e}"
-            error(msg)
-            raise GitOperationError(msg) from e
-        if result.returncode != 0:
+            up_to_date = self.branch_analyzer.is_ancestor_of_head(base_branch)
+        except GitOperationError as e:
+            error(str(e))
+            raise
+        if not up_to_date:
             msg = f"Branch is not up to date with {base_branch}; rebase or merge {base_branch} first"
             error(msg)
             raise GitOperationError(msg)
@@ -419,47 +373,13 @@ class CleanupPrOrchestrator:
             GitOperationError: If the worktree cannot be created.
         """
         project_key = self.config.sonarqube_project_key
-        worktree_dir = Path(tempfile.mkdtemp(prefix="vibe-heal-baseline-"))
-        created = False
-        try:
-            self._add_worktree(worktree_dir, base_branch)
-            created = True
+        with self.branch_analyzer.temporary_worktree(base_branch) as worktree_dir:
             dim(f"Running baseline SonarQube scan of {base_branch} against {project_key}...")
             return await self.analysis_runner.run_analysis(
                 project_key=project_key,
                 project_name=project_key,
                 project_dir=worktree_dir,
             )
-        finally:
-            self._remove_worktree(worktree_dir, created)
-
-    @staticmethod
-    def _add_worktree(worktree_dir: Path, base_branch: str) -> None:
-        """Create a detached worktree of ``base_branch`` at ``worktree_dir``."""
-        cmd = ["git", "worktree", "add", "--detach", str(worktree_dir), base_branch]
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
-        except OSError as e:
-            msg = f"Failed to create worktree for {base_branch}: {e}"
-            raise GitOperationError(msg) from e
-        if result.returncode != 0:
-            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
-            msg = f"Failed to create worktree for {base_branch}: {stderr_text or f'exit code {result.returncode}'}"
-            raise GitOperationError(msg)
-
-    @staticmethod
-    def _remove_worktree(worktree_dir: Path, created: bool) -> None:
-        """Remove the baseline worktree; failures are warnings, never errors."""
-        if created:
-            cmd = ["git", "worktree", "remove", "--force", str(worktree_dir)]
-            try:
-                result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
-                if result.returncode != 0:
-                    warn(f"Warning: Failed to remove worktree {worktree_dir}")
-            except OSError as e:
-                warn(f"Warning: Failed to remove worktree {worktree_dir}: {e}")
-        # Also drops the mkdtemp directory when the worktree was never created.
-        shutil.rmtree(worktree_dir, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Temp project lifecycle (FR-2 step 4 + step 7)

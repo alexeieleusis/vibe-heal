@@ -110,7 +110,7 @@ def _preconditions_pass(
         patch.object(orchestrator.branch_analyzer, "get_user_email", return_value="u@example.com"),
         patch.object(orchestrator.ai_tool, "is_available", return_value=True),
         patch.object(orchestrator.git_manager, "require_clean_working_directory", side_effect=clean_side_effect),
-        patch("vibe_heal.cleanup_pr.orchestrator.subprocess.run", side_effect=fake_run),
+        patch("vibe_heal.git.branch_analyzer.subprocess.run", side_effect=fake_run),
     ):
         yield commands
 
