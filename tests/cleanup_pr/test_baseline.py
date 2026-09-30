@@ -119,6 +119,8 @@ def _patch_subprocess(
             if worktree_remove_exc is not None:
                 raise worktree_remove_exc
             return _git_result(worktree_remove_rc)
+        if cmd == ["git", "remote"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"origin\n", stderr=b"")
         if "fetch" in cmd or "merge-base" in cmd:
             return _git_result(0)
         msg = f"Unexpected command {cmd}"

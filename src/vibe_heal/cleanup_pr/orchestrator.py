@@ -290,24 +290,42 @@ class CleanupPrOrchestrator:
         # Strict clean working tree (untracked files are fine), checked once up front.
         self.git_manager.require_clean_working_directory()
 
-    @staticmethod
-    def _split_remote_ref(base_branch: str) -> tuple[str, str]:
-        """Split a base ref into ``(remote, branch)``.
+    def _split_remote_ref(self, base_branch: str) -> tuple[str, str] | None:
+        """Split a base ref into ``(remote, branch)`` if its prefix is a real remote.
 
-        ``origin/main`` -> ``("origin", "main")``. A bare name (no slash) assumes
-        the default remote ``origin``.
+        ``origin/main`` -> ``("origin", "main")``. A bare name (``main``) or a local
+        branch containing a slash (``release/1.0``) has no remote prefix and yields
+        ``None``. Remote names are taken from ``git remote``; the longest matching
+        prefix wins.
+
+        Raises:
+            GitOperationError: If ``git remote`` cannot be run or fails.
         """
-        if "/" in base_branch:
-            remote, branch = base_branch.split("/", 1)
-            return remote, branch
-        return "origin", base_branch
+        cmd = ["git", "remote"]
+        try:
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)  # noqa: S603
+        except OSError as e:
+            msg = f"Failed to run 'git remote': {e}"
+            error(msg)
+            raise GitOperationError(msg) from e
+        if result.returncode != 0:
+            msg = f"'git remote' exited with code {result.returncode}"
+            error(msg)
+            raise GitOperationError(msg)
+        remotes = result.stdout.decode(errors="replace").split() if result.stdout else []
+        for remote in sorted(remotes, key=len, reverse=True):
+            prefix = f"{remote}/"
+            if base_branch.startswith(prefix) and len(base_branch) > len(prefix):
+                return remote, base_branch[len(prefix) :]
+        return None
 
     def _fetch_base_branch(self, base_branch: str) -> None:
         """Fetch the base ref's remote ref; refuse to run on any fetch failure.
 
         Runs even in dry-run. On any failure (offline, auth, missing remote) the
         run is refused with a domain error before any SonarQube work — no fallback
-        to the local ref.
+        to the local ref. A base ref that is not ``<remote>/<branch>`` (a local
+        branch) is not fetched; a warning says so.
 
         Args:
             base_branch: Base branch to fetch (e.g. 'origin/main').
@@ -315,8 +333,12 @@ class CleanupPrOrchestrator:
         Raises:
             GitOperationError: If the git binary is unavailable or the fetch fails.
         """
-        remote, branch = self._split_remote_ref(base_branch)
-        cmd = shlex.split(f"git fetch {remote} {branch}")
+        split = self._split_remote_ref(base_branch)
+        if split is None:
+            warn(f"'{base_branch}' is not a remote-tracking ref; skipping fetch and using the local ref as-is")
+            return
+        remote, branch = split
+        cmd = ["git", "fetch", remote, branch]
         dim(f"Fetching {base_branch} ...")
         try:
             result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603

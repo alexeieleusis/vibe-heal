@@ -79,6 +79,7 @@ def _preconditions_pass(
     fetch_rc: int = 0,
     ancestor_rc: int = 0,
     dirty: bool = False,
+    remotes: tuple[str, ...] = ("origin", "upstream"),
 ) -> Iterator[list[list[str]]]:
     """Make the up-front preconditions pass, with controllable git exit codes.
 
@@ -91,6 +92,8 @@ def _preconditions_pass(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         commands.append(cmd)
+        if cmd == ["git", "remote"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(remotes).encode(), stderr=b"")
         if "fetch" in cmd:
             stderr = b"fatal: unable to access 'https://example.com/'" if fetch_rc else b""
             return _git_result(fetch_rc, stderr=stderr)
@@ -181,17 +184,36 @@ class TestCleanupPrPreconditions:
         assert mock_client.method_calls == []
 
     @pytest.mark.asyncio
-    async def test_bare_branch_name_fetches_via_default_remote(
+    async def test_bare_branch_name_skips_fetch(
         self,
         orchestrator: CleanupPrOrchestrator,
         mock_client: AsyncMock,
     ) -> None:
-        """A base name without a slash is fetched through the default remote ``origin``."""
-        with _preconditions_pass(orchestrator, fetch_rc=1) as commands, pytest.raises(GitOperationError):
+        """A bare local name is not fetched (it would not update the local ref)."""
+        with (
+            _preconditions_pass(orchestrator) as commands,
+            patch.object(orchestrator.branch_analyzer, "get_modified_files", return_value=[]),
+        ):
             await orchestrator.cleanup_pr(base_branch="main")
 
-        assert ["git", "fetch", "origin", "main"] in commands
-        assert mock_client.method_calls == []
+        assert not any("fetch" in c for c in commands)
+        assert ["git", "merge-base", "--is-ancestor", "main", "HEAD"] in commands
+
+    @pytest.mark.asyncio
+    async def test_slashed_local_branch_is_not_split(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+    ) -> None:
+        """A local branch like release/1.0 (prefix is not a remote) is not misparsed."""
+        with (
+            _preconditions_pass(orchestrator) as commands,
+            patch.object(orchestrator.branch_analyzer, "get_modified_files", return_value=[]),
+        ):
+            await orchestrator.cleanup_pr(base_branch="release/1.0")
+
+        assert not any("fetch" in c for c in commands)
+        assert ["git", "merge-base", "--is-ancestor", "release/1.0", "HEAD"] in commands
 
     @pytest.mark.asyncio
     async def test_slashed_branch_name_splits_on_first_slash_only(
