@@ -171,3 +171,34 @@ class TestCleanupPrCommand:
 
         assert result.exit_code == 0
         assert orchestrator.cleanup_pr.call_args.kwargs["include_main_duplications"] is True
+
+
+def test_summary_shows_main_duplications_and_external_files(mocks: tuple[MagicMock, MagicMock]) -> None:
+    orchestrator, _ = mocks
+    orchestrator.cleanup_pr.return_value = CleanupPrResult(
+        success=True,
+        files_processed=[
+            FileCleanupPrResult(
+                file_path=Path("src/file1.py"),
+                main_duplications_fixed=2,
+                main_duplications_skipped=1,
+                success=True,
+            ),
+        ],
+        total_main_duplications_fixed=2,
+        external_files_touched=[Path("src/other.py")],
+    )
+    result = runner.invoke(app, ["cleanup-pr", "--include-main-duplications"])
+
+    assert result.exit_code == 0
+    assert "Total main duplications fixed: 2" in result.stdout
+    assert "outside the branch diff" in result.stdout
+    assert "src/other.py" in result.stdout
+    assert "2 fixed" in result.stdout
+    assert "1 skipped" in result.stdout
+
+
+def test_header_describes_whole_branch_rounds(mocks: tuple[MagicMock, MagicMock]) -> None:
+    result = runner.invoke(app, ["cleanup-pr"])
+
+    assert "Max analysis rounds (whole branch): 10" in result.stdout

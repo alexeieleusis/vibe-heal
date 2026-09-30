@@ -384,8 +384,8 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - Fixes only findings on lines changed vs the base branch (duplications first, then issues); see `cleanup_pr/` above for preconditions and scoping
   - `--dry-run` runs analysis and scoping and prints what would be fixed; no fix commits (main duplications are counted without AI calls)
   - `--include-main-duplications` runs a baseline scan that overwrites the real project's SonarQube analysis, even with `--dry-run`
-  - Helpers `_run_cleanup_pr` and `_display_cleanup_pr_results`; displays per-file issues/duplications fixed and out-of-scope counts. It does not yet display `main_duplications_fixed`, `total_main_duplications_fixed` or `external_files_touched`
-  - Header and `--max-iterations` help text are copied from `cleanup` ("per file"); the count is really whole-branch analysis rounds
+  - Helpers `_run_cleanup_pr` and `_display_cleanup_pr_results`; displays per-file issues/duplications fixed and out-of-scope counts, per-file main duplications fixed/skipped, `total_main_duplications_fixed`, and `external_files_touched`
+  - Header ("Max analysis rounds (whole branch)") and `--max-iterations` help describe whole-branch analysis rounds
   - Errors: `ConfigurationError` prints `Configuration error: ...` and exits 1; any other exception prints `Error: ...` and exits 1 (traceback with `--verbose`); a failed result exits 1 after the per-file table
   - Does not replace `cleanup` / `dedupe-branch`, does no GitHub interaction (run `review --post` afterwards) and does not push
 - `vibe-heal review` - analyze SonarQube issues on changed lines (read-only, no fixes)

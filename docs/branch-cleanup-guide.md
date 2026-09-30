@@ -335,7 +335,7 @@ vibe-heal cleanup-pr --include-main-duplications
 | Flag | Default | Behavior |
 |---|---|---|
 | `--base-branch`, `-b` | `origin/main` | Base to diff against. Plain `origin/main`; no `gh` auto-detection |
-| `--max-iterations`, `-i` | `10` | Maximum analyze -> fix rounds for the whole branch (the `--help` text says "per file", but it counts whole-branch rounds) |
+| `--max-iterations`, `-i` | `10` | Maximum analyze -> fix rounds for the whole branch |
 | `--pattern`, `-p` | none | Glob filters (repeatable), same as `cleanup` (matched with `Path.match`) |
 | `--min-severity` | none | Minimum severity (`BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, `INFO`); applies to issues only |
 | `--dry-run` | off | Run analysis and scoping, report what would be fixed; no AI calls and no commits. Runs a single round |
@@ -389,12 +389,13 @@ One commit per fix, with no extra trailer:
 ```
 Branch Cleanup (PR scope)
   Base branch: origin/main
-  Max iterations per file: 10
+  Max analysis rounds (whole branch): 10
 
 Cleanup Summary (PR scope):
   Files processed: 2
   Total issues fixed: 3
   Total duplications fixed: 1
+  Total main duplications fixed: 0
 
 Per-File Results:
   ✓ src/api/users.py
@@ -407,7 +408,7 @@ Per-File Results:
 ✨ Branch cleanup (PR scope) complete!
 ```
 
-Out-of-scope counts show what was deliberately left alone. With `--dry-run` the summary adds `Dry run: no changes were made`. The summary does not show main-duplication counts. The "Max iterations per file" header line reflects the same option described above.
+Out-of-scope counts show what was deliberately left alone. With `--dry-run` the summary adds `Dry run: no changes were made`. The summary also lists the total of main duplications fixed and, when duplication refactors edited files outside the branch diff, those file paths. Per-file lines add `main duplications: N fixed, M skipped` when there is anything to report. The "Max analysis rounds" header line reflects `--max-iterations`.
 
 ### Failure behavior
 

@@ -256,18 +256,20 @@ def _display_branch_operation_header(
     base_branch: str,
     max_iterations: int,
     file_patterns: list[str] | None,
+    iterations_label: str = "Max iterations per file",
 ) -> None:
     """Display header for branch operations.
 
     Args:
         operation_name: Name of the operation (e.g., "Branch Cleanup")
         base_branch: Base branch being compared against
-        max_iterations: Maximum iterations per file
+        max_iterations: Maximum iterations
         file_patterns: Optional file patterns to filter
+        iterations_label: Label describing what max_iterations counts
     """
     bold_cyan(f"\n{operation_name}")
     console.print(f"  Base branch: {base_branch}")
-    console.print(f"  Max iterations per file: {max_iterations}")
+    console.print(f"  {iterations_label}: {max_iterations}")
     if file_patterns:
         console.print(f"  File patterns: {', '.join(file_patterns)}")
     console.print()
@@ -429,8 +431,14 @@ def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) 
     console.print(f"  Files processed: {len(result.files_processed)}")
     success(f"  Total issues fixed: {result.total_issues_fixed}")
     success(f"  Total duplications fixed: {result.total_duplications_fixed}")
+    success(f"  Total main duplications fixed: {result.total_main_duplications_fixed}")
     if dry_run:
         dim("  Dry run: no changes were made")
+
+    if result.external_files_touched:
+        warn("\nFiles outside the branch diff were modified by duplication refactors:")
+        for touched in result.external_files_touched:
+            console.print(f"  {rich_escape(str(touched))}")
 
     if result.files_processed:
         console.print("\n[bold]Per-File Results:[/bold]")
@@ -444,6 +452,11 @@ def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) 
                 f"      duplications: {file_result.duplications_fixed} fixed, "
                 f"{file_result.duplications_out_of_scope} out of scope"
             )
+            if file_result.main_duplications_fixed or file_result.main_duplications_skipped:
+                console.print(
+                    f"      main duplications: {file_result.main_duplications_fixed} fixed, "
+                    f"{file_result.main_duplications_skipped} skipped"
+                )
             if file_result.error_message:
                 error(f"      Error: {file_result.error_message}")
 
@@ -508,7 +521,7 @@ def cleanup_pr(
         10,
         "--max-iterations",
         "-i",
-        help="Maximum fix iterations per file",
+        help="Maximum analyze/fix rounds for the whole branch",
     ),
     file_patterns: list[str] | None = typer.Option(
         None,
@@ -570,6 +583,7 @@ def cleanup_pr(
             base_branch=base_branch,
             max_iterations=max_iterations,
             file_patterns=file_patterns,
+            iterations_label="Max analysis rounds (whole branch)",
         )
 
         ai_tool_instance = initialize_ai_tool(config)
