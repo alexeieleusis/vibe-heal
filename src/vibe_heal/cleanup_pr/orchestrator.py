@@ -632,8 +632,11 @@ class CleanupPrOrchestrator:
         """Analyze the branch, then detect and fix main duplications (once, from the original diff).
 
         The qualifying set is computed before the first fix commit, so ``old_lines`` still
-        describes the original diff. Failure policy is the same as elsewhere: a failed AI
-        attempt increments ``failed`` and processing continues; nothing is reverted.
+        describes the original diff. Each task's branch-side hunk/range is nevertheless
+        re-read from HEAD right before its AI call (``_fix_main_duplication``), since
+        earlier fix commits in the same file shift line numbers. Failure policy is the same
+        as elsewhere: a failed AI attempt increments ``failed`` and processing continues;
+        nothing is reverted.
 
         Returns:
             The analysis result when it is still fresh (no commits were made), else None
@@ -672,7 +675,7 @@ class CleanupPrOrchestrator:
         commits = 0
         for task in tasks:
             commits += await self._fix_main_duplication(
-                task, results[task.file_path], diff_files, external_files, dry_run
+                task, results[task.file_path], diff_files, external_files, dry_run, merge_base
             )
         return None if commits else analysis_result
 
@@ -741,8 +744,15 @@ class CleanupPrOrchestrator:
         diff_files: set[str],
         external_files: list[Path],
         dry_run: bool,
+        merge_base: str,
     ) -> int:
         """Fix one main duplication with one AI task and, on success, one commit (FR-6 Fix/Commits).
+
+        The task's branch hunk/range was snapshotted before the first fix commit, so it is
+        re-read from HEAD right before the AI call: an earlier commit in this file may have
+        already rewritten it, which would otherwise leave the prompt pointing at stale lines.
+        When no branch diff remains for the block (an earlier fix absorbed it), the task is
+        skipped as already handled.
 
         Returns:
             The number of commits created (0 or 1).
@@ -755,9 +765,22 @@ class CleanupPrOrchestrator:
 
         # Same failure policy as cleanup: a dirty tree left by a failed attempt raises here.
         self.git_manager.require_clean_working_directory()
+
+        # Rebuild lazily so the branch diff is re-read from the current HEAD instead of the
+        # pre-fix snapshot (stale for the 2nd+ group in a file).
+        fresh_task = build_main_duplication_task(
+            self.branch_analyzer.repo, merge_base, task.file_path, task.repo_relative, task.resolved
+        )
+        if fresh_task is None:
+            dim(f"  Skipping main duplication at main line {line}: no branch diff remains after earlier fixes")
+            result.main_duplications_skipped += 1
+            return 0
+
         head_before = self.branch_analyzer.get_head_sha()
         dim(f"\n{task.file_path}: fixing main duplication at main line {line}")
-        fix_result = await self.ai_tool.fix_duplication(build_main_duplication_prompt(task), task.file_path.as_posix())
+        fix_result = await self.ai_tool.fix_duplication(
+            build_main_duplication_prompt(fresh_task), task.file_path.as_posix()
+        )
         if not fix_result.success:
             error(
                 f"  Failed to fix main duplication at main line {line}: {fix_result.error_message or 'unknown error'}"
@@ -765,7 +788,7 @@ class CleanupPrOrchestrator:
             self._mark_failures(result, 1)
             return 0
 
-        message = build_main_duplication_commit_message(task, self.ai_tool.tool_type.display_name)
+        message = build_main_duplication_commit_message(fresh_task, self.ai_tool.tool_type.display_name)
         try:
             sha = self.git_manager.create_commit(message, None, include_untracked=True)
         except Exception as e:

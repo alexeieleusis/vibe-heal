@@ -235,17 +235,35 @@ def _main_env(
     diffs: list[DiffLines],
     tasks: list[MainDuplicationTask] | None = None,
     commit_results: list[str | None] | None = None,
+    rebuild_tasks: list[MainDuplicationTask] | None = None,
 ) -> Iterator[MagicMock]:
-    """Loop harness plus mocks for the main-duplication phase (detection patched out)."""
+    """Loop harness plus mocks for the main-duplication phase (detection patched out).
+
+    ``rebuild_tasks`` stands in for the lazy task rebuild from the current HEAD that runs
+    right before each AI call (matched to the task being fixed by ``resolved``); it
+    defaults to the detection tasks. An empty list simulates no branch diff remaining.
+    """
     events: list[str] = []
+    detection_tasks = tasks if tasks is not None else []
+    rebuild_source = rebuild_tasks if rebuild_tasks is not None else detection_tasks
+
+    def rebuild(
+        _repo: object, _merge_base: str, _file_path: Path, _repo_relative: str, resolved: object
+    ) -> MainDuplicationTask | None:
+        for t in rebuild_source:
+            if t.resolved == resolved:
+                return t
+        return None
+
     with (
         _loop_env(orchestrator, mock_client, temp_project, diffs) as h,
         patch.object(orchestrator, "_detect_main_duplications", new_callable=AsyncMock) as detect,
         patch.object(orchestrator.branch_analyzer, "repo", MagicMock()) as repo,
         patch.object(orchestrator.git_manager, "require_clean_working_directory") as clean,
         patch.object(orchestrator.git_manager, "create_commit", side_effect=commit_results or ["sha"] * 5) as commit,
+        patch(f"{_MODULE}.build_main_duplication_task", side_effect=rebuild) as build,
     ):
-        detect.return_value = tasks if tasks is not None else []
+        detect.return_value = detection_tasks
         repo.git.merge_base.return_value = "mergebase\n"
         repo.git.diff.return_value = ""
         original_analysis = h.analysis.side_effect
@@ -260,6 +278,7 @@ def _main_env(
         h.dedupe.dedupe_file = AsyncMock(return_value=FixSummary(total_issues=0))
         env = MagicMock()
         env.h, env.detect, env.repo, env.clean, env.commit, env.events = h, detect, repo, clean, commit, events
+        env.build = build
         yield env
 
 
@@ -315,6 +334,67 @@ class TestMainDuplicationPhase:
             await _loop(orchestrator, temp_project)
         # one analysis for detection, one fresh analysis for the loop's first iteration
         assert env.events.count("analysis") == 2
+
+    @pytest.mark.asyncio
+    async def test_prompt_uses_fresh_diff_reread_from_head(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+        temp_project: TempProjectMetadata,
+        ai_tool: MagicMock,
+    ) -> None:
+        original = _task()
+        fresh = MainDuplicationTask(
+            file_path=original.file_path,
+            repo_relative=original.repo_relative,
+            resolved=original.resolved,
+            main_block_text=original.main_block_text,
+            branch_hunk="@@ -6 +40 @@\n-fresh\n+fresh-new",
+            branch_range=(40, 40),
+        )
+        with _main_env(
+            orchestrator,
+            mock_client,
+            temp_project,
+            [_diff_with_old({20}, {6})] * 3,
+            tasks=[original],
+            rebuild_tasks=[fresh],
+        ) as env:
+            files, _, _ = await _loop(orchestrator, temp_project)
+
+        env.build.assert_called_once()
+        ai_tool.fix_duplication.assert_awaited_once()
+        prompt, _ = ai_tool.fix_duplication.await_args.args
+        assert "+fresh-new" in prompt
+        assert "lines 40-40" in prompt
+        assert "-old" not in prompt
+        assert "lines 40-40" in env.commit.call_args.args[0]
+        assert files[0].main_duplications_fixed == 1
+
+    @pytest.mark.asyncio
+    async def test_no_fresh_diff_after_earlier_fix_is_skipped(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+        temp_project: TempProjectMetadata,
+        ai_tool: MagicMock,
+    ) -> None:
+        with _main_env(
+            orchestrator,
+            mock_client,
+            temp_project,
+            [_diff_with_old({20}, {6})] * 3,
+            tasks=[_task()],
+            rebuild_tasks=[],
+        ) as env:
+            files, _, _ = await _loop(orchestrator, temp_project)
+
+        ai_tool.fix_duplication.assert_not_awaited()
+        env.commit.assert_not_called()
+        assert files[0].main_duplications_skipped == 1
+        assert files[0].main_duplications_fixed == 0
+        assert files[0].success is True
+        assert env.events.count("analysis") == 1  # nothing committed: analysis still fresh
 
     @pytest.mark.asyncio
     async def test_no_tasks_reuses_analysis(
