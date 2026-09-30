@@ -53,6 +53,7 @@ BASE_BRANCH_HELP = "Base branch to compare against"
 GITHUB_FOOTER_LINE = "\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]"
 STATUS_SUCCESS = "[green]✓[/green]"
 STATUS_FAILURE = "[red]✗[/red]"
+PER_FILE_RESULTS_HEADER = "\n[bold]Per-File Results:[/bold]"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -295,7 +296,7 @@ def _display_cleanup_results(result: CleanupResult) -> None:
     success(f"  Total issues fixed: {result.total_issues_fixed}")
 
     if result.files_processed:
-        console.print("\n[bold]Per-File Results:[/bold]")
+        console.print(PER_FILE_RESULTS_HEADER)
         for file_result in result.files_processed:
             status = STATUS_SUCCESS if file_result.success else STATUS_FAILURE
             console.print(
@@ -472,7 +473,7 @@ def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) 
             console.print(f"  {rich_escape(str(touched))}")
 
     if result.files_processed:
-        console.print("\n[bold]Per-File Results:[/bold]")
+        console.print(PER_FILE_RESULTS_HEADER)
         for file_result in result.files_processed:
             _display_cleanup_pr_file_result(file_result)
 
@@ -639,7 +640,7 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
     success(f"  Total duplications fixed: {result.total_duplications_fixed}")
 
     if result.files_processed:
-        console.print("\n[bold]Per-File Results:[/bold]")
+        console.print(PER_FILE_RESULTS_HEADER)
         for file_result in result.files_processed:
             status = STATUS_SUCCESS if file_result.success else STATUS_FAILURE
             console.print(
