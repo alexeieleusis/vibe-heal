@@ -1,6 +1,8 @@
 """Tests for the cleanup-pr baseline scan (FR-2 step 3, --include-main-duplications)."""
 
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -61,7 +63,6 @@ def _setup(
     orchestrator: CleanupPrOrchestrator,
     temp_project: TempProjectMetadata,
     baseline: AnalysisResult | Exception,
-    worktree_add_rc: int = 0,
     files: list[Path] | None = None,
 ) -> tuple[_Env, AsyncMock, AsyncMock]:
     env = _Env()
@@ -102,7 +103,12 @@ def _fail() -> AnalysisResult:
     return AnalysisResult(success=False, error_message="scan broke")
 
 
-def _patch_subprocess(env: _Env, worktree_add_rc: int = 0) -> object:
+def _patch_subprocess(
+    env: _Env,
+    worktree_add_rc: int = 0,
+    worktree_remove_rc: int = 0,
+    worktree_remove_exc: Exception | None = None,
+) -> object:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if "worktree" in cmd:
             env.worktree_cmds.append(cmd)
@@ -110,7 +116,9 @@ def _patch_subprocess(env: _Env, worktree_add_rc: int = 0) -> object:
                 env.events.append("worktree_add")
                 return _git_result(worktree_add_rc, stderr=b"fatal: bad ref" if worktree_add_rc else b"")
             env.events.append("worktree_remove")
-            return _git_result(0)
+            if worktree_remove_exc is not None:
+                raise worktree_remove_exc
+            return _git_result(worktree_remove_rc)
         if "fetch" in cmd or "merge-base" in cmd:
             return _git_result(0)
         msg = f"Unexpected command {cmd}"
@@ -211,7 +219,12 @@ class TestBaselineScan:
         self, orchestrator: CleanupPrOrchestrator, temp_project: TempProjectMetadata
     ) -> None:
         env, create, delete = _setup(orchestrator, temp_project, _ok())
-        with _preconditions_pass(orchestrator), _patch_subprocess(env, worktree_add_rc=128):
+        leaked_dir = Path(tempfile.mkdtemp(prefix="vibe-heal-baseline-test-"))
+        with (
+            _preconditions_pass(orchestrator),
+            _patch_subprocess(env, worktree_add_rc=128),
+            patch("vibe_heal.cleanup_pr.orchestrator.tempfile.mkdtemp", return_value=str(leaked_dir)),
+        ):
             result = await orchestrator.cleanup_pr(include_main_duplications=True)
 
         assert result.success is False
@@ -219,8 +232,56 @@ class TestBaselineScan:
         assert orchestrator.analysis_runner.run_analysis.await_count == 0
         # No worktree was created, so none is removed via git.
         assert [c[2] for c in env.worktree_cmds] == ["add"]
+        # With created=False the rmtree fallback is the only thing that drops the mkdtemp dir.
+        assert not leaked_dir.exists()
         create.assert_not_awaited()
         delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_worktree_remove_failure_is_warning_not_error(
+        self, orchestrator: CleanupPrOrchestrator, temp_project: TempProjectMetadata
+    ) -> None:
+        env, create, delete = _setup(orchestrator, temp_project, _ok())
+        with (
+            _preconditions_pass(orchestrator),
+            _patch_subprocess(env, worktree_remove_rc=1),
+            patch("vibe_heal.cleanup_pr.orchestrator.warn") as warn,
+            patch("vibe_heal.cleanup_pr.orchestrator.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
+        ):
+            result = await orchestrator.cleanup_pr(include_main_duplications=True)
+
+        assert result.success is True
+        assert env.events == ["worktree_add", "baseline", "worktree_remove", "create_temp"]
+        warn.assert_called_once()
+        assert "Failed to remove worktree" in str(warn.call_args)
+        # The rmtree fallback still drops the mkdtemp dir even though the git remove failed.
+        rmtree.assert_called_once_with(env.dirs[0], ignore_errors=True)
+        assert not env.dirs[0].exists()
+        create.assert_awaited_once()
+        delete.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_worktree_remove_oserror_is_warning_not_error(
+        self, orchestrator: CleanupPrOrchestrator, temp_project: TempProjectMetadata
+    ) -> None:
+        env, create, delete = _setup(orchestrator, temp_project, _ok())
+        with (
+            _preconditions_pass(orchestrator),
+            _patch_subprocess(env, worktree_remove_exc=OSError("disk full")),
+            patch("vibe_heal.cleanup_pr.orchestrator.warn") as warn,
+            patch("vibe_heal.cleanup_pr.orchestrator.shutil.rmtree", side_effect=shutil.rmtree) as rmtree,
+        ):
+            result = await orchestrator.cleanup_pr(include_main_duplications=True)
+
+        assert result.success is True
+        assert env.events == ["worktree_add", "baseline", "worktree_remove", "create_temp"]
+        warn.assert_called_once()
+        assert "disk full" in str(warn.call_args)
+        # The rmtree fallback still drops the mkdtemp dir even though the git remove raised.
+        rmtree.assert_called_once_with(env.dirs[0], ignore_errors=True)
+        assert not env.dirs[0].exists()
+        create.assert_awaited_once()
+        delete.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_no_modified_files_skips_baseline(
