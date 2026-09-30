@@ -320,7 +320,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 # Fix issues and duplications on lines changed by the current branch
 vibe-heal cleanup-pr
 
-# Preview what is in scope (no AI calls, no commits)
+# Preview in-scope fixes (the AI tool is invoked; nothing is committed)
 vibe-heal cleanup-pr --dry-run
 
 # Compare against another base, only Python files, only MAJOR and above issues
@@ -338,7 +338,7 @@ vibe-heal cleanup-pr --include-main-duplications
 | `--max-iterations`, `-i` | `10` | Maximum analyze -> fix rounds for the whole branch |
 | `--pattern`, `-p` | none | Glob filters (repeatable), same as `cleanup` (matched with `Path.match`) |
 | `--min-severity` | none | Minimum severity (`BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, `INFO`); applies to issues only |
-| `--dry-run` | off | Run analysis and scoping, report what would be fixed; no AI calls and no commits. Runs a single round |
+| `--dry-run` | off | Run analysis and scoping, attempt each in-scope fix with the AI tool, and report what would be fixed. No commits are made; the uncommitted edits remain in the working tree (discard with `git checkout -- .`). Runs a single round |
 | `--ai-tool` | auto-detect | Same as `cleanup` |
 | `--env-file` | `.env.vibeheal` / `.env` | Same as `cleanup` |
 | `--verbose`, `-v` | off | Same as `cleanup` |
@@ -356,7 +356,7 @@ vibe-heal cleanup-pr --include-main-duplications
 
 1. **Preconditions** (all checked before any SonarQube work):
    - You are in a git repository and the base branch exists.
-   - An AI tool is available (skipped with `--dry-run`).
+   - An AI tool is available, even with `--dry-run` (the in-scope fixers invoke it; only the main-duplication counts are reported without an AI call).
    - The working tree has no modified or staged files (untracked files are fine).
    - The base ref's remote is fetched, also in `--dry-run`. If the fetch fails, the command refuses to run; there is no fallback to the local ref.
    - The base tip is an ancestor of `HEAD`. Otherwise it stops with `Branch is not up to date with origin/main; rebase or merge origin/main first`. A branch that merged the base in also passes. The rule applies to any `--base-branch`.
@@ -408,7 +408,7 @@ Per-File Results:
 ✨ Branch cleanup (PR scope) complete!
 ```
 
-Out-of-scope counts show what was deliberately left alone. With `--dry-run` the summary adds `Dry run: no changes were made`. The summary also lists the total of main duplications fixed and, when duplication refactors edited files outside the branch diff, those file paths. Per-file lines add `main duplications: N fixed, M skipped` when there is anything to report. The "Max analysis rounds" header line reflects `--max-iterations`.
+Out-of-scope counts show what was deliberately left alone. With `--dry-run` the summary adds `Dry run: no changes were made`, meaning no commits: in-scope fixes were still attempted by the AI tool, and their uncommitted edits remain in the working tree — discard them with `git checkout -- .` before the next run. The summary also lists the total of main duplications fixed and, when duplication refactors edited files outside the branch diff, those file paths. Per-file lines add `main duplications: N fixed, M skipped` when there is anything to report. The "Max analysis rounds" header line reflects `--max-iterations`.
 
 ### Failure behavior
 
