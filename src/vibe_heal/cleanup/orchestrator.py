@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from vibe_heal.ai_tools.base import AITool
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
+from vibe_heal.git.file_selection import select_modified_files
 from vibe_heal.git.manager import GitManager
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, dim, error, success, warn
@@ -102,7 +103,7 @@ class CleanupOrchestrator:
 
         try:
             # Step 1: Validate and filter modified files
-            modified_files = self._validate_and_filter_files(base_branch, file_patterns)
+            modified_files = select_modified_files(self.branch_analyzer, base_branch, file_patterns)
 
             if not modified_files:
                 return CleanupResult(
@@ -185,40 +186,6 @@ class CleanupOrchestrator:
         finally:
             # Always cleanup temporary project
             await self._cleanup_temp_project(temp_project)
-
-    def _validate_and_filter_files(
-        self,
-        base_branch: str,
-        file_patterns: list[str] | None,
-    ) -> list[Path]:
-        """Validate and filter modified files.
-
-        Args:
-            base_branch: Base branch to compare against
-            file_patterns: Optional list of glob patterns to filter files
-
-        Returns:
-            List of filtered modified files
-        """
-        dim(f"Analyzing branch against {base_branch}...")
-        modified_files = self.branch_analyzer.get_modified_files(base_branch)
-        dim(f"Found {len(modified_files)} modified files")
-
-        if not modified_files:
-            return []
-
-        # Filter files if patterns provided
-        if file_patterns:
-            dim(f"Filtering files with patterns: {file_patterns}")
-            modified_files = self._filter_files(modified_files, file_patterns)
-            dim(f"After filtering: {len(modified_files)} files remain")
-
-        if modified_files:
-            dim("Files to process:")
-            for f in modified_files:
-                dim(f"  - {f}")
-
-        return modified_files
 
     async def _create_temp_project(self) -> TempProjectMetadata:
         """Create temporary SonarQube project for analysis.
@@ -351,25 +318,3 @@ class CleanupOrchestrator:
                 success("✓ Temporary project deleted")
             except Exception as e:
                 warn(f"Warning: Failed to delete temporary project: {e}")
-
-    def _filter_files(
-        self,
-        files: list[Path],
-        patterns: list[str],
-    ) -> list[Path]:
-        """Filter files by glob patterns.
-
-        Args:
-            files: List of file paths
-            patterns: List of glob patterns (e.g., ["*.py", "src/**/*.ts"])
-
-        Returns:
-            Filtered list of files matching at least one pattern
-        """
-        filtered = []
-        for file_path in files:
-            for pattern in patterns:
-                if file_path.match(pattern):
-                    filtered.append(file_path)
-                    break
-        return filtered

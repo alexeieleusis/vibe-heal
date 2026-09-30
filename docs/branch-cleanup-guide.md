@@ -4,6 +4,8 @@
 
 The `vibe-heal cleanup` command automatically fixes all SonarQube issues in modified files of your feature branch before code review. This ensures pull requests have no new code quality issues.
 
+Two related commands are covered here as well: `dedupe-branch` (duplications) and `cleanup-pr` (only findings on lines your branch changed, see [PR-Scoped Cleanup](#pr-scoped-cleanup-cleanup-pr)).
+
 ## When to Use
 
 Use `vibe-heal cleanup` when:
@@ -305,6 +307,114 @@ Fixed by: Claude Code
 🤖 Generated with Claude Code
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
+
+## PR-Scoped Cleanup (`cleanup-pr`)
+
+`vibe-heal cleanup-pr` fixes only the findings **your branch introduced**: SonarQube issues and duplications on lines changed relative to the base branch. Pre-existing findings elsewhere in the same files are left alone. Use it when `cleanup` would touch too much of a large, legacy file.
+
+`cleanup-pr` does **not** replace `cleanup` or `dedupe-branch`, which keep whole-file semantics. It also does no GitHub interaction and never pushes: commits stay local. To report findings on the PR afterwards, run `vibe-heal review --post`.
+
+### Usage
+
+```bash
+# Fix issues and duplications on lines changed by the current branch
+vibe-heal cleanup-pr
+
+# Preview in-scope fixes (the AI tool is invoked; nothing is committed)
+vibe-heal cleanup-pr --dry-run
+
+# Compare against another base, only Python files, only MAJOR and above issues
+vibe-heal cleanup-pr --base-branch origin/develop --pattern "*.py" --min-severity MAJOR
+
+# Also refactor duplications that existed in main (see the warning below)
+vibe-heal cleanup-pr --include-main-duplications
+```
+
+### Options
+
+| Flag | Default | Behavior |
+|---|---|---|
+| `--base-branch`, `-b` | `origin/main` | Base to diff against. Plain `origin/main`; no `gh` auto-detection |
+| `--max-iterations`, `-i` | `10` | Maximum analyze -> fix rounds for the whole branch |
+| `--pattern`, `-p` | none | Glob filters (repeatable), same as `cleanup` (matched with `Path.match`) |
+| `--min-severity` | none | Minimum severity (`BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, `INFO`); applies to issues only |
+| `--dry-run` | off | Run analysis and scoping, attempt each in-scope fix with the AI tool, and report what would be fixed. No commits are made; the uncommitted edits remain in the working tree (discard with `git checkout -- .`). Runs a single round |
+| `--ai-tool` | auto-detect | Same as `cleanup` |
+| `--env-file` | `.env.vibeheal` / `.env` | Same as `cleanup` |
+| `--verbose`, `-v` | off | Same as `cleanup` |
+| `--include-main-duplications` | off | Also handle duplications that existed in main (runs a baseline scan) |
+
+`--pattern` uses `Path.match` (like `cleanup` and `review`), whereas `dedupe-branch` uses `fnmatch`, so the same pattern can behave differently between the commands.
+
+### What "in scope" means
+
+- **Issues** are kept if they sit on lines added or modified by the branch, plus a 3-line trailing window (the same filter `review` uses).
+- **Duplications** are fixed only when the duplicated block in your file intersects lines strictly changed by the branch.
+- Issue fixes stay within one file. A duplication refactor may edit other files (for example when extracting a shared helper); a warning is printed when a refactor touches a file outside the branch diff. Review those commits.
+
+### Workflow
+
+1. **Preconditions** (all checked before any SonarQube work):
+   - You are in a git repository and the base branch exists.
+   - An AI tool is available, even with `--dry-run` (the in-scope fixers invoke it; only the main-duplication counts are reported without an AI call).
+   - The working tree has no modified or staged files (untracked files are fine).
+   - The base ref's remote is fetched, also in `--dry-run`. If the fetch fails, the command refuses to run; there is no fallback to the local ref.
+   - The base tip is an ancestor of `HEAD`. Otherwise it stops with `Branch is not up to date with origin/main; rebase or merge origin/main first`. A branch that merged the base in also passes. The rule applies to any `--base-branch`.
+2. **File selection**: modified files versus the base, then the `--pattern` filter. An empty selection is a success with zero counts.
+3. **Baseline scan** (only with `--include-main-duplications`, see below).
+4. **Temporary project**: a temporary SonarQube project is created for the analysis.
+5. **Iteration loop**, up to `--max-iterations` rounds: analyze the whole repository, recompute the diff against the base, then for each file fix in-scope duplications first and issues second. If a duplication commit landed in a file, that file's issues are deferred to the next round, so they are re-evaluated against the new code. Issues introduced by cleanup-pr's own commits are in scope on the next round. The loop stops early once nothing in scope remains, and waits 5 seconds between rounds.
+6. **Cleanup**: the temporary project is always deleted afterwards. A deletion failure is only a warning.
+
+### Main duplications (`--include-main-duplications`)
+
+> **Warning:** this flag runs a baseline scan of the base ref, in a temporary detached `git worktree`, against your **real** SonarQube project key. This **overwrites the real project's analysis on the SonarQube server, including with `--dry-run`**. With the flag, a run performs two full-repository analyses. The scan is skipped when no files are selected; if it fails the run stops with `Baseline scan failed: ...`.
+
+A *main duplication* is a duplication that existed in main, was modified or removed by your branch, and is no longer active. For each one, the AI tool is asked to extract the shared code into a helper, update all other locations, and then re-apply your branch's change on top, with no behavior change beyond your diff. Each one gets its own commit. With `--dry-run` they are only counted as would-fix.
+
+These mechanics are the least proven part of the command. Review those commits carefully.
+
+### Commit formats
+
+One commit per fix, with no extra trailer:
+
+| Kind | Subject |
+|---|---|
+| Issue | `fix: [SQ-RULE] message` |
+| Duplication | `refactor: [duplication] remove duplicate code at line X` |
+| Main duplication | `refactor: [duplication] extract shared code from removed main duplication at line X` |
+
+### Output
+
+```
+Branch Cleanup (PR scope)
+  Base branch: origin/main
+  Max analysis rounds (whole branch): 10
+
+Cleanup Summary (PR scope):
+  Files processed: 2
+  Total issues fixed: 3
+  Total duplications fixed: 1
+  Total main duplications fixed: 0
+
+Per-File Results:
+  ✓ src/api/users.py
+      issues: 2 fixed, 4 out of scope
+      duplications: 1 fixed, 0 out of scope
+  ✓ src/api/auth.py
+      issues: 1 fixed, 0 out of scope
+      duplications: 0 fixed, 1 out of scope
+
+✨ Branch cleanup (PR scope) complete!
+```
+
+Out-of-scope counts show what was deliberately left alone. With `--dry-run` the summary adds `Dry run: no changes were made`, meaning no commits: in-scope fixes were still attempted by the AI tool, and their uncommitted edits remain in the working tree — discard them with `git checkout -- .` before the next run. The summary also lists the total of main duplications fixed and, when duplication refactors edited files outside the branch diff, those file paths. Per-file lines add `main duplications: N fixed, M skipped` when there is anything to report. The "Max analysis rounds" header line reflects `--max-iterations`.
+
+### Failure behavior
+
+- **Nothing is reverted.** A failed AI attempt is counted and processing continues, but its edits stay in the working tree. The next fix attempt then aborts with a dirty-working-tree error, so a single failed fix can end the whole run with a failed result. Commits made earlier are kept. Discard (`git checkout -- .`) or commit the leftover edits by hand before re-running.
+- A failed analysis returns a failed result immediately.
+- Exit codes: `Configuration error: ...` exits 1; any other exception prints `Error: ...` and exits 1; a failed result exits 1 after the per-file table; a failed precondition prints `Error: ...` and exits 1.
 
 ## Pre-commit Hook Compatibility
 
@@ -698,5 +808,6 @@ cleanup:
 ## See Also
 
 - [Architecture Documentation](ARCHITECTURE.md)
+- [Review Guide](review-guide.md) (`review --post` to post findings on a PR)
 - [CI/CD Integration Examples](#cicd-integration)
 - [Project Home](index.md)

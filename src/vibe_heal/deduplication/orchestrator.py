@@ -1,6 +1,7 @@
 """Orchestrator for deduplication workflow."""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -56,6 +57,7 @@ class DeduplicationOrchestrator:
         file_path: str,
         dry_run: bool = False,
         max_duplications: int | None = None,
+        group_filter: Callable[[DuplicationGroup, str], bool] | None = None,
     ) -> FixSummary:
         """Remove code duplications in a file.
 
@@ -63,6 +65,8 @@ class DeduplicationOrchestrator:
             file_path: Path to file to deduplicate
             dry_run: If True, don't commit changes
             max_duplications: Maximum number of duplication groups to fix
+            group_filter: Optional predicate (group, target_ref); when set, only groups
+                for which it returns True are processed
 
         Returns:
             Summary of deduplication fixes
@@ -90,6 +94,14 @@ class DeduplicationOrchestrator:
         # Step 3: Process duplications (filter and sort)
         processor = DuplicationProcessor(max_duplications=max_duplications)
         component_key = f"{self.config.sonarqube_project_key}:{file_path}"
+
+        # Apply the optional caller-supplied group filter before processing
+        if group_filter is not None:
+            target_ref = response.get_target_file_ref(component_key)
+            if target_ref is not None:
+                kept = [g for g in response.duplications if group_filter(g, target_ref)]
+                response = response.model_copy(update={"duplications": kept})
+
         result = processor.process(response, component_key)
 
         cyan(

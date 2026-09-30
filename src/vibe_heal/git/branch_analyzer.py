@@ -1,9 +1,17 @@
 """Git branch analysis for identifying modified files."""
 
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from git import GitCommandError, Repo
 from git.exc import InvalidGitRepositoryError
+
+from vibe_heal.git.exceptions import GitOperationError
+from vibe_heal.output import warn
 
 
 class BranchAnalyzerError(Exception):
@@ -224,3 +232,125 @@ class BranchAnalyzer:
             raise
         except Exception as e:
             raise BranchAnalyzerError(f"Failed to get user email: {e}") from e
+
+    def split_remote_ref(self, ref: str) -> tuple[str, str] | None:
+        """Split a ref into ``(remote, branch)`` if its prefix is a real remote.
+
+        ``origin/main`` -> ``("origin", "main")``. A bare name (``main``) or a local
+        branch containing a slash (``release/1.0``) has no remote prefix and yields
+        ``None``. The longest matching remote name wins.
+
+        Raises:
+            GitOperationError: If ``git remote`` cannot be run or fails.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "remote"],  # noqa: S607
+                cwd=self.repo_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as e:
+            msg = f"Failed to run 'git remote': {e}"
+            raise GitOperationError(msg) from e
+        if result.returncode != 0:
+            msg = f"'git remote' exited with code {result.returncode}"
+            raise GitOperationError(msg)
+        remotes = result.stdout.decode(errors="replace").split() if result.stdout else []
+        for remote in sorted(remotes, key=len, reverse=True):
+            prefix = f"{remote}/"
+            if ref.startswith(prefix) and len(ref) > len(prefix):
+                return remote, ref[len(prefix) :]
+        return None
+
+    def fetch_remote_ref(self, ref: str) -> bool:
+        """Fetch a remote-tracking ref (``<remote>/<branch>``).
+
+        Returns:
+            True if fetched, False if ``ref`` is not a remote-tracking ref (nothing to fetch).
+
+        Raises:
+            GitOperationError: If the git binary is unavailable or the fetch fails.
+        """
+        split = self.split_remote_ref(ref)
+        if split is None:
+            return False
+        remote, branch = split
+        try:
+            result = subprocess.run(  # noqa: S603
+                ["git", "fetch", remote, branch],  # noqa: S607
+                cwd=self.repo_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as e:
+            msg = f"Failed to run 'git fetch {remote} {branch}': {e}"
+            raise GitOperationError(msg) from e
+        if result.returncode != 0:
+            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            detail = stderr_text or f"'git fetch {remote} {branch}' exited with code {result.returncode}"
+            msg = f"Refusing to run: unable to fetch {ref}. {detail}"
+            raise GitOperationError(msg)
+        return True
+
+    def is_ancestor_of_head(self, ref: str) -> bool:
+        """Check whether ``ref`` is an ancestor of HEAD (a merged-in ref counts).
+
+        Raises:
+            GitOperationError: If the git binary cannot be run.
+        """
+        try:
+            result = subprocess.run(  # noqa: S603
+                ["git", "merge-base", "--is-ancestor", ref, "HEAD"],  # noqa: S607
+                cwd=self.repo_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as e:
+            msg = f"Failed to check ancestry with {ref}: {e}"
+            raise GitOperationError(msg) from e
+        return result.returncode == 0
+
+    @contextmanager
+    def temporary_worktree(self, ref: str) -> Iterator[Path]:
+        """Check ``ref`` out into a temporary detached worktree, removed on exit.
+
+        The main working tree is untouched. Removal failures are warnings, never errors.
+
+        Raises:
+            GitOperationError: If the worktree cannot be created.
+        """
+        worktree_dir = Path(tempfile.mkdtemp(prefix="vibe-heal-baseline-"))
+        created = False
+        try:
+            try:
+                result = subprocess.run(  # noqa: S603
+                    ["git", "worktree", "add", "--detach", str(worktree_dir), ref],  # noqa: S607
+                    cwd=self.repo_path,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+            except OSError as e:
+                msg = f"Failed to create worktree for {ref}: {e}"
+                raise GitOperationError(msg) from e
+            if result.returncode != 0:
+                stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+                msg = f"Failed to create worktree for {ref}: {stderr_text or f'exit code {result.returncode}'}"
+                raise GitOperationError(msg)
+            created = True
+            yield worktree_dir
+        finally:
+            if created:
+                try:
+                    removed = subprocess.run(  # noqa: S603
+                        ["git", "worktree", "remove", "--force", str(worktree_dir)],  # noqa: S607
+                        cwd=self.repo_path,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    if removed.returncode != 0:
+                        warn(f"Warning: Failed to remove worktree {worktree_dir}")
+                except OSError as e:
+                    warn(f"Warning: Failed to remove worktree {worktree_dir}: {e}")
+            # Also drops the mkdtemp directory when the worktree was never created.
+            shutil.rmtree(worktree_dir, ignore_errors=True)

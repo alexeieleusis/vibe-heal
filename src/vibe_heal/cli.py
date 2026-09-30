@@ -15,6 +15,11 @@ from vibe_heal import __version__
 from vibe_heal.ai_tools.base import AITool, AIToolType
 from vibe_heal.ai_tools.factory import AIToolFactory
 from vibe_heal.cleanup.orchestrator import CleanupOrchestrator, CleanupResult
+from vibe_heal.cleanup_pr.orchestrator import (
+    CleanupPrOrchestrator,
+    CleanupPrResult,
+    FileCleanupPrResult,
+)
 from vibe_heal.config import ConfigurationError, VibeHealConfig
 from vibe_heal.converters.oxlint import convert_oxlint_to_eslint
 from vibe_heal.deduplication.orchestrator import (
@@ -39,10 +44,17 @@ app = typer.Typer(
 
 # Help text constants
 VERBOSE_OUTPUT_HELP = "Verbose output"
+DRY_RUN_HELP = "Preview fixes without committing"
 ENV_FILE_HELP = "Path to custom environment file (default: .env.vibeheal or .env)"
 AI_TOOL_OVERRIDE_HELP = "AI tool to use (overrides config)"
 FILE_PATTERN_HELP = "File patterns to filter (e.g., '*.py', 'src/**/*.ts')"
 BASE_BRANCH_HELP = "Base branch to compare against"
+
+# Display constants
+GITHUB_FOOTER_LINE = "\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]"
+STATUS_SUCCESS = "[green]✓[/green]"
+STATUS_FAILURE = "[red]✗[/red]"
+PER_FILE_RESULTS_HEADER = "\n[bold]Per-File Results:[/bold]"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -105,7 +117,7 @@ def fix(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Preview fixes without committing",
+        help=DRY_RUN_HELP,
     ),
     max_issues: int | None = typer.Option(
         None,
@@ -182,7 +194,7 @@ def dedupe(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Preview fixes without committing",
+        help=DRY_RUN_HELP,
     ),
     max_duplications: int | None = typer.Option(
         None,
@@ -255,18 +267,20 @@ def _display_branch_operation_header(
     base_branch: str,
     max_iterations: int,
     file_patterns: list[str] | None,
+    iterations_label: str = "Max iterations per file",
 ) -> None:
     """Display header for branch operations.
 
     Args:
         operation_name: Name of the operation (e.g., "Branch Cleanup")
         base_branch: Base branch being compared against
-        max_iterations: Maximum iterations per file
+        max_iterations: Maximum iterations
         file_patterns: Optional file patterns to filter
+        iterations_label: Label describing what max_iterations counts
     """
     bold_cyan(f"\n{operation_name}")
     console.print(f"  Base branch: {base_branch}")
-    console.print(f"  Max iterations per file: {max_iterations}")
+    console.print(f"  {iterations_label}: {max_iterations}")
     if file_patterns:
         console.print(f"  File patterns: {', '.join(file_patterns)}")
     console.print()
@@ -283,9 +297,9 @@ def _display_cleanup_results(result: CleanupResult) -> None:
     success(f"  Total issues fixed: {result.total_issues_fixed}")
 
     if result.files_processed:
-        console.print("\n[bold]Per-File Results:[/bold]")
+        console.print(PER_FILE_RESULTS_HEADER)
         for file_result in result.files_processed:
-            status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
+            status = STATUS_SUCCESS if file_result.success else STATUS_FAILURE
             console.print(
                 f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.issues_fixed} issues fixed"
             )
@@ -298,7 +312,7 @@ def _display_cleanup_results(result: CleanupResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch cleanup complete![/green]")
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    console.print(GITHUB_FOOTER_LINE)
 
 
 async def _run_cleanup(
@@ -417,6 +431,205 @@ def cleanup(
         sys.exit(1)
 
 
+def _display_cleanup_pr_file_result(file_result: FileCleanupPrResult) -> None:
+    """Display cleanup results for a single file.
+
+    Args:
+        file_result: Per-file cleanup-PR result to display
+    """
+    status = STATUS_SUCCESS if file_result.success else STATUS_FAILURE
+    console.print(f"  {status} {rich_escape(str(file_result.file_path))}")
+    console.print(f"      issues: {file_result.issues_fixed} fixed, {file_result.issues_out_of_scope} out of scope")
+    console.print(
+        f"      duplications: {file_result.duplications_fixed} fixed, "
+        f"{file_result.duplications_out_of_scope} out of scope"
+    )
+    if file_result.main_duplications_fixed or file_result.main_duplications_skipped:
+        console.print(
+            f"      main duplications: {file_result.main_duplications_fixed} fixed, "
+            f"{file_result.main_duplications_skipped} skipped"
+        )
+    if file_result.error_message:
+        error(f"      Error: {file_result.error_message}")
+
+
+def _display_cleanup_pr_results(result: CleanupPrResult, dry_run: bool = False) -> None:
+    """Display PR-scoped cleanup results.
+
+    Args:
+        result: Cleanup-PR result to display
+        dry_run: Whether this was a dry run (nothing was fixed or committed)
+    """
+    console.print("\n[bold]Cleanup Summary (PR scope):[/bold]")
+    console.print(f"  Files processed: {len(result.files_processed)}")
+    success(f"  Total issues fixed: {result.total_issues_fixed}")
+    success(f"  Total duplications fixed: {result.total_duplications_fixed}")
+    success(f"  Total main duplications fixed: {result.total_main_duplications_fixed}")
+    if dry_run:
+        dim("  Dry run: no changes were made")
+
+    if result.external_files_touched:
+        warn("\nFiles outside the branch diff were modified by duplication refactors:")
+        for touched in result.external_files_touched:
+            console.print(f"  {rich_escape(str(touched))}")
+
+    if result.files_processed:
+        console.print(PER_FILE_RESULTS_HEADER)
+        for file_result in result.files_processed:
+            _display_cleanup_pr_file_result(file_result)
+
+    if not result.success:
+        if result.error_message:
+            error(f"\nCleanup failed: {result.error_message}")
+        sys.exit(1)
+
+    console.print("\n[green]✨ Branch cleanup (PR scope) complete![/green]")
+    console.print(GITHUB_FOOTER_LINE)
+
+
+async def _run_cleanup_pr(
+    config: VibeHealConfig,
+    ai_tool_instance: AITool,
+    base_branch: str,
+    max_iterations: int,
+    file_patterns: list[str] | None,
+    min_severity: str | None,
+    include_main_duplications: bool,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Run PR-scoped branch cleanup workflow.
+
+    Args:
+        config: Configuration object
+        ai_tool_instance: AI tool instance to use for fixing
+        base_branch: Base branch to compare against
+        max_iterations: Maximum analyze/fix rounds for the whole branch
+        file_patterns: Optional file patterns to filter
+        min_severity: Optional minimum issue severity
+        include_main_duplications: Also handle duplications from main (runs a baseline scan)
+        dry_run: Preview without AI calls or commits
+        verbose: Enable verbose output
+    """
+    async with SonarQubeClient(config) as client:
+        orchestrator = CleanupPrOrchestrator(config, client, ai_tool_instance)
+
+        result = await orchestrator.cleanup_pr(
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+            min_severity=min_severity,
+            include_main_duplications=include_main_duplications,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+
+        _display_cleanup_pr_results(result, dry_run=dry_run)
+
+
+@app.command()
+def cleanup_pr(
+    base_branch: str = typer.Option(
+        DEFAULT_BASE_BRANCH,
+        "--base-branch",
+        "-b",
+        help=BASE_BRANCH_HELP,
+    ),
+    max_iterations: int = typer.Option(
+        10,
+        "--max-iterations",
+        "-i",
+        help="Maximum analyze/fix rounds for the whole branch",
+    ),
+    file_patterns: list[str] | None = typer.Option(
+        None,
+        "--pattern",
+        "-p",
+        help=FILE_PATTERN_HELP,
+    ),
+    min_severity: str | None = typer.Option(
+        None,
+        "--min-severity",
+        help="Minimum severity (BLOCKER, CRITICAL, MAJOR, MINOR, INFO)",
+    ),
+    include_main_duplications: bool = typer.Option(
+        False,
+        "--include-main-duplications",
+        help=(
+            "Also fix duplications that existed in the base branch and were modified or removed by "
+            "this branch. Runs a baseline scan of the base branch that overwrites the real project's "
+            "SonarQube analysis (even with --dry-run)."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=DRY_RUN_HELP,
+    ),
+    ai_tool: AIToolType | None = typer.Option(
+        None,
+        "--ai-tool",
+        help=AI_TOOL_OVERRIDE_HELP,
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help=ENV_FILE_HELP,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help=VERBOSE_OUTPUT_HELP,
+    ),
+) -> None:
+    """Clean up issues and duplications introduced by the current branch (PR scope).
+
+    Creates a temporary SonarQube project, analyzes the branch, and fixes only
+    findings on lines changed relative to the base branch.
+    """
+    setup_logging(verbose)
+
+    try:
+        config = VibeHealConfig(env_file=env_file)
+
+        if ai_tool:
+            config.ai_tool = ai_tool
+
+        _display_branch_operation_header(
+            operation_name="Branch Cleanup (PR scope)",
+            base_branch=base_branch,
+            max_iterations=max_iterations,
+            file_patterns=file_patterns,
+            iterations_label="Max analysis rounds (whole branch)",
+        )
+
+        ai_tool_instance = initialize_ai_tool(config)
+
+        asyncio.run(
+            _run_cleanup_pr(
+                config=config,
+                ai_tool_instance=ai_tool_instance,
+                base_branch=base_branch,
+                max_iterations=max_iterations,
+                file_patterns=file_patterns,
+                min_severity=min_severity,
+                include_main_duplications=include_main_duplications,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
+        )
+
+    except ConfigurationError as e:
+        error(f"Configuration error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        error(f"Error: {e}")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
 def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
     """Display dedupe-branch results.
 
@@ -428,9 +641,9 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
     success(f"  Total duplications fixed: {result.total_duplications_fixed}")
 
     if result.files_processed:
-        console.print("\n[bold]Per-File Results:[/bold]")
+        console.print(PER_FILE_RESULTS_HEADER)
         for file_result in result.files_processed:
-            status = "[green]✓[/green]" if file_result.success else "[red]✗[/red]"
+            status = STATUS_SUCCESS if file_result.success else STATUS_FAILURE
             console.print(
                 f"  {status} {rich_escape(str(file_result.file_path))}: {file_result.duplications_fixed} duplications fixed"
             )
@@ -443,7 +656,7 @@ def _display_dedupe_branch_results(result: DedupeBranchResult) -> None:
         sys.exit(1)
 
     console.print("\n[green]✨ Branch deduplication complete![/green]")
-    console.print("\n[dim]GitHub: https://github.com/alexeieleusis/vibe-heal[/dim]")
+    console.print(GITHUB_FOOTER_LINE)
 
 
 async def _run_dedupe_branch(

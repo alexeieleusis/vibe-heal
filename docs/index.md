@@ -29,6 +29,7 @@ AI-powered SonarQube issue remediation that automatically fixes your code qualit
 | `vibe-heal dedupe <file>` | Remove code duplications from a single file |
 | `vibe-heal cleanup` | Fix all modified files in the current branch |
 | `vibe-heal dedupe-branch` | Remove duplications from all modified files in the current branch |
+| `vibe-heal cleanup-pr` | Fix issues and duplications on lines changed by the current branch (PR scope) |
 | `vibe-heal review` | Report issues on changed lines; optionally post to GitHub PR |
 | `vibe-heal review --baseline` | Refresh the real SonarQube project's analysis (for CI baseline maintenance) |
 | `vibe-heal config` | Show current configuration |
@@ -36,6 +37,6 @@ AI-powered SonarQube issue remediation that automatically fixes your code qualit
 
 ## Quick Links
 
-- [Branch Cleanup Guide](branch-cleanup-guide.md) — full guide for the `cleanup` and `dedupe-branch` commands
+- [Branch Cleanup Guide](branch-cleanup-guide.md) — full guide for the `cleanup`, `dedupe-branch` and `cleanup-pr` commands
 - [Review Guide](review-guide.md) — full guide for the `review` command and GitHub PR commenting
 - [Architecture](ARCHITECTURE.md) — system design and module structure
