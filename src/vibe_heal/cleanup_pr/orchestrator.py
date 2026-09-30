@@ -34,11 +34,12 @@ from vibe_heal.git.diff_parser import DiffLines, DiffParser
 from vibe_heal.git.exceptions import GitOperationError, NotAGitRepositoryError
 from vibe_heal.git.file_selection import select_modified_files
 from vibe_heal.git.manager import GitManager
+from vibe_heal.git.paths import to_repo_relative
 from vibe_heal.orchestrator import VibeHealOrchestrator
 from vibe_heal.output import bold, dim, error, success, warn
 from vibe_heal.processor.issue_processor import IssueProcessor
+from vibe_heal.review.duplication_scope import get_resolved_duplications
 from vibe_heal.review.models import FileDiagnostics
-from vibe_heal.review.orchestrator import ReviewOrchestrator
 from vibe_heal.sonarqube.analysis_runner import AnalysisResult, AnalysisRunner
 from vibe_heal.sonarqube.client import SonarQubeClient
 from vibe_heal.sonarqube.exceptions import ComponentNotFoundError
@@ -753,12 +754,10 @@ class CleanupPrOrchestrator:
                 if block is not None:
                     active_ranges.add((block.from_line, block.to_line))
 
-        reviewer = ReviewOrchestrator(
-            self.config, self.client, branch_analyzer=self.branch_analyzer, diff_parser=self.diff_parser
-        )
         diag = FileDiagnostics(file_path=repo_relative, lookup_key=repo_relative)
-        resolved_list = await reviewer._get_resolved_duplications(
-            file_path,
+        resolved_list = await get_resolved_duplications(
+            self.config,
+            repo_relative,
             {repo_relative: strict_lines},
             diff_lines.old_lines,
             active_ranges,
@@ -1030,11 +1029,4 @@ class CleanupPrOrchestrator:
 
     def _to_repo_relative(self, file_path: Path) -> str:
         """Convert a (possibly CWD-relative) path to a repo-root-relative POSIX string."""
-        try:
-            repo_root = Path(self.branch_analyzer.repo.working_dir)
-            if file_path.is_absolute():
-                return file_path.relative_to(repo_root).as_posix()
-            resolved = (Path.cwd() / file_path).resolve()
-            return resolved.relative_to(repo_root.resolve()).as_posix()
-        except (ValueError, TypeError):
-            return file_path.as_posix()
+        return to_repo_relative(file_path, Path(self.branch_analyzer.repo.working_dir))

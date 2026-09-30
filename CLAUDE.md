@@ -239,6 +239,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `get_current_branch()` - returns active branch name
   - `validate_branch_exists(branch)` - checks local and remote branches
   - `get_user_email()` - retrieves git user email for project naming
+- `paths.py` - `to_repo_relative(file_path, repo_root)`: shared repo-relative POSIX path helper used by `review` and `cleanup_pr`
 - `file_selection.py` - shared file-selection helpers used by `cleanup`, `cleanup-pr`, and `review`
   - `select_modified_files(branch_analyzer, base_branch, file_patterns)` - modified files vs. base branch, optionally glob-filtered, with dim logging
   - `filter_files_by_patterns(files, patterns)` - glob filter using `Path.match` (not `fnmatch`; `dedupe-branch` intentionally keeps `fnmatch`)
@@ -356,6 +357,7 @@ Orchestrator (orchestrator.py) - coordinates entire workflow
   - `ReviewIssue.root_cause` - persisted in `review.json` so `--post` can include descriptions without re-fetching
   - `ReviewDuplication` - active duplication block intersecting changed lines (reported against temp project)
   - `ResolvedDuplication` - duplication block from `main` that was modified but is no longer active in the branch
+- `review/duplication_scope.py` - public helpers shared with `cleanup_pr`: `changed_lines_in_block`, `build_other_locations`, `get_resolved_duplications(config, repo_relative, ...)`
 - `IssueLineFilter` (`review/line_filter.py`) - filters SonarQube issues to changed lines from diff
 - `GitHubReviewClient` (`review/github.py`) - posts review results as inline comments via `gh` CLI
   - `detect_pr()` - auto-detects open PR for the current branch

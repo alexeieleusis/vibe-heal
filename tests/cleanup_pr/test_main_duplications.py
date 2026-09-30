@@ -532,7 +532,7 @@ class TestMainDuplicationPhase:
     ) -> None:
         with (
             _loop_env(orchestrator, mock_client, temp_project, [_diff({10})]),
-            patch(f"{_MODULE}.ReviewOrchestrator") as review_cls,
+            patch(f"{_MODULE}.get_resolved_duplications") as review_cls,
             patch.object(orchestrator, "_run_main_duplication_phase", new_callable=AsyncMock) as phase,
         ):
             await orchestrator._run_iteration_loop(
@@ -588,7 +588,7 @@ class TestMainDuplicationDetection:
             build_side_effect = lambda _r, _m, fp, rel, resolved: _task(resolved, fp)
         build = MagicMock(side_effect=build_side_effect)
         with (
-            patch("vibe_heal.review.orchestrator.DuplicationClient", return_value=cm) as client_cls,
+            patch("vibe_heal.review.duplication_scope.DuplicationClient", return_value=cm) as client_cls,
             patch.object(orchestrator, "_fetch_duplications", new_callable=AsyncMock, return_value=temp_result),
             patch.object(orchestrator, "_to_repo_relative", side_effect=lambda p: p.as_posix()),
             patch(f"{_MODULE}.build_main_duplication_task", build),

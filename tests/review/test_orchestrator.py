@@ -1016,7 +1016,7 @@ class TestGetResolvedDuplications:
         mock_dup_instance = AsyncMock()
         mock_dup_instance.get_duplications_for_file.return_value = response
 
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with patch("vibe_heal.review.duplication_scope.DuplicationClient") as MockDupClient:
             MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
             MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -1046,7 +1046,7 @@ class TestGetResolvedDuplications:
         mock_dup_instance = AsyncMock()
         mock_dup_instance.get_duplications_for_file.return_value = response
 
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with patch("vibe_heal.review.duplication_scope.DuplicationClient") as MockDupClient:
             MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
             MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -1065,7 +1065,7 @@ class TestGetResolvedDuplications:
     @pytest.mark.asyncio
     async def test_no_old_changed_lines_returns_empty(self, orchestrator) -> None:
         """When file has no old changed lines, returns empty without API call."""
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with patch("vibe_heal.review.duplication_scope.DuplicationClient") as MockDupClient:
             diag = self._make_diag()
             result = await orchestrator._get_resolved_duplications(
                 Path("src/file.py"),
@@ -1088,7 +1088,7 @@ class TestGetResolvedDuplications:
         mock_dup_instance = AsyncMock()
         mock_dup_instance.get_duplications_for_file.side_effect = ComponentNotFoundError("not found")
 
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with patch("vibe_heal.review.duplication_scope.DuplicationClient") as MockDupClient:
             MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
             MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -1116,7 +1116,7 @@ class TestGetResolvedDuplications:
         mock_dup_instance = AsyncMock()
         mock_dup_instance.get_duplications_for_file.return_value = response
 
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with patch("vibe_heal.review.duplication_scope.DuplicationClient") as MockDupClient:
             MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
             MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -1208,7 +1208,10 @@ class TestSameFileDuplication:
 
         diag = FileDiagnostics(file_path="src/file.py", lookup_key="src/file.py")
 
-        with patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient:
+        with (
+            patch("vibe_heal.review.orchestrator.DuplicationClient") as MockDupClient,
+            patch("vibe_heal.review.duplication_scope.DuplicationClient", MockDupClient),
+        ):
             MockDupClient.return_value.__aenter__ = AsyncMock(return_value=mock_dup_instance)
             MockDupClient.return_value.__aexit__ = AsyncMock(return_value=None)
 

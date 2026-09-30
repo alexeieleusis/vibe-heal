@@ -4,7 +4,7 @@ A *main duplication* is a duplication block that existed in the base branch, was
 modified or removed by the branch, and is no longer active in the branch
 (``ResolvedDuplication``). This module reads the main-side text and the
 branch-side hunk from git and builds the AI prompt and commit message for one
-qualifying group. Detection itself reuses ``ReviewOrchestrator``; the
+qualifying group. Detection itself reuses ``review.duplication_scope``; the
 orchestration (ordering, counters, failure policy) lives in ``orchestrator.py``.
 """
 

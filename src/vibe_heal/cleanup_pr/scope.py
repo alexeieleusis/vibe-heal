@@ -10,8 +10,8 @@ strict changed lines — the same active-duplication rule ``review`` applies.
 import dataclasses
 
 from vibe_heal.deduplication.models import DuplicationGroup
+from vibe_heal.review.duplication_scope import changed_lines_in_block
 from vibe_heal.review.line_filter import IssueLineFilter
-from vibe_heal.review.orchestrator import changed_lines_in_block
 from vibe_heal.sonarqube.models import SonarQubeIssue
 
 

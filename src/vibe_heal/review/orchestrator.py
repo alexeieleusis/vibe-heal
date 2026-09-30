@@ -7,15 +7,20 @@ from pydantic import BaseModel, Field
 
 from vibe_heal.config import VibeHealConfig
 from vibe_heal.deduplication.client import DuplicationClient
-from vibe_heal.deduplication.models import DuplicationBlock, DuplicationGroup, DuplicationsResponse
+from vibe_heal.deduplication.models import DuplicationGroup, DuplicationsResponse
 from vibe_heal.git.branch_analyzer import BranchAnalyzer
 from vibe_heal.git.diff_parser import DiffParser
 from vibe_heal.git.file_selection import filter_files_by_patterns
+from vibe_heal.git.paths import to_repo_relative
 from vibe_heal.output import console, dim, error, success, warn
+from vibe_heal.review.duplication_scope import (
+    build_other_locations,
+    changed_lines_in_block,
+    get_resolved_duplications,
+)
 from vibe_heal.review.github import GitHubReviewClient
 from vibe_heal.review.line_filter import IssueLineFilter
 from vibe_heal.review.models import (
-    DuplicationLocation,
     FileDiagnostics,
     FileReview,
     ResolvedDuplication,
@@ -42,25 +47,6 @@ from vibe_heal.sonarqube.project_manager import ProjectManager, TempProjectMetad
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_BRANCH = "origin/main"
-
-
-def changed_lines_in_block(block: DuplicationBlock, changed_lines: set[int]) -> set[int]:
-    """Return the changed lines that fall inside a duplication block.
-
-    The block's ``[from_line, to_line]`` range is inclusive. This is the shared
-    active-duplication intersection test: a block is active when the returned
-    set is non-empty.
-
-    Args:
-        block: Duplication block whose line range is tested.
-        changed_lines: Changed-line set to intersect with the block (for the
-            active-duplication rule, the strict changed lines of the block's file).
-
-    Returns:
-        The block's lines that are in ``changed_lines`` (possibly empty).
-    """
-    block_lines = set(range(block.from_line, block.to_line + 1))
-    return block_lines & changed_lines
 
 
 class ReviewAnalysisResult(BaseModel):
@@ -603,41 +589,13 @@ class ReviewOrchestrator:
         # Use the lowest changed line in the block as the anchor so the GitHub
         # PR comment is attached to a line that is actually in the diff.
         anchor_line = min(changed_in_block)
-        other_locations = self._build_other_locations(group, target_block, response)
+        other_locations = build_other_locations(group, target_block, response)
         return ReviewDuplication(
             from_line=target_block.from_line,
             to_line=target_block.to_line,
             anchor_line=anchor_line,
             other_locations=other_locations,
         )
-
-    def _build_other_locations(
-        self,
-        group: DuplicationGroup,
-        target_block: DuplicationBlock,
-        response: DuplicationsResponse,
-    ) -> list[DuplicationLocation]:
-        """Build other_locations by iterating all blocks and skipping only the target block.
-
-        Preserves same-file duplicates by skipping only the specific target block
-        instance (by identity) rather than excluding all blocks with the same ref.
-        """
-        other_locations: list[DuplicationLocation] = []
-        for block in group.blocks:
-            if block is target_block:
-                continue
-            file_info = response.get_file_info(block.ref)
-            if file_info is None:
-                continue
-            block_file_path = file_info.key.split(":", 1)[1] if ":" in file_info.key else file_info.key
-            other_locations.append(
-                DuplicationLocation(
-                    file_path=block_file_path,
-                    from_line=block.from_line,
-                    to_line=block.to_line,
-                )
-            )
-        return other_locations
 
     async def _get_resolved_duplications(
         self,
@@ -650,94 +608,16 @@ class ReviewOrchestrator:
     ) -> list[ResolvedDuplication]:
         """Warn about duplication blocks from main that were modified but not active in temp.
 
-        Queries the main project (not the temp project) for duplications on the
-        old-side changed lines. If a block from main intersects those old lines
-        and Feature 1 found no corresponding active duplication in the temp project,
-        we warn the developer to check the other instances.
-
-        Args:
-            file_path: Path to the file.
-            changed_lines_map: New-side changed lines per file (for anchor line).
-            old_changed_lines_map: Old-side changed lines per file.
-            active_dup_ranges: Set of (from_line, to_line) from Feature 1 (skip if covered).
-            original_project_key: The main project key (config currently points at temp).
-            diag: Per-file diagnostics object to populate with API outcome.
-
-        Returns:
-            ResolvedDuplication entries for each uncovered block, if any.
+        Thin wrapper over :func:`get_resolved_duplications`.
         """
-        repo_relative = self._to_repo_relative(file_path)
-        old_changed_lines = old_changed_lines_map.get(repo_relative, set())
-        if not old_changed_lines:
-            diag.resolved_dup_api_status = "skipped_no_changed_lines"
-            return []
-        new_changed_lines = changed_lines_map.get(repo_relative, set())
-        if not new_changed_lines:
-            diag.resolved_dup_api_status = "skipped_no_changed_lines"
-            return []
-
-        try:
-            original_config = self.config.model_copy(update={"sonarqube_project_key": original_project_key})
-            async with DuplicationClient(original_config) as dup_client:
-                response = await dup_client.get_duplications_for_file(repo_relative)
-        except ComponentNotFoundError:
-            diag.resolved_dup_api_status = "component_not_found"
-            return []
-        except SonarQubeAPIError as e:
-            diag.resolved_dup_api_status = f"api_error:{e}"
-            return []
-        except Exception as e:
-            diag.resolved_dup_api_status = f"error:{type(e).__name__}:{e}"
-            return []
-
-        diag.resolved_dup_api_status = "ok"
-        diag.resolved_dup_groups_found = len(response.duplications)
-
-        if not response.duplications:
-            return []
-
-        component_key = f"{original_project_key}:{repo_relative}"
-        target_ref = response.get_target_file_ref(component_key)
-        if target_ref is None:
-            return []
-
-        findings: list[ResolvedDuplication] = []
-        for group in response.duplications:
-            resolved = self._resolve_group(
-                group, target_ref, response, old_changed_lines, active_dup_ranges, new_changed_lines
-            )
-            if resolved is not None:
-                findings.append(resolved)
-        return findings
-
-    def _resolve_group(
-        self,
-        group: DuplicationGroup,
-        target_ref: str,
-        response: DuplicationsResponse,
-        old_changed_lines: set[int],
-        active_dup_ranges: set[tuple[int, int]],
-        new_changed_lines: set[int],
-    ) -> ResolvedDuplication | None:
-        target_block = group.get_target_block(target_ref)
-        if target_block is None:
-            return None
-        block_lines = set(range(target_block.from_line, target_block.to_line + 1))
-        if not block_lines & old_changed_lines:
-            return None
-        # Suppress if any active dup range overlaps this block (line shifts mean
-        # the ranges are unlikely to match exactly after edits).
-        if any(a_from <= target_block.to_line and a_to >= target_block.from_line for a_from, a_to in active_dup_ranges):
-            return None
-        other_locations = self._build_other_locations(group, target_block, response)
-        # Choose the new-side anchor closest to the block so the GitHub PR comment
-        # is attached near the relevant change rather than an unrelated hunk.
-        anchor_new_line = min(new_changed_lines, key=lambda ln: abs(ln - target_block.from_line))
-        return ResolvedDuplication(
-            main_from_line=target_block.from_line,
-            main_to_line=target_block.to_line,
-            other_locations=other_locations,
-            anchor_new_line=anchor_new_line,
+        return await get_resolved_duplications(
+            self.config,
+            self._to_repo_relative(file_path),
+            changed_lines_map,
+            old_changed_lines_map,
+            active_dup_ranges,
+            original_project_key,
+            diag,
         )
 
     async def _fetch_coverage(
@@ -793,25 +673,8 @@ class ReviewOrchestrator:
                 warn(f"Warning: Failed to delete temporary project: {e}")
 
     def _to_repo_relative(self, file_path: Path) -> str:
-        """Convert a file path to repo-root-relative POSIX string.
-
-        Handles paths from BranchAnalyzer which may be CWD-relative when
-        running from a subdirectory, or already repo-relative from repo root.
-
-        Args:
-            file_path: A Path that may be CWD-relative or repo-root-relative.
-
-        Returns:
-            Repo-root-relative path as a POSIX string (for DiffParser map lookup).
-        """
-        try:
-            repo_root = Path(self.branch_analyzer.repo.working_dir)
-            if file_path.is_absolute():
-                return file_path.relative_to(repo_root).as_posix()
-            resolved = (Path.cwd() / file_path).resolve()
-            return resolved.relative_to(repo_root.resolve()).as_posix()
-        except (ValueError, TypeError):
-            return file_path.as_posix()
+        """Convert a file path to a repo-root-relative POSIX string (see ``to_repo_relative``)."""
+        return to_repo_relative(file_path, Path(self.branch_analyzer.repo.working_dir))
 
     def _write_report(self, result: ReviewAnalysisResult, report_file: Path | None) -> None:
         """Write report files if a report path is specified.
