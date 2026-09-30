@@ -664,7 +664,7 @@ class CleanupPrOrchestrator:
         for file_path in modified_files:
             tasks.extend(
                 await self._detect_main_duplications(
-                    file_path, diff_lines, temp_project, original_project_key, merge_base, verbose
+                    file_path, diff_lines, temp_project, original_project_key, merge_base, results[file_path], verbose
                 )
             )
 
@@ -686,12 +686,15 @@ class CleanupPrOrchestrator:
         temp_project: TempProjectMetadata,
         original_project_key: str,
         merge_base: str,
+        result: FileCleanupPrResult,
         verbose: bool,
     ) -> list[MainDuplicationTask]:
         """Detect a file's qualifying main duplications (FR-6 Detection).
 
         Queries the REAL project (repo-relative path), keeps blocks that intersect the
         old-side changed lines and overlap no active duplication of the temp project.
+        Blocks whose task cannot be built (no main-side text, no diff, or no branch hunk
+        related to the block) are counted in ``result.main_duplications_skipped``.
         Returned in reverse line order (highest main line first).
         """
         repo_relative = self._to_repo_relative(file_path)
@@ -733,6 +736,7 @@ class CleanupPrOrchestrator:
                     dim(
                         f"  {file_path}: main block at line {resolved.main_from_line} skipped (no main-side text or diff)"
                     )
+                result.main_duplications_skipped += 1
                 continue
             tasks.append(task)
         return tasks

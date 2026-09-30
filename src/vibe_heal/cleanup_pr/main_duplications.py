@@ -81,11 +81,14 @@ def extract_branch_hunks(
     """Limit a ``--unified=0`` diff of one file to the hunks around a main block.
 
     A hunk is kept when its old-side span intersects ``[main_from, main_to]`` or
-    its new-side span contains ``anchor_new_line``. If none match, the hunk
-    nearest to the anchor is kept.
+    its new-side span contains ``anchor_new_line``. If none match, None is
+    returned: a hunk touching neither the main block nor the anchor is an
+    unrelated change (or a rename/copy artifact) and must not be presented as
+    the branch change to re-apply.
 
     Returns:
-        ``(hunk_text, (first_new_line, last_new_line))`` or None if the diff has no hunks.
+        ``(hunk_text, (first_new_line, last_new_line))`` or None when the diff has
+        no hunks or no hunk relates to the main block.
     """
     header: list[str] = []
     hunks: list[tuple[int, int, int, int, list[str]]] = []  # old_start, old_end, new_start, new_end, lines
@@ -113,7 +116,11 @@ def extract_branch_hunks(
 
     kept = [h for h in hunks if (h[0] <= main_to and h[1] >= main_from) or (h[2] <= anchor_new_line <= h[3])]
     if not kept:
-        kept = [min(hunks, key=lambda h: min(abs(h[2] - anchor_new_line), abs(h[3] - anchor_new_line)))]
+        # No hunk touches the main block (old side) nor the anchor (new side). Rather than
+        # fall back to the nearest hunk — which may be an unrelated edit far away, or a
+        # whole-file add from rename/copy detection — return None so the caller skips
+        # the group and counts it in ``main_duplications_skipped``.
+        return None
 
     text = "\n".join(header + [ln for h in kept for ln in h[4]])
     return text, (min(h[2] for h in kept), max(h[3] for h in kept))
@@ -129,13 +136,19 @@ def build_main_duplication_task(
     """Read the main-side block and the branch-side hunk for one resolved duplication.
 
     Returns:
-        The task, or None when the file is missing at the merge base or has no diff.
+        The task, or None when the file is missing at the merge base, has no diff, or no
+        branch hunk relates to the main block.
     """
     main_lines = read_main_file_lines(repo, merge_base, repo_relative)
     if main_lines is None:
         return None
     try:
-        diff_text = str(repo.git.diff("--no-color", "--unified=0", merge_base, "HEAD", "--", repo_relative))
+        # ``--no-renames`` keeps the diff scoped to this exact path pair. With rename/copy
+        # detection on, the diff could surface as a whole-file add whose hunks have no
+        # relation to the main block.
+        diff_text = str(
+            repo.git.diff("--no-color", "--no-renames", "--unified=0", merge_base, "HEAD", "--", repo_relative)
+        )
     except GitCommandError:
         return None
     hunks = extract_branch_hunks(diff_text, resolved.main_from_line, resolved.main_to_line, resolved.anchor_new_line)

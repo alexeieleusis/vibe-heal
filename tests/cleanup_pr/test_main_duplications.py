@@ -90,6 +90,10 @@ def _resolved(main_from: int = 5, main_to: int = 9, anchor: int = 20) -> Resolve
     )
 
 
+def _result() -> FileCleanupPrResult:
+    return FileCleanupPrResult(file_path=_FILE, success=True)
+
+
 def _task(resolved: ResolvedDuplication | None = None, file_path: Path = _FILE) -> MainDuplicationTask:
     return MainDuplicationTask(
         file_path=file_path,
@@ -156,10 +160,17 @@ class TestExtractBranchHunks:
         assert "old1" not in text
         assert rng == (49, 50)
 
-    def test_falls_back_to_nearest_hunk(self) -> None:
-        result = extract_branch_hunks(_DIFF, 100, 110, 45)
-        assert result is not None
-        assert "far1" in result[0]
+    def test_no_matching_hunk_returns_none_instead_of_nearest(self) -> None:
+        # Neither hunk touches [100, 110] on the old side nor contains anchor 45 on the
+        # new side. The former nearest-hunk fallback kept the unrelated "far" hunk; now
+        # the group must be skipped so it is counted in main_duplications_skipped.
+        assert extract_branch_hunks(_DIFF, 100, 110, 45) is None
+
+    def test_unrelated_far_hunk_is_not_kept(self) -> None:
+        # P1 repro from review: main block 10-30, the only branch hunk is at line 400 and
+        # the anchor (12) is not in it. Keeping that hunk would re-apply an unrelated edit.
+        far_only = "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n@@ -400,1 +400,1 @@\n-old\n+new\n"
+        assert extract_branch_hunks(far_only, 10, 30, 12) is None
 
     def test_no_hunks_returns_none(self) -> None:
         assert extract_branch_hunks("", 1, 2, 1) is None
@@ -566,20 +577,23 @@ class TestMainDuplicationDetection:
         orchestrator: CleanupPrOrchestrator,
         real_response: DuplicationsResponse,
         temp_result: tuple[list[object], str | None] = ([], None),
-    ) -> Iterator[tuple[MagicMock, MagicMock]]:
+        build_side_effect: object | None = None,
+    ) -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
         dup_client = MagicMock()
         dup_client.get_duplications_for_file = AsyncMock(return_value=real_response)
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=dup_client)
         cm.__aexit__ = AsyncMock(return_value=None)
-        build = MagicMock(side_effect=lambda _r, _m, fp, rel, resolved: _task(resolved, fp))
+        if build_side_effect is None:
+            build_side_effect = lambda _r, _m, fp, rel, resolved: _task(resolved, fp)
+        build = MagicMock(side_effect=build_side_effect)
         with (
             patch("vibe_heal.review.orchestrator.DuplicationClient", return_value=cm) as client_cls,
             patch.object(orchestrator, "_fetch_duplications", new_callable=AsyncMock, return_value=temp_result),
             patch.object(orchestrator, "_to_repo_relative", side_effect=lambda p: p.as_posix()),
             patch(f"{_MODULE}.build_main_duplication_task", build),
         ):
-            yield client_cls, dup_client
+            yield client_cls, dup_client, build
 
     @pytest.mark.asyncio
     async def test_queries_real_project_by_repo_relative_path(
@@ -587,9 +601,9 @@ class TestMainDuplicationDetection:
     ) -> None:
         real = _dup_response("my-project", 5)
         diff = _diff_with_old({20}, {6})
-        with self._patched(orchestrator, real) as (client_cls, dup_client):
+        with self._patched(orchestrator, real) as (client_cls, dup_client, _build):
             tasks = await orchestrator._detect_main_duplications(
-                _FILE, diff, temp_project, "my-project", "mb", verbose=True
+                _FILE, diff, temp_project, "my-project", "mb", _result(), verbose=True
             )
 
         assert client_cls.call_args.args[0].sonarqube_project_key == "my-project"
@@ -605,7 +619,7 @@ class TestMainDuplicationDetection:
     ) -> None:
         with self._patched(orchestrator, _dup_response("my-project", 5)):
             tasks = await orchestrator._detect_main_duplications(
-                _FILE, _diff_with_old({20}, {40}), temp_project, "my-project", "mb", verbose=False
+                _FILE, _diff_with_old({20}, {40}), temp_project, "my-project", "mb", _result(), verbose=False
             )
         assert tasks == []
 
@@ -617,7 +631,7 @@ class TestMainDuplicationDetection:
         diff = _diff_with_old({8, 20}, {6})
         with self._patched(orchestrator, _dup_response("my-project", 5), (temp.duplications, "1")):
             tasks = await orchestrator._detect_main_duplications(
-                _FILE, diff, temp_project, "my-project", "mb", verbose=False
+                _FILE, diff, temp_project, "my-project", "mb", _result(), verbose=False
             )
         assert tasks == []
 
@@ -625,9 +639,9 @@ class TestMainDuplicationDetection:
     async def test_no_old_lines_skips_without_querying(
         self, orchestrator: CleanupPrOrchestrator, temp_project: TempProjectMetadata
     ) -> None:
-        with self._patched(orchestrator, _dup_response("my-project", 5)) as (client_cls, _):
+        with self._patched(orchestrator, _dup_response("my-project", 5)) as (client_cls, _, _build):
             tasks = await orchestrator._detect_main_duplications(
-                _FILE, _diff({20}), temp_project, "my-project", "mb", verbose=False
+                _FILE, _diff({20}), temp_project, "my-project", "mb", _result(), verbose=False
             )
         assert tasks == []
         client_cls.assert_not_called()
@@ -648,9 +662,23 @@ class TestMainDuplicationDetection:
         })
         with self._patched(orchestrator, real):
             tasks = await orchestrator._detect_main_duplications(
-                _FILE, _diff_with_old({50}, {6, 31}), temp_project, "my-project", "mb", verbose=False
+                _FILE, _diff_with_old({50}, {6, 31}), temp_project, "my-project", "mb", _result(), verbose=False
             )
         assert [t.resolved.main_from_line for t in tasks] == [30, 5]
+
+    @pytest.mark.asyncio
+    async def test_unbuildable_task_is_counted_skipped(
+        self, orchestrator: CleanupPrOrchestrator, temp_project: TempProjectMetadata
+    ) -> None:
+        # P1 fix: when build_main_duplication_task returns None (no branch hunk relates
+        # to the main block), the group is skipped and counted in main_duplications_skipped.
+        result = _result()
+        with self._patched(orchestrator, _dup_response("my-project", 5), build_side_effect=lambda *a: None):
+            tasks = await orchestrator._detect_main_duplications(
+                _FILE, _diff_with_old({20}, {6}), temp_project, "my-project", "mb", result, verbose=False
+            )
+        assert tasks == []
+        assert result.main_duplications_skipped == 1
 
 
 class TestCleanupPrPassesThrough:
