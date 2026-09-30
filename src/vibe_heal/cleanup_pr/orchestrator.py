@@ -521,20 +521,16 @@ class CleanupPrOrchestrator:
         for iteration in range(max_iterations):
             bold(f"\nIteration {iteration + 1}/{max_iterations}")
 
-            # Step 6.1: full-repo analysis into the temp project.
-            if reusable_analysis is not None:
-                analysis_result, reusable_analysis = reusable_analysis, None
-                dim("Reusing the analysis from the main-duplication phase (no commits were made).")
-            else:
-                dim("Running SonarQube analysis on full repository...")
-                analysis_result = await self.analysis_runner.run_analysis(
-                    project_key=temp_project.project_key,
-                    project_name=temp_project.project_name,
-                    project_dir=Path.cwd(),
-                )
-                if not analysis_result.success:
-                    raise CleanupPrAnalysisError(iteration + 1, analysis_result, list(results.values()), external_files)
-                dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
+            # Step 6.1: full-repo analysis into the temp project (reused from the
+            # main-duplication phase when nothing was committed there).
+            analysis_result = await self._run_analysis_round(
+                iteration=iteration + 1,
+                reusable_analysis=reusable_analysis,
+                temp_project=temp_project,
+                results=results,
+                external_files=external_files,
+            )
+            reusable_analysis = None
 
             # Step 6.2: recompute the diff every iteration (fix commits shift lines).
             diff_lines = self.diff_parser.get_diff_lines(base_branch)
@@ -570,6 +566,47 @@ class CleanupPrOrchestrator:
                 await asyncio.sleep(5)
 
         return list(results.values()), analysis_result, external_files
+
+    async def _run_analysis_round(
+        self,
+        iteration: int,
+        reusable_analysis: AnalysisResult | None,
+        temp_project: TempProjectMetadata,
+        results: dict[Path, FileCleanupPrResult],
+        external_files: list[Path],
+    ) -> AnalysisResult:
+        """Run (or reuse) the full-repo analysis for one iteration (FR-2 step 6.1).
+
+        A reusable analysis from the main-duplication phase is consumed as-is;
+        otherwise a fresh analysis runs into the temp project.
+
+        Args:
+            iteration: 1-based iteration number (used in the failure message).
+            reusable_analysis: Fresh analysis from the main-duplication phase, or
+                None when no reuse applies.
+            temp_project: Active temp project the analysis runs into.
+            results: Per-file results so far (carried on a failure).
+            external_files: External files touched so far (carried on a failure).
+
+        Returns:
+            The analysis result for this iteration.
+
+        Raises:
+            CleanupPrAnalysisError: If the analysis round fails.
+        """
+        if reusable_analysis is not None:
+            dim("Reusing the analysis from the main-duplication phase (no commits were made).")
+            return reusable_analysis
+        dim("Running SonarQube analysis on full repository...")
+        analysis_result = await self.analysis_runner.run_analysis(
+            project_key=temp_project.project_key,
+            project_name=temp_project.project_name,
+            project_dir=Path.cwd(),
+        )
+        if not analysis_result.success:
+            raise CleanupPrAnalysisError(iteration, analysis_result, list(results.values()), external_files)
+        dim(f"Analysis completed. Dashboard: {analysis_result.dashboard_url}")
+        return analysis_result
 
     def _diff_files(self, diff_lines: DiffLines, modified_files: list[Path]) -> set[str]:
         """Repo-relative paths of every file in the branch diff (plus the selected files)."""
