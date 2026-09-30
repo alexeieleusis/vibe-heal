@@ -79,15 +79,18 @@ def _preconditions_pass(
     fetch_rc: int = 0,
     ancestor_rc: int = 0,
     dirty: bool = False,
-) -> Iterator[None]:
+) -> Iterator[list[list[str]]]:
     """Make the up-front preconditions pass, with controllable git exit codes.
 
     ``fetch_rc`` controls the ``git fetch`` exit code, ``ancestor_rc`` the
     ``git merge-base --is-ancestor`` exit code, and ``dirty`` whether the strict
-    clean-tree check raises.
+    clean-tree check raises. Yields the git argvs that were run, in order, so
+    callers can pin the exact commands (parsed remote/branch, argument order).
     """
+    commands: list[list[str]] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        commands.append(cmd)
         if "fetch" in cmd:
             stderr = b"fatal: unable to access 'https://example.com/'" if fetch_rc else b""
             return _git_result(fetch_rc, stderr=stderr)
@@ -106,7 +109,7 @@ def _preconditions_pass(
         patch.object(orchestrator.git_manager, "require_clean_working_directory", side_effect=clean_side_effect),
         patch("vibe_heal.cleanup_pr.orchestrator.subprocess.run", side_effect=fake_run),
     ):
-        yield
+        yield commands
 
 
 class TestCleanupPrOrchestratorInit:
@@ -153,9 +156,54 @@ class TestCleanupPrPreconditions:
         mock_client: AsyncMock,
     ) -> None:
         """The fetch command is built from the parsed remote/branch of the base ref."""
-        with _preconditions_pass(orchestrator, fetch_rc=1), pytest.raises(GitOperationError):
+        with _preconditions_pass(orchestrator, fetch_rc=1) as commands, pytest.raises(GitOperationError):
             await orchestrator.cleanup_pr(base_branch="upstream/develop")
 
+        # Pin the exact argv: the split remote and branch, not just "fetch" somewhere.
+        assert ["git", "fetch", "upstream", "develop"] in commands
+        assert mock_client.method_calls == []
+
+    @pytest.mark.asyncio
+    async def test_ancestry_check_pins_base_ref_before_head(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+    ) -> None:
+        """The up-to-date check runs merge-base --is-ancestor <base> HEAD, in that order."""
+        with (
+            _preconditions_pass(orchestrator) as commands,
+            patch.object(orchestrator.branch_analyzer, "get_modified_files", return_value=[]),
+        ):
+            await orchestrator.cleanup_pr(base_branch="upstream/develop")
+
+        # The full base ref (unsplit) is the ancestor argument, HEAD the descendant argument.
+        assert ["git", "merge-base", "--is-ancestor", "upstream/develop", "HEAD"] in commands
+        assert mock_client.method_calls == []
+
+    @pytest.mark.asyncio
+    async def test_bare_branch_name_fetches_via_default_remote(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+    ) -> None:
+        """A base name without a slash is fetched through the default remote ``origin``."""
+        with _preconditions_pass(orchestrator, fetch_rc=1) as commands, pytest.raises(GitOperationError):
+            await orchestrator.cleanup_pr(base_branch="main")
+
+        assert ["git", "fetch", "origin", "main"] in commands
+        assert mock_client.method_calls == []
+
+    @pytest.mark.asyncio
+    async def test_slashed_branch_name_splits_on_first_slash_only(
+        self,
+        orchestrator: CleanupPrOrchestrator,
+        mock_client: AsyncMock,
+    ) -> None:
+        """A slashed branch name keeps everything after the first slash as the branch."""
+        with _preconditions_pass(orchestrator, fetch_rc=1) as commands, pytest.raises(GitOperationError):
+            await orchestrator.cleanup_pr(base_branch="origin/feature/x")
+
+        assert ["git", "fetch", "origin", "feature/x"] in commands
         assert mock_client.method_calls == []
 
     @pytest.mark.asyncio
